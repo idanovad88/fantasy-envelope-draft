@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { formatTime } from '@/lib/utils'
 import type { League, Team, Auction } from '@/types'
+import DraftCountdown from '@/components/DraftCountdown'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -116,6 +117,11 @@ export default async function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* Draft countdown — shown when draft hasn't started yet */}
+      {typedLeague?.draft_start_time && ['setup', 'lottery'].includes(typedLeague.status) && (
+        <DraftCountdown targetDate={typedLeague.draft_start_time} />
+      )}
 
       {/* Priority table */}
       <div className="card mt-4">

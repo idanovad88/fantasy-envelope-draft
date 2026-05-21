@@ -25,6 +25,10 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
   const [playersPerTeam, setPlayersPerTeam] = useState(league?.players_per_team ?? 13)
   const [budgetPerTeam, setBudgetPerTeam] = useState(league?.budget_per_team ?? 200)
   const [joinCode, setJoinCode] = useState(league?.join_code ?? '')
+  const [draftStartTime, setDraftStartTime] = useState(() => {
+    if (!league?.draft_start_time) return ''
+    return new Date(league.draft_start_time).toISOString().slice(0, 16)
+  })
 
   // Player management state
   const [newPlayerName, setNewPlayerName] = useState('')
@@ -99,6 +103,7 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
       players_per_team: playersPerTeam,
       budget_per_team: budgetPerTeam,
       join_code: joinCode.trim().toUpperCase() || null,
+      draft_start_time: draftStartTime ? new Date(draftStartTime).toISOString() : null,
       updated_at: new Date().toISOString(),
     }
     if (league) {
@@ -544,6 +549,20 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
                   שתף את הקוד <strong style={{ color: 'var(--primary)' }}>{joinCode}</strong> עם המשתתפים — יכנסו דרך /join
                 </p>
               )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1.5">תאריך ושעת תחילת הדראפט</label>
+              <input
+                type="datetime-local"
+                className="input"
+                value={draftStartTime}
+                onChange={e => setDraftStartTime(e.target.value)}
+                dir="ltr"
+              />
+              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                יוצג שעון ספירה לאחור בדאשבורד עד לזמן זה
+              </p>
             </div>
 
             <button className="btn btn-primary" onClick={saveLeague} disabled={loading === 'league'}>

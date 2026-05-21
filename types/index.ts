@@ -15,6 +15,7 @@ export interface League {
   nomination_interval_hours: number
   reveal_before_minutes: number
   join_code: string | null
+  draft_start_time: string | null
   created_by: string
   created_at: string
   updated_at: string

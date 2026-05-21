@@ -78,10 +78,12 @@ export default async function TeamsPage() {
               {roster.length > 0 ? (
                 <div className="flex flex-col gap-1">
                   {roster.map(p => (
-                    <div key={p.id} className="flex items-center justify-between text-sm py-1 px-2 rounded" style={{ background: 'var(--background)' }}>
-                      <div>
-                        <span className="font-medium">{p.name}</span>
-                        <span className="text-xs mr-2" style={{ color: 'var(--muted)' }}>{p.position}</span>
+                    <div key={p.id} className="flex items-center justify-between text-sm py-1.5 px-2 rounded" style={{ background: 'var(--background)' }}>
+                      <div className="flex items-center gap-2">
+                        {p.position && (
+                          <span className="badge badge-blue text-xs w-8 text-center">{p.position}</span>
+                        )}
+                        <span className="font-medium" dir="ltr">{p.name}</span>
                       </div>
                       <span className="font-bold" style={{ color: 'var(--warning)' }}>${p.draft_price}</span>
                     </div>

@@ -51,7 +51,14 @@ export default async function PlayersPage() {
         </div>
       </div>
 
-      {/* Turn banners */}
+      {/* Status / turn banners */}
+      {typedLeague && typedLeague.status !== 'active' && typedMyTeam && (
+        <div className="card mb-4" style={{ borderColor: 'var(--border)' }}>
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>
+            הדראפט טרם החל — כפתורי ההעלאה יופיעו כשהדראפט יהיה פעיל.
+          </p>
+        </div>
+      )}
       {canNominate && (
         <div className="card mb-4" style={{ borderColor: 'var(--success)', background: 'rgba(34,197,94,0.08)' }}>
           <p className="font-bold" style={{ color: 'var(--success)' }}>
