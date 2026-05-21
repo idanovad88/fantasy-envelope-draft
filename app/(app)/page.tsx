@@ -102,9 +102,11 @@ export default async function DashboardPage() {
                   <p className="font-bold text-lg">{typedMyTeam.player_count}</p>
                 </div>
                 <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
-                  <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>פריוריטי</p>
+                  <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>תור העלאה</p>
                   <p className="font-bold text-lg">
-                    {typedMyTeam.priority_rank ?? (typedMyTeam.is_complete ? '✅' : '—')}
+                    {typedMyTeam.is_complete ? '✅' : typedMyTeam.priority_rank != null
+                      ? `${typedMyTeam.priority_rank}/${typedTeams.filter(t => !t.is_complete && t.priority_rank != null).length}`
+                      : '—'}
                   </p>
                 </div>
               </div>
