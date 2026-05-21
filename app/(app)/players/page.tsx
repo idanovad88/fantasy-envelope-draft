@@ -96,7 +96,6 @@ export default async function PlayersPage() {
               <tr style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
                 <th className="text-right pb-2 pr-2 w-8">#</th>
                 <th className="text-right pb-2">שחקן</th>
-                <th className="text-right pb-2 w-12">עמדה</th>
                 <th className="text-right pb-2 w-12">PPG</th>
                 <th className="text-right pb-2 w-12">RPG</th>
                 <th className="text-right pb-2 w-12">APG</th>
@@ -107,8 +106,16 @@ export default async function PlayersPage() {
               {available.map((p, i) => (
                 <tr key={p.id} className="border-t" style={{ borderColor: 'var(--border)' }}>
                   <td className="py-2 pr-2" style={{ color: 'var(--muted)' }}>{p.ranking ?? i + 1}</td>
-                  <td className="py-2 font-medium" dir="ltr">{p.name}</td>
-                  <td className="py-2">{p.position ?? '—'}</td>
+                  <td className="py-2">
+                    <div className="flex items-center gap-2" dir="ltr">
+                      {p.position && (
+                        <span style={{ background: 'rgba(99,102,241,0.2)', color: 'var(--primary)', fontSize: '11px', padding: '1px 5px', borderRadius: '4px', flexShrink: 0, minWidth: 28, textAlign: 'center' }}>
+                          {p.position}
+                        </span>
+                      )}
+                      <span className="font-medium">{p.name}</span>
+                    </div>
+                  </td>
                   <td className="py-2">{(p.stats as { ppg?: number })?.ppg ?? '—'}</td>
                   <td className="py-2">{(p.stats as { rpg?: number })?.rpg ?? '—'}</td>
                   <td className="py-2">{(p.stats as { apg?: number })?.apg ?? '—'}</td>
@@ -137,7 +144,6 @@ export default async function PlayersPage() {
               <thead>
                 <tr style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
                   <th className="text-right pb-2">שחקן</th>
-                  <th className="text-right pb-2 w-12">עמדה</th>
                   <th className="text-right pb-2 w-14">מחיר</th>
                   <th className="text-right pb-2">קבוצה</th>
                 </tr>
@@ -145,8 +151,14 @@ export default async function PlayersPage() {
               <tbody>
                 {drafted.map(p => (
                   <tr key={p.id} className="border-t" style={{ borderColor: 'var(--border)', opacity: 0.65 }}>
-                    <td className="py-2 font-medium" dir="ltr">{p.name}</td>
-                    <td className="py-2">{p.position ?? '—'}</td>
+                    <td className="py-2">
+                      <div className="flex items-center gap-2">
+                        {p.position && (
+                          <span className="badge badge-gray text-xs w-8 text-center flex-shrink-0">{p.position}</span>
+                        )}
+                        <span className="font-medium" dir="ltr">{p.name}</span>
+                      </div>
+                    </td>
                     <td className="py-2 font-bold" style={{ color: 'var(--danger)' }}>
                       ${p.draft_price}
                     </td>
