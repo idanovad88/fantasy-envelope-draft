@@ -29,37 +29,21 @@ export default async function DashboardPage() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      {/* Header + status */}
-      <div className="card mb-6">
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h1 className="text-2xl font-bold">
-              {typedLeague ? typedLeague.name : 'פנטזי דראפט מעטפות 🏀'}
-            </h1>
-            {typedLeague && (
-              <p className="text-sm mt-0.5" style={{ color: 'var(--muted)' }}>
-                {['setup', 'lottery'].includes(typedLeague.status) && 'טרם התחיל הדראפט'}
-                {['active', 'paused'].includes(typedLeague.status) && 'פעיל'}
-                {typedLeague.status === 'completed' && 'הדראפט הסתיים'}
-              </p>
-            )}
-          </div>
-        </div>
+      {/* Header */}
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold mb-1">
+          {typedLeague ? typedLeague.name : 'פנטזי דראפט מעטפות 🏀'}
+        </h1>
         {typedLeague && (
-          <div className="grid grid-cols-3 gap-3">
-            <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
-              <p className="text-2xl font-bold">{typedTeams.filter(t => t.approved).length}/{typedLeague.num_teams}</p>
-              <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>הצטרפו</p>
-            </div>
-            <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
-              <p className="text-2xl font-bold" style={{ color: 'var(--warning)' }}>{typedTeams.filter(t => !t.approved).length}</p>
-              <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>ממתינות לאישור</p>
-            </div>
-            <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
-              <p className="text-2xl font-bold" style={{ color: 'var(--success)' }}>{typedTeams.filter(t => t.is_complete).length}</p>
-              <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>השלימו דראפט</p>
-            </div>
-          </div>
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>
+            <span>{typedTeams.filter(t => t.approved).length}/{typedLeague.num_teams} הצטרפו</span>
+            {typedTeams.filter(t => !t.approved).length > 0 && (
+              <span style={{ color: 'var(--warning)' }}> · {typedTeams.filter(t => !t.approved).length} ממתינים לאישור</span>
+            )}
+            {typedTeams.filter(t => t.is_complete).length > 0 && (
+              <span> · {typedTeams.filter(t => t.is_complete).length} השלימו דראפט</span>
+            )}
+          </p>
         )}
       </div>
 
