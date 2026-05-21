@@ -6,8 +6,6 @@ import { getMaxBid } from '@/lib/utils'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-export const dynamic = 'force-dynamic'
-
 type PlayerWithTeam = Player & { drafting_team: { id: string; name: string } | null }
 
 export default async function PlayersPage() {
