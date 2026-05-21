@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { formatTime } from '@/lib/utils'
 import type { League, Team, Auction } from '@/types'
 import DraftCountdown from '@/components/DraftCountdown'
+import BidForm from '@/components/BidForm'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -15,6 +16,11 @@ export default async function DashboardPage() {
       supabase.from('auctions').select('*, player:players(*), nominating_team:teams!nominating_team_id(name)').eq('status', 'active').maybeSingle(),
       supabase.from('teams').select('*').order('priority_rank', { ascending: true, nullsFirst: false }),
     ])
+
+  const myTeamId = (myTeam as Team | null)?.id
+  const { data: myActiveBid } = myTeamId && (activeAuction as Auction | null)?.id
+    ? await supabase.from('bids').select('amount').eq('auction_id', (activeAuction as Auction).id).eq('team_id', myTeamId).maybeSingle()
+    : { data: null }
 
   const typedLeague = league as League | null
   const typedMyTeam = myTeam as Team | null
@@ -59,25 +65,31 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className={`grid gap-4 ${typedActiveAuction ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2'}`}>
         {/* Current auction card */}
         <div className="card">
           <h2 className="font-bold mb-3">מכרז נוכחי</h2>
           {typedActiveAuction ? (
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-bold text-xl">{typedActiveAuction.player?.name}</span>
-                <span className="badge badge-blue">פעיל</span>
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-bold text-2xl">{typedActiveAuction.player?.name}</span>
+                <span className="badge badge-green">פעיל</span>
               </div>
-              <p className="text-sm mb-1" style={{ color: 'var(--muted)' }}>
-                מועלה על ידי: {typedActiveAuction.nominating_team?.name ?? '—'}
+              <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
+                מועלה על ידי: {typedActiveAuction.nominating_team?.name ?? '—'} · חשיפה: {formatTime(typedActiveAuction.reveal_time)}
               </p>
-              <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>
-                חשיפה: {formatTime(typedActiveAuction.reveal_time)}
-              </p>
-              <Link href="/auction" className="btn btn-primary w-full">
-                הגש הצעה
-              </Link>
+              {typedMyTeam && typedLeague && !typedMyTeam.is_complete ? (
+                <BidForm
+                  auctionId={typedActiveAuction.id}
+                  team={typedMyTeam}
+                  league={typedLeague}
+                  existingBid={myActiveBid?.amount}
+                />
+              ) : (
+                <Link href="/auction" className="btn btn-outline w-full text-sm">
+                  לוח המכרזים
+                </Link>
+              )}
             </div>
           ) : (
             <div className="text-center py-6" style={{ color: 'var(--muted)' }}>
