@@ -47,8 +47,22 @@ BEGIN
     ORDER BY COALESCE(t.tiebreak_rank, t.priority_rank) ASC
     LIMIT 1;
 
-    -- Push winner to bottom of nomination queue (priority_rank only, tiebreak_rank stays fixed)
+    -- Demote winner to bottom of nomination queue
     PERFORM demote_priority(v_winning_team_id, v_league_id);
+
+    -- Demote winner to bottom of tiebreak order too
+    SELECT MAX(tiebreak_rank) INTO v_best_priority
+    FROM teams WHERE league_id = v_league_id;
+
+    UPDATE teams SET tiebreak_rank = v_best_priority + 1 WHERE id = v_winning_team_id;
+
+    -- Compact tiebreak ranks (fill gaps)
+    WITH ranked AS (
+      SELECT id, ROW_NUMBER() OVER (ORDER BY tiebreak_rank ASC NULLS LAST) AS new_rank
+      FROM teams WHERE league_id = v_league_id
+    )
+    UPDATE teams t SET tiebreak_rank = r.new_rank
+    FROM ranked r WHERE t.id = r.id AND t.league_id = v_league_id;
   END IF;
 
   -- Assign player to team
