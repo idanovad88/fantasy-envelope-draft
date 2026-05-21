@@ -90,7 +90,7 @@ export default async function DashboardPage() {
           {typedMyTeam ? (
             <div>
               <p className="font-bold text-xl mb-1">{typedMyTeam.name}</p>
-              <div className="grid grid-cols-3 gap-3 mt-3">
+              <div className="grid grid-cols-2 gap-3 mt-3">
                 <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
                   <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>תקציב</p>
                   <p className="font-bold text-lg" style={{ color: 'var(--success)' }}>
@@ -99,14 +99,8 @@ export default async function DashboardPage() {
                 </div>
                 <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
                   <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>שחקנים</p>
-                  <p className="font-bold text-lg">{typedMyTeam.player_count}</p>
-                </div>
-                <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
-                  <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>תור העלאה</p>
                   <p className="font-bold text-lg">
-                    {typedMyTeam.is_complete ? '✅' : typedMyTeam.priority_rank != null
-                      ? `${typedMyTeam.priority_rank}/${typedTeams.filter(t => !t.is_complete && t.priority_rank != null).length}`
-                      : '—'}
+                    {typedMyTeam.player_count}/{typedLeague?.players_per_team ?? '—'}
                   </p>
                 </div>
               </div>
