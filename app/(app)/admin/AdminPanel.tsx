@@ -412,30 +412,36 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
           {league && (
             <div className="card">
               <h2 className="font-bold mb-4">הוסף שחקן ידנית</h2>
-              <div className="flex gap-2">
-                <input
-                  className="input flex-1"
-                  placeholder="שם שחקן"
-                  value={newPlayerName}
-                  onChange={e => setNewPlayerName(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && addPlayer()}
-                  dir="ltr"
-                />
-                <select
-                  className="input w-24 text-center"
-                  value={newPlayerPos}
-                  onChange={e => setNewPlayerPos(e.target.value)}
-                >
-                  {['PG', 'SG', 'SF', 'PF', 'C'].map(p => (
-                    <option key={p} value={p}>{p}</option>
-                  ))}
-                </select>
+              <div className="flex flex-col gap-3">
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">שם שחקן</label>
+                  <input
+                    className="input"
+                    placeholder="שם מלא"
+                    value={newPlayerName}
+                    onChange={e => setNewPlayerName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && addPlayer()}
+                    dir="ltr"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">עמדה</label>
+                  <select
+                    className="input"
+                    value={newPlayerPos}
+                    onChange={e => setNewPlayerPos(e.target.value)}
+                  >
+                    {['PG', 'SG', 'SF', 'PF', 'C'].map(p => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                </div>
                 <button
                   className="btn btn-primary"
                   onClick={addPlayer}
                   disabled={!newPlayerName.trim() || loading === 'add_player'}
                 >
-                  {loading === 'add_player' ? '...' : '+ הוסף'}
+                  {loading === 'add_player' ? '...' : '+ הוסף שחקן'}
                 </button>
               </div>
             </div>
