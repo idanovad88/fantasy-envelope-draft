@@ -19,7 +19,7 @@ export default async function AdminPage() {
       supabase.from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle(),
       supabase.from('teams').select('*').order('priority_rank', { ascending: true, nullsFirst: false }),
       supabase.from('teams').select('*').eq('approved', false),
-      supabase.from('auctions').select('*, player:players(*), bids(*,team:teams(name))').eq('status', 'active').maybeSingle(),
+      supabase.from('auctions').select('*, player:players(*), bids(id)').eq('status', 'active').maybeSingle(),
       supabase.from('players').select('id, name, status, ranking, position').order('ranking', { ascending: true }),
     ])
 
@@ -29,7 +29,7 @@ export default async function AdminPage() {
         league={league as League | null}
         teams={(teams || []) as Team[]}
         pendingTeams={(pendingTeams || []) as Team[]}
-        activeAuction={activeAuction as (Auction & { player: { name: string }; bids: { amount: number; team: { name: string } }[] }) | null}
+        activeAuction={activeAuction as (Auction & { player: { name: string }; bids: { id: string }[] }) | null}
         players={players || []}
       />
       {league && <ImportPlayers leagueId={league.id} />}

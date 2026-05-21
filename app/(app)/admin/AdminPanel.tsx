@@ -9,7 +9,7 @@ interface Props {
   league: League | null
   teams: Team[]
   pendingTeams: Team[]
-  activeAuction: (Auction & { player: { name: string }; bids: { amount: number; team: { name: string } }[] }) | null
+  activeAuction: (Auction & { player: { name: string }; bids: { id: string }[] }) | null
   players: { id: string; name: string; status: string; ranking: number | null; position: string | null }[]
 }
 
@@ -296,17 +296,13 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
                 חשיפה: {formatDateTime(activeAuction.reveal_time)}
               </p>
 
-              {/* Bids table (admin sees all) */}
+              {/* Bid count only — amounts hidden until reveal */}
               <div className="mb-4">
-                <h3 className="font-medium mb-2 text-sm">הצעות:</h3>
-                {((activeAuction as { bids?: { amount: number; team: { name: string } }[] }).bids || []).map((bid, i) => (
-                  <div key={i} className="flex items-center justify-between text-sm py-1 px-2 rounded mb-1" style={{ background: 'var(--background)' }}>
-                    <span>{bid.team?.name}</span>
-                    <span className="font-bold" style={{ color: bid.amount > 0 ? 'var(--success)' : 'var(--muted)' }}>
-                      ${bid.amount}
-                    </span>
-                  </div>
-                ))}
+                <p className="text-sm" style={{ color: 'var(--muted)' }}>
+                  הצעות שהוגשו: <strong style={{ color: 'var(--text)' }}>
+                    {((activeAuction as { bids?: unknown[] }).bids || []).length}
+                  </strong>
+                </p>
               </div>
 
               <div className="flex gap-2">
