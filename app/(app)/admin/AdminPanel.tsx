@@ -530,7 +530,7 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-1.5">קוד הצטרפות לליגה</label>
+              <label className="block text-sm font-medium mb-1.5">סיסמת הליגה</label>
               <div className="flex gap-2">
                 <input
                   className="input text-center font-bold tracking-widest uppercase flex-1"
@@ -546,7 +546,7 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
               </div>
               {joinCode && (
                 <p className="text-xs mt-1.5" style={{ color: 'var(--muted)' }}>
-                  שתף את הקוד <strong style={{ color: 'var(--primary)' }}>{joinCode}</strong> עם המשתתפים — יכנסו דרך /join
+                  שתף: שם הליגה <strong style={{ color: 'var(--primary)' }}>{leagueName}</strong> + סיסמה <strong style={{ color: 'var(--primary)' }}>{joinCode}</strong>
                 </p>
               )}
             </div>

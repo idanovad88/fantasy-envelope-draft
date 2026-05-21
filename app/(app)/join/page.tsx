@@ -5,29 +5,31 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
 export default function JoinLeaguePage() {
-  const [code, setCode] = useState('')
+  const [leagueName, setLeagueName] = useState('')
+  const [leaguePassword, setLeaguePassword] = useState('')
   const [teamName, setTeamName] = useState('')
-  const [step, setStep] = useState<'code' | 'team'>('code')
-  const [league, setLeague] = useState<{ id: string; name: string } | null>(null)
+  const [step, setStep] = useState<'find' | 'team'>('find')
+  const [league, setLeague] = useState<{ id: string; name: string; budget_per_team: number } | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
   const supabase = createClient()
   const router = useRouter()
 
-  async function checkCode(e: React.FormEvent) {
+  async function findLeague(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     setError('')
 
     const { data } = await supabase
       .from('leagues')
-      .select('id, name, status')
-      .eq('join_code', code.trim().toUpperCase())
+      .select('id, name, budget_per_team, status')
+      .ilike('name', leagueName.trim())
+      .eq('join_code', leaguePassword.trim().toUpperCase())
       .maybeSingle()
 
     if (!data) {
-      setError('קוד לא תקין — בדוק שוב')
+      setError('שם הליגה או הסיסמה שגויים')
     } else if (data.status === 'completed') {
       setError('הדראפט הסתיים — לא ניתן להצטרף')
     } else {
@@ -43,37 +45,23 @@ export default function JoinLeaguePage() {
     setError('')
 
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { setError('יש להתחבר'); setLoading(false); return }
+    if (!user) { setError('יש להתחבר מחדש'); setLoading(false); return }
 
     const { data: existing } = await supabase
-      .from('teams')
-      .select('id')
-      .eq('user_id', user.id)
-      .eq('league_id', league!.id)
-      .maybeSingle()
+      .from('teams').select('id').eq('user_id', user.id).eq('league_id', league!.id).maybeSingle()
 
-    if (existing) {
-      setError('כבר נרשמת לליגה זו')
-      setLoading(false)
-      return
-    }
+    if (existing) { setError('כבר הצטרפת לליגה זו'); setLoading(false); return }
 
-    const { data: leagueData } = await supabase
-      .from('leagues')
-      .select('budget_per_team')
-      .eq('id', league!.id)
-      .single()
-
-    const { error: insertError } = await supabase.from('teams').insert({
+    const { error: insertErr } = await supabase.from('teams').insert({
       league_id: league!.id,
-      name: teamName,
+      name: teamName.trim(),
       user_id: user.id,
-      budget_remaining: leagueData?.budget_per_team ?? 200,
+      budget_remaining: league!.budget_per_team,
       approved: false,
     })
 
-    if (insertError) {
-      setError(insertError.code === '23505' ? 'שם הקבוצה כבר תפוס, בחר שם אחר' : insertError.message)
+    if (insertErr) {
+      setError(insertErr.code === '23505' ? 'שם קבוצה זה כבר תפוס — בחר שם אחר' : insertErr.message)
     } else {
       setSuccess(true)
     }
@@ -85,8 +73,7 @@ export default function JoinLeaguePage() {
       <div className="max-w-sm mx-auto text-center py-12">
         <div className="text-5xl mb-4">✅</div>
         <h2 className="text-xl font-bold mb-2">נרשמת בהצלחה!</h2>
-        <p className="mb-2" style={{ color: 'var(--muted)' }}>הקבוצה שלך ממתינה לאישור האדמין.</p>
-        <p className="text-sm mb-6" style={{ color: 'var(--muted)' }}>תקבל גישה לאחר האישור.</p>
+        <p className="mb-6" style={{ color: 'var(--muted)' }}>הקבוצה ממתינה לאישור המנהל.</p>
         <button className="btn btn-primary" onClick={() => router.push('/')}>לדף הבית</button>
       </div>
     )
@@ -94,28 +81,35 @@ export default function JoinLeaguePage() {
 
   return (
     <div className="max-w-sm mx-auto py-8">
-      <h1 className="text-2xl font-bold mb-2">הצטרפות לליגה 🏀</h1>
-      <p className="text-sm mb-6" style={{ color: 'var(--muted)' }}>
-        הכנס את קוד הליגה שקיבלת מהאדמין
-      </p>
+      <h1 className="text-2xl font-bold mb-6">הצטרפות לליגה</h1>
 
-      {step === 'code' ? (
-        <form onSubmit={checkCode} className="card flex flex-col gap-4">
+      {step === 'find' ? (
+        <form onSubmit={findLeague} className="card flex flex-col gap-4">
           <div>
-            <label className="block text-sm font-medium mb-1.5">קוד ליגה</label>
+            <label className="block text-sm font-medium mb-1.5">שם הליגה</label>
             <input
-              className="input text-center text-2xl font-bold tracking-widest uppercase"
-              placeholder="ABC123"
-              value={code}
-              onChange={e => setCode(e.target.value.toUpperCase())}
-              maxLength={10}
+              className="input"
+              placeholder="שם הליגה"
+              value={leagueName}
+              onChange={e => setLeagueName(e.target.value)}
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1.5">סיסמת הליגה</label>
+            <input
+              className="input"
+              type="password"
+              placeholder="הסיסמה שקיבלת מהמנהל"
+              value={leaguePassword}
+              onChange={e => setLeaguePassword(e.target.value)}
               required
               dir="ltr"
             />
           </div>
           {error && <p className="text-sm" style={{ color: 'var(--danger)' }}>{error}</p>}
-          <button type="submit" className="btn btn-primary" disabled={loading || !code.trim()}>
-            {loading ? 'בודק...' : 'המשך'}
+          <button type="submit" className="btn btn-primary" disabled={loading || !leagueName.trim() || !leaguePassword.trim()}>
+            {loading ? 'מחפש...' : 'המשך'}
           </button>
         </form>
       ) : (
@@ -127,19 +121,19 @@ export default function JoinLeaguePage() {
             <label className="block text-sm font-medium mb-1.5">שם הקבוצה שלך</label>
             <input
               className="input"
-              placeholder="שם הקבוצה"
+              placeholder="בחר שם לקבוצה"
               value={teamName}
               onChange={e => setTeamName(e.target.value)}
               required
-              maxLength={50}
+              maxLength={40}
             />
           </div>
           {error && <p className="text-sm" style={{ color: 'var(--danger)' }}>{error}</p>}
           <button type="submit" className="btn btn-primary" disabled={loading || !teamName.trim()}>
             {loading ? 'רושם...' : 'הצטרף לליגה'}
           </button>
-          <button type="button" className="btn btn-ghost text-sm" onClick={() => { setStep('code'); setError('') }}>
-            ← שנה קוד
+          <button type="button" className="btn-ghost text-sm" onClick={() => { setStep('find'); setError('') }}>
+            ← שנה פרטים
           </button>
         </form>
       )}
