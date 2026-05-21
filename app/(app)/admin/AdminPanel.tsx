@@ -190,6 +190,23 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
     window.location.reload()
   }
 
+  async function cancelAuction(auctionId: string) {
+    if (!confirm('לבטל את המכרז ולהחזיר את השחקן לרשימה?')) return
+    setLoading('cancel_' + auctionId)
+    const res = await fetch('/api/admin/cancel-auction', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ auctionId }),
+    })
+    if (res.ok) {
+      setMsg('המכרז בוטל והשחקן הוחזר לרשימה')
+    } else {
+      setMsg('שגיאה בביטול')
+    }
+    setLoading('')
+    window.location.reload()
+  }
+
   const TABS = [
     { id: 'overview', label: 'סקירה' },
     { id: 'auction', label: 'מכרז' },
@@ -297,9 +314,15 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
                 </p>
               </div>
 
-              <button className="btn btn-primary w-full" onClick={() => revealAuction(activeAuction.id)} disabled={!!loading}>
-                {loading === 'reveal_' + activeAuction.id ? 'מסדר...' : '👁 חשוף תוצאות והעבר לקבוצה'}
-              </button>
+              <div className="flex gap-2">
+                <button className="btn btn-primary flex-1" onClick={() => revealAuction(activeAuction.id)} disabled={!!loading}>
+                  {loading === 'reveal_' + activeAuction.id ? 'מסדר...' : '👁 חשוף תוצאות'}
+                </button>
+                <button className="btn btn-outline flex-shrink-0" onClick={() => cancelAuction(activeAuction.id)} disabled={!!loading}
+                  style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}>
+                  {loading === 'cancel_' + activeAuction.id ? '...' : '✕ בטל מכרז'}
+                </button>
+              </div>
             </div>
           )}
 

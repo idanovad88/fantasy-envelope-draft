@@ -65,23 +65,12 @@ export default function BidForm({ auctionId, team, league, existingBid, onBidSub
         </div>
       </div>
 
-      <div className="flex gap-2 items-center">
-        <div className="flex gap-1">
-          {[1, 5, 10, 25].map(v => (
-            <button
-              key={v}
-              type="button"
-              className="btn btn-outline px-2 py-1 text-xs"
-              onClick={() => setAmount(prev => Math.min(prev + v, maxBid))}
-            >
-              +{v}
-            </button>
-          ))}
-        </div>
+      <div>
+        <label className="block text-sm font-medium mb-1.5">סכום ($)</label>
         <input
           type="number"
-          className="input font-bold text-center flex-1"
-          min={0}
+          className="input font-bold text-center"
+          min={1}
           max={maxBid}
           value={amount}
           onChange={e => setAmount(Number(e.target.value))}
