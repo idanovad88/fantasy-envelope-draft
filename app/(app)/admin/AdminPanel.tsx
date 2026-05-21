@@ -41,6 +41,12 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
   // Admin management state
   const [adminEmail, setAdminEmail] = useState('')
 
+  // Reveal time edit state
+  const [editingRevealTime, setEditingRevealTime] = useState(false)
+  const [newRevealTime, setNewRevealTime] = useState(() =>
+    activeAuction ? new Date(activeAuction.reveal_time).toISOString().slice(0, 16) : ''
+  )
+
   // Auction nomination state
   const [selectedPlayer, setSelectedPlayer] = useState('')
   const [selectedNominator, setSelectedNominator] = useState('')
@@ -185,6 +191,19 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
     window.location.reload()
   }
 
+  async function updateRevealTime(auctionId: string) {
+    if (!newRevealTime) return
+    setLoading('reveal_time')
+    const { error } = await supabase
+      .from('auctions')
+      .update({ reveal_time: new Date(newRevealTime).toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', auctionId)
+    if (error) { setMsg('שגיאה: ' + error.message) }
+    else { setMsg('מועד החשיפה עודכן'); setEditingRevealTime(false) }
+    setLoading('')
+    window.location.reload()
+  }
+
   async function revealAuction(auctionId: string) {
     setLoading('reveal_' + auctionId)
     await supabase.rpc('resolve_auction', { p_auction_id: auctionId })
@@ -304,9 +323,53 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
           {activeAuction && (
             <div className="card" style={{ borderColor: 'var(--primary)' }}>
               <h2 className="font-bold mb-3">מכרז פעיל: {(activeAuction as { player?: { name: string } }).player?.name}</h2>
-              <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
-                חשיפה: {formatDateTime(activeAuction.reveal_time)}
-              </p>
+
+              {/* Reveal time + edit */}
+              <div className="mb-3">
+                {!editingRevealTime ? (
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm" style={{ color: 'var(--muted)' }}>
+                      חשיפה: <strong style={{ color: 'var(--text)' }}>{formatDateTime(activeAuction.reveal_time)}</strong>
+                    </p>
+                    <button
+                      className="text-xs px-2 py-0.5 rounded"
+                      style={{ color: 'var(--primary)', border: '1px solid var(--primary)' }}
+                      onClick={() => { setNewRevealTime(new Date(activeAuction.reveal_time).toISOString().slice(0, 16)); setEditingRevealTime(true) }}
+                    >
+                      ✏️ שנה מועד
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">מועד חשיפה חדש</label>
+                    <div className="flex gap-2 items-center">
+                      <input
+                        type="datetime-local"
+                        className="input text-sm flex-1"
+                        value={newRevealTime}
+                        onChange={e => setNewRevealTime(e.target.value)}
+                        dir="ltr"
+                      />
+                      <button
+                        className="btn btn-primary text-sm"
+                        onClick={() => updateRevealTime(activeAuction.id)}
+                        disabled={loading === 'reveal_time' || !newRevealTime}
+                      >
+                        {loading === 'reveal_time' ? '...' : 'שמור'}
+                      </button>
+                      <button
+                        className="btn btn-ghost text-sm"
+                        onClick={() => setEditingRevealTime(false)}
+                      >
+                        ביטול
+                      </button>
+                    </div>
+                    <p className="text-xs" style={{ color: 'var(--muted)' }}>
+                      ⚠️ מועד בעבר יגרום לחשיפה אוטומטית תוך דקה
+                    </p>
+                  </div>
+                )}
+              </div>
 
               {/* Bid count only — amounts hidden until reveal */}
               <div className="mb-4">

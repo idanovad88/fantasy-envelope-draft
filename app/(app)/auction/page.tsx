@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { formatTime, formatDateTime } from '@/lib/utils'
 import BidForm from '@/components/BidForm'
 import Countdown from '@/components/Countdown'
+import AuctionRevealOverlay from '@/components/AuctionRevealOverlay'
 import type { Auction, Team, League } from '@/types'
 
 export const dynamic = 'force-dynamic'
@@ -33,6 +34,7 @@ export default async function AuctionPage() {
 
   return (
     <div className="max-w-2xl mx-auto">
+      <AuctionRevealOverlay leagueId={typedLeague?.id ?? ''} />
       <h1 className="text-2xl font-bold mb-6">לוח המכרזים</h1>
 
       {/* Active auction */}
