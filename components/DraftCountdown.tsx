@@ -38,7 +38,7 @@ export default function DraftCountdown({ targetDate }: { targetDate: string }) {
       <p className="text-sm font-bold text-center mb-4" style={{ color: 'var(--primary)' }}>
         הדראפט מתחיל בעוד
       </p>
-      <div className="flex justify-center gap-3">
+      <div className="flex justify-center gap-3" dir="ltr">
         {units.map(({ value, label }) => (
           <div key={label} className="text-center">
             <div className="rounded-xl px-4 py-3" style={{ background: 'var(--background)', minWidth: 60 }}>
