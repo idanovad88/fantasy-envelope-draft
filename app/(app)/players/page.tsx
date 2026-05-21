@@ -1,7 +1,10 @@
 import { createClient } from '@/lib/supabase/server'
-import NominateButton from '@/components/NominateButton'
+import PlayerSearch from '@/components/PlayerSearch'
 import type { Player, League, Team } from '@/types'
 import { getMaxBid } from '@/lib/utils'
+
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 export const dynamic = 'force-dynamic'
 
@@ -89,47 +92,16 @@ export default async function PlayersPage() {
       ))}
 
       {/* Available players */}
-      <div className="card">
-        <h2 className="font-bold mb-3">שחקנים זמינים ({available.length})</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-                <th className="text-right pb-2 pr-2 w-8">#</th>
-                <th className="text-right pb-2">שחקן</th>
-                <th className="pb-2 w-10"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {available.map((p, i) => (
-                <tr key={p.id} className="border-t" style={{ borderColor: 'var(--border)' }}>
-                  <td className="py-2 pr-2" style={{ color: 'var(--muted)' }}>{p.ranking ?? i + 1}</td>
-                  <td className="py-2">
-                    <div className="flex items-center gap-2" dir="ltr">
-                      {p.position && (
-                        <span style={{ background: 'rgba(99,102,241,0.2)', color: 'var(--primary)', fontSize: '11px', padding: '1px 5px', borderRadius: '4px', flexShrink: 0, minWidth: 28, textAlign: 'center' }}>
-                          {p.position}
-                        </span>
-                      )}
-                      <span className="font-medium">{p.name}</span>
-                    </div>
-                  </td>
-                  <td className="py-1 pl-1">
-                    {canNominate && typedLeague && typedMyTeam ? (
-                      <NominateButton
-                        playerId={p.id}
-                        leagueId={typedLeague.id}
-                        playerName={p.name}
-                        maxBid={getMaxBid(typedMyTeam.budget_remaining, typedMyTeam.player_count, typedLeague.players_per_team)}
-                      />
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <PlayerSearch
+        players={available.map(p => ({ id: p.id, name: p.name, position: p.position, nba_team: p.nba_team, ranking: p.ranking }))}
+        canNominate={canNominate}
+        leagueId={typedLeague?.id ?? null}
+        teamId={typedMyTeam?.id ?? null}
+        budgetRemaining={typedMyTeam?.budget_remaining ?? 0}
+        playerCount={typedMyTeam?.player_count ?? 0}
+        playersPerTeam={typedLeague?.players_per_team ?? 13}
+        maxBid={typedMyTeam && typedLeague ? getMaxBid(typedMyTeam.budget_remaining, typedMyTeam.player_count, typedLeague.players_per_team) : 1}
+      />
 
       {/* Drafted players */}
       {drafted.length > 0 && (
