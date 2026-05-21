@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import NominateButton from '@/components/NominateButton'
 import type { Player, League, Team } from '@/types'
+import { getMaxBid } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -114,11 +115,12 @@ export default async function PlayersPage() {
                     </div>
                   </td>
                   <td className="py-1 pl-1">
-                    {canNominate && typedLeague ? (
+                    {canNominate && typedLeague && typedMyTeam ? (
                       <NominateButton
                         playerId={p.id}
                         leagueId={typedLeague.id}
                         playerName={p.name}
+                        maxBid={getMaxBid(typedMyTeam.budget_remaining, typedMyTeam.player_count, typedLeague.players_per_team)}
                       />
                     ) : null}
                   </td>

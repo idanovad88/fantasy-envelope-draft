@@ -19,7 +19,7 @@ export default async function AdminPage() {
       supabase.from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle(),
       supabase.from('teams').select('*').order('priority_rank', { ascending: true, nullsFirst: false }),
       supabase.from('teams').select('*').eq('approved', false),
-      supabase.from('auctions').select('*, player:players(*), bids(id)').eq('status', 'active').maybeSingle(),
+      supabase.from('auctions').select('*, player:players(*), bids(id)').eq('status', 'active').order('scheduled_start', { ascending: false }).limit(1).maybeSingle(),
       supabase.from('players').select('id, name, status, ranking, position').order('ranking', { ascending: true }),
       supabase.from('auctions')
         .select('id, scheduled_start, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)')

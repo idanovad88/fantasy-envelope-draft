@@ -7,7 +7,7 @@ export async function POST(req: NextRequest) {
   const supabase = createAdminClient()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { player_id, league_id } = await req.json()
+  const { player_id, league_id, initial_bid } = await req.json()
   if (!player_id || !league_id) return NextResponse.json({ error: 'Missing data' }, { status: 400 })
 
   const [{ data: league }, { data: myTeam }, { data: adminRow }, { count: activeCount }, { data: teams }] = await Promise.all([
@@ -61,6 +61,15 @@ export async function POST(req: NextRequest) {
   if (auctionErr) return NextResponse.json({ error: auctionErr.message }, { status: 500 })
 
   await supabase.from('players').update({ status: 'on_auction' }).eq('id', player_id)
+
+  // Place initial bid if provided
+  if (initial_bid && initial_bid >= 1 && nominatingTeamId) {
+    await supabase.from('bids').insert({
+      auction_id: auction.id,
+      team_id: nominatingTeamId,
+      amount: initial_bid,
+    })
+  }
 
   return NextResponse.json({ success: true })
 }
