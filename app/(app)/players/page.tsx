@@ -10,7 +10,7 @@ export default async function PlayersPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const [{ data: players }, { data: league }, { data: myTeamRow }, { data: allTeams }, { data: activeAuction }] =
+  const [{ data: players }, { data: league }, { data: myTeamRow }, { data: allTeams }, { data: activeAuction }, { data: adminRow }] =
     await Promise.all([
       supabase.from('players')
         .select('*, drafting_team:teams!drafted_by_team_id(id, name)')
@@ -26,15 +26,19 @@ export default async function PlayersPage() {
         .not('priority_rank', 'is', null)
         .order('priority_rank', { ascending: true }),
       supabase.from('auctions').select('id').eq('status', 'active').maybeSingle(),
+      user
+        ? supabase.from('admin_users').select('role').eq('user_id', user.id).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ])
 
   const typedLeague = league as League | null
   const typedMyTeam = myTeamRow as Team | null
   const typedPlayers = (players || []) as PlayerWithTeam[]
 
+  const isAdmin = !!adminRow
   const currentNominatorId = allTeams?.[0]?.id ?? null
   const isMyTurn = !!typedMyTeam && typedMyTeam.id === currentNominatorId && !typedMyTeam.is_complete
-  const canNominate = isMyTurn && typedLeague?.status === 'active' && !activeAuction
+  const canNominate = (isMyTurn || isAdmin) && typedLeague?.status === 'active' && !activeAuction && !!currentNominatorId
 
   const available = typedPlayers.filter(p => p.status === 'available')
   const onAuction = typedPlayers.filter(p => p.status === 'on_auction')
