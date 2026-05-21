@@ -85,7 +85,7 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
             startedRef.current = false
             router.refresh()
           }, 4000)
-        }, 500)
+        }, 3000)
       } else {
         setShownCount(count)
       }
