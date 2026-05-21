@@ -29,23 +29,23 @@ export default async function DashboardPage() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">
-        {typedLeague ? typedLeague.name : 'פנטזי דראפט מעטפות 🏀'}
-      </h1>
-
-      {/* Status banner */}
-      {typedLeague && (
-        <div className="card mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <p className="text-sm" style={{ color: 'var(--muted)' }}>סטטוס</p>
-              <p className="font-bold text-lg mt-0.5">
+      {/* Header + status */}
+      <div className="card mb-6">
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h1 className="text-2xl font-bold">
+              {typedLeague ? typedLeague.name : 'פנטזי דראפט מעטפות 🏀'}
+            </h1>
+            {typedLeague && (
+              <p className="text-sm mt-0.5" style={{ color: 'var(--muted)' }}>
                 {['setup', 'lottery'].includes(typedLeague.status) && 'טרם התחיל הדראפט'}
                 {['active', 'paused'].includes(typedLeague.status) && 'פעיל'}
                 {typedLeague.status === 'completed' && 'הדראפט הסתיים'}
               </p>
-            </div>
+            )}
           </div>
+        </div>
+        {typedLeague && (
           <div className="grid grid-cols-3 gap-3">
             <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
               <p className="text-2xl font-bold">{typedTeams.filter(t => t.approved).length}/{typedLeague.num_teams}</p>
@@ -60,8 +60,8 @@ export default async function DashboardPage() {
               <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>השלימו דראפט</p>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       <div className={`grid gap-4 ${typedActiveAuction ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2'}`}>
         {/* Current auction card */}
