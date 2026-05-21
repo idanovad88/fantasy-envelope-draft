@@ -58,7 +58,10 @@ export default function LandingPage() {
     const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({ email, password })
 
     if (signInErr) {
-      const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({ email, password })
+      const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+        email, password,
+        options: { emailRedirectTo: `${window.location.origin}/` },
+      })
       if (signUpErr || !signUpData.user) {
         setError('שגיאת כניסה: ' + (signUpErr?.message ?? signInErr.message))
         setLoading(false)
