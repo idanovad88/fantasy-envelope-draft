@@ -96,9 +96,6 @@ export default async function PlayersPage() {
               <tr style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
                 <th className="text-right pb-2 pr-2 w-8">#</th>
                 <th className="text-right pb-2">שחקן</th>
-                <th className="text-right pb-2 w-12">PPG</th>
-                <th className="text-right pb-2 w-12">RPG</th>
-                <th className="text-right pb-2 w-12">APG</th>
                 <th className="pb-2 w-10"></th>
               </tr>
             </thead>
@@ -116,9 +113,6 @@ export default async function PlayersPage() {
                       <span className="font-medium">{p.name}</span>
                     </div>
                   </td>
-                  <td className="py-2">{(p.stats as { ppg?: number })?.ppg ?? '—'}</td>
-                  <td className="py-2">{(p.stats as { rpg?: number })?.rpg ?? '—'}</td>
-                  <td className="py-2">{(p.stats as { apg?: number })?.apg ?? '—'}</td>
                   <td className="py-1 pl-1">
                     {canNominate && typedLeague ? (
                       <NominateButton
