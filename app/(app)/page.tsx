@@ -155,7 +155,7 @@ export default async function DashboardPage() {
                       </span>
                       <span className="font-medium">{team.name}</span>
                       {isFirst && <span className="badge badge-yellow text-xs">עולה הבא</span>}
-                      {isLast && !isFirst && <span className="text-xs" style={{ color: 'var(--muted)' }}>העלה אחרון</span>}
+
                       {isMe && <span className="badge badge-blue text-xs">אתה</span>}
                     </div>
                     <div className="flex items-center gap-4 text-sm" style={{ color: 'var(--muted)' }}>
