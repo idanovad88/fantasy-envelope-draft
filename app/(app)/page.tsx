@@ -38,13 +38,11 @@ export default async function DashboardPage() {
         <div className="card mb-6">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <p className="text-sm" style={{ color: 'var(--muted)' }}>סטטוס ליגה</p>
+              <p className="text-sm" style={{ color: 'var(--muted)' }}>סטטוס</p>
               <p className="font-bold text-lg mt-0.5">
-                {typedLeague.status === 'setup' && 'הגדרה'}
-                {typedLeague.status === 'lottery' && 'הגרלת פריוריטי'}
-                {typedLeague.status === 'active' && 'דראפט פעיל'}
-                {typedLeague.status === 'paused' && 'דראפט מושהה'}
-                {typedLeague.status === 'completed' && 'דראפט הסתיים'}
+                {['setup', 'lottery'].includes(typedLeague.status) && 'טרם התחיל הדראפט'}
+                {['active', 'paused'].includes(typedLeague.status) && 'פעיל'}
+                {typedLeague.status === 'completed' && 'הדראפט הסתיים'}
               </p>
             </div>
           </div>
