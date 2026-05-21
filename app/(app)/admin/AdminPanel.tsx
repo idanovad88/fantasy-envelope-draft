@@ -10,12 +10,12 @@ interface Props {
   teams: Team[]
   pendingTeams: Team[]
   activeAuction: (Auction & { player: { name: string }; bids: { amount: number; team: { name: string } }[] }) | null
-  players: { id: string; name: string; status: string; ranking: number | null }[]
+  players: { id: string; name: string; status: string; ranking: number | null; position: string | null }[]
 }
 
 export default function AdminPanel({ league, teams, pendingTeams, activeAuction, players }: Props) {
   const supabase = createClient()
-  const [tab, setTab] = useState<'overview' | 'teams' | 'auction' | 'lottery' | 'league'>('overview')
+  const [tab, setTab] = useState<'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league'>('overview')
   const [loading, setLoading] = useState('')
   const [msg, setMsg] = useState('')
 
@@ -25,6 +25,14 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
   const [playersPerTeam, setPlayersPerTeam] = useState(league?.players_per_team ?? 13)
   const [budgetPerTeam, setBudgetPerTeam] = useState(league?.budget_per_team ?? 200)
   const [joinCode, setJoinCode] = useState(league?.join_code ?? '')
+
+  // Player management state
+  const [newPlayerName, setNewPlayerName] = useState('')
+  const [newPlayerPos, setNewPlayerPos] = useState('PG')
+  const [playerFilter, setPlayerFilter] = useState('')
+
+  // Admin management state
+  const [adminEmail, setAdminEmail] = useState('')
 
   // Auction nomination state
   const [selectedPlayer, setSelectedPlayer] = useState('')
@@ -36,6 +44,46 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
   })
 
   const availablePlayers = players.filter(p => p.status === 'available')
+
+  async function addPlayer() {
+    if (!league || !newPlayerName.trim()) return
+    setLoading('add_player')
+    const { error } = await supabase.from('players').insert({
+      league_id: league.id,
+      name: newPlayerName.trim(),
+      position: newPlayerPos,
+      status: 'available',
+      stats: {},
+    })
+    if (error) { setMsg('שגיאה: ' + error.message); setLoading(''); return }
+    setMsg(`${newPlayerName.trim()} נוסף!`)
+    setNewPlayerName('')
+    setLoading('')
+    window.location.reload()
+  }
+
+  async function removePlayer(playerId: string, name: string) {
+    if (!confirm(`להסיר את ${name} מהרשימה?`)) return
+    setLoading('remove_' + playerId)
+    await supabase.from('players').delete().eq('id', playerId)
+    setMsg(`${name} הוסר`)
+    setLoading('')
+    window.location.reload()
+  }
+
+  async function addAdmin() {
+    if (!adminEmail.trim()) return
+    setLoading('add_admin')
+    const res = await fetch('/api/admin/add-admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: adminEmail.trim() }),
+    })
+    const data = await res.json()
+    if (data.error) setMsg('שגיאה: ' + data.error)
+    else { setMsg(`מנהל נוסף בהצלחה`); setAdminEmail('') }
+    setLoading('')
+  }
 
   function generateCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -148,6 +196,7 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
   const TABS = [
     { id: 'overview', label: 'סקירה' },
     { id: 'auction', label: 'מכרז' },
+    { id: 'players', label: 'שחקנים' },
     { id: 'teams', label: 'קבוצות' },
     { id: 'lottery', label: 'הגרלה' },
     { id: 'league', label: 'הגדרות' },
@@ -155,7 +204,7 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
 
   return (
     <div className="max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-2">ניהול דראפט 🛠️</h1>
+      <h1 className="text-2xl font-bold mb-2">ניהול דראפט</h1>
       {msg && (
         <div className="mb-4 p-3 rounded-lg text-sm" style={{ background: 'rgba(99,102,241,0.15)', color: 'var(--primary)' }}>
           {msg}
@@ -314,6 +363,84 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
         </div>
       )}
 
+      {/* PLAYERS */}
+      {tab === 'players' && (
+        <div className="flex flex-col gap-4">
+          {/* Add player */}
+          {league && (
+            <div className="card">
+              <h2 className="font-bold mb-4">הוסף שחקן ידנית</h2>
+              <div className="flex gap-2">
+                <input
+                  className="input flex-1"
+                  placeholder="שם שחקן"
+                  value={newPlayerName}
+                  onChange={e => setNewPlayerName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addPlayer()}
+                  dir="ltr"
+                />
+                <select
+                  className="input w-24 text-center"
+                  value={newPlayerPos}
+                  onChange={e => setNewPlayerPos(e.target.value)}
+                >
+                  {['PG', 'SG', 'SF', 'PF', 'C'].map(p => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+                <button
+                  className="btn btn-primary"
+                  onClick={addPlayer}
+                  disabled={!newPlayerName.trim() || loading === 'add_player'}
+                >
+                  {loading === 'add_player' ? '...' : '+ הוסף'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Player list */}
+          <div className="card">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-bold">רשימת שחקנים ({players.length})</h2>
+              <input
+                className="input text-sm w-40"
+                placeholder="חיפוש..."
+                value={playerFilter}
+                onChange={e => setPlayerFilter(e.target.value)}
+                dir="ltr"
+              />
+            </div>
+            <div className="flex flex-col gap-1 max-h-[500px] overflow-y-auto">
+              {players
+                .filter(p => !playerFilter || p.name.toLowerCase().includes(playerFilter.toLowerCase()))
+                .map(p => (
+                  <div key={p.id} className="flex items-center justify-between px-3 py-2 rounded" style={{ background: 'var(--background)' }}>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium" dir="ltr">{p.name}</span>
+                      {p.position && <span className="badge badge-blue text-xs">{p.position}</span>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`badge text-xs ${p.status === 'available' ? 'badge-green' : p.status === 'on_auction' ? 'badge-yellow' : 'badge-gray'}`}>
+                        {p.status === 'available' ? 'זמין' : p.status === 'on_auction' ? 'במכרז' : 'נדרפט'}
+                      </span>
+                      {p.status === 'available' && (
+                        <button
+                          className="btn btn-danger text-xs py-0.5 px-2"
+                          onClick={() => removePlayer(p.id, p.name)}
+                          disabled={loading === 'remove_' + p.id}
+                        >
+                          הסר
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* TEAMS */}
       {tab === 'teams' && (
         <div className="card">
@@ -422,6 +549,31 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
             <button className="btn btn-primary" onClick={saveLeague} disabled={loading === 'league'}>
               {loading === 'league' ? 'שומר...' : 'שמור הגדרות'}
             </button>
+          </div>
+
+          <div className="mt-6 pt-6" style={{ borderTop: '1px solid var(--border)' }}>
+            <h2 className="font-bold mb-3">הוסף מנהל ליגה</h2>
+            <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
+              המשתמש חייב להיות רשום במערכת לפני ההוספה.
+            </p>
+            <div className="flex gap-2">
+              <input
+                className="input flex-1"
+                type="email"
+                placeholder="אימייל המנהל"
+                value={adminEmail}
+                onChange={e => setAdminEmail(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addAdmin()}
+                dir="ltr"
+              />
+              <button
+                className="btn btn-primary"
+                onClick={addAdmin}
+                disabled={!adminEmail.trim() || loading === 'add_admin'}
+              >
+                {loading === 'add_admin' ? '...' : 'הוסף'}
+              </button>
+            </div>
           </div>
         </div>
       )}

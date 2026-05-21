@@ -20,7 +20,7 @@ export default async function AdminPage() {
       supabase.from('teams').select('*').order('priority_rank', { ascending: true, nullsFirst: false }),
       supabase.from('teams').select('*').eq('approved', false),
       supabase.from('auctions').select('*, player:players(*), bids(*,team:teams(name))').eq('status', 'active').maybeSingle(),
-      supabase.from('players').select('id, name, status, ranking').order('ranking', { ascending: true }),
+      supabase.from('players').select('id, name, status, ranking, position').order('ranking', { ascending: true }),
     ])
 
   return (
