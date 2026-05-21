@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 
 interface Props {
   leagueId: string
@@ -10,6 +10,15 @@ export default function ImportPlayers({ leagueId }: Props) {
   const [csvText, setCsvText] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = ev => setCsvText((ev.target?.result as string) ?? '')
+    reader.readAsText(file, 'UTF-8')
+  }
 
   async function handleImport() {
     setLoading(true)
@@ -52,12 +61,37 @@ export default function ImportPlayers({ leagueId }: Props) {
     <div className="card mt-4">
       <h2 className="font-bold mb-2">ייבוא שחקנים (CSV)</h2>
       <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
-        עמודות נדרשות: name, team, pos, rank, value, ppg, rpg, apg, spg, bpg
+        עמודות נדרשות: name — אופציונלי: pos, team, rank, value, ppg, rpg, apg, spg, bpg
       </p>
+      <div className="flex gap-2 mb-3">
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".csv,.txt"
+          className="hidden"
+          onChange={handleFile}
+        />
+        <button
+          type="button"
+          className="btn btn-outline flex-1"
+          onClick={() => fileRef.current?.click()}
+        >
+          בחר קובץ CSV
+        </button>
+        {csvText && (
+          <button
+            type="button"
+            className="btn btn-outline text-sm"
+            onClick={() => { setCsvText(''); setResult(''); if (fileRef.current) fileRef.current.value = '' }}
+          >
+            נקה
+          </button>
+        )}
+      </div>
       <textarea
         className="input font-mono text-xs"
         rows={6}
-        placeholder="name,team,pos,rank,value&#10;LeBron James,LAL,SF,10,45&#10;..."
+        placeholder="name,pos&#10;LeBron James,SF&#10;..."
         value={csvText}
         onChange={e => setCsvText(e.target.value)}
         dir="ltr"
