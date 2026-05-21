@@ -126,47 +126,68 @@ export default async function DashboardPage() {
         <DraftCountdown targetDate={typedLeague.draft_start_time} />
       )}
 
-      {/* Priority table */}
-      <div className="card mt-4">
-        <h2 className="font-bold mb-3">סדר העלאות</h2>
-        {typedTeams.filter(t => !t.is_complete && t.priority_rank !== null).length === 0 ? (
-          <p style={{ color: 'var(--muted)' }}>הגרלה טרם בוצעה</p>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {typedTeams
-              .filter(t => !t.is_complete && t.priority_rank !== null)
-              .sort((a, b) => (a.priority_rank ?? 99) - (b.priority_rank ?? 99))
-              .map((team, i, arr) => {
-                const isFirst = i === 0
-                const isLast = i === arr.length - 1
-                const isMe = team.user_id === user?.id
-                return (
-                  <div
-                    key={team.id}
-                    className="flex items-center justify-between px-3 py-2 rounded-lg"
-                    style={{
-                      background: isMe ? 'rgba(99,102,241,0.1)' : isFirst ? 'rgba(234,179,8,0.08)' : 'var(--background)',
-                      border: isMe ? '1px solid rgba(99,102,241,0.3)' : isFirst ? '1px solid rgba(234,179,8,0.3)' : '1px solid transparent',
-                    }}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-bold w-6 text-center" style={{ color: isFirst ? 'var(--warning)' : 'var(--muted)' }}>
-                        {i + 1}
-                      </span>
-                      <span className="font-medium">{team.name}</span>
-                      {isFirst && <span className="badge badge-yellow text-xs">עולה הבא</span>}
-
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+        {/* Nomination order */}
+        <div className="card">
+          <h2 className="font-bold mb-1">סדר העלאות</h2>
+          <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>מי מעלה שחקן למכרז עכשיו</p>
+          {typedTeams.filter(t => !t.is_complete && t.priority_rank !== null).length === 0 ? (
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>הגרלה טרם בוצעה</p>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {typedTeams
+                .filter(t => !t.is_complete && t.priority_rank !== null)
+                .sort((a, b) => (a.priority_rank ?? 99) - (b.priority_rank ?? 99))
+                .map((team, i) => {
+                  const isFirst = i === 0
+                  const isMe = team.user_id === user?.id
+                  return (
+                    <div key={team.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm"
+                      style={{
+                        background: isMe ? 'rgba(99,102,241,0.1)' : isFirst ? 'rgba(234,179,8,0.08)' : 'var(--background)',
+                        border: isMe ? '1px solid rgba(99,102,241,0.3)' : isFirst ? '1px solid rgba(234,179,8,0.25)' : '1px solid transparent',
+                      }}>
+                      <span className="font-bold w-5 text-center" style={{ color: isFirst ? 'var(--warning)' : 'var(--muted)' }}>{i + 1}</span>
+                      <span className="font-medium flex-1">{team.name}</span>
+                      {isFirst && <span className="badge badge-yellow text-xs">הבא</span>}
                       {isMe && <span className="badge badge-blue text-xs">אתה</span>}
                     </div>
-                    <div className="flex items-center gap-4 text-sm" style={{ color: 'var(--muted)' }}>
-                      <span>{team.player_count} שחקנים</span>
-                      <span style={{ color: 'var(--success)' }}>${team.budget_remaining}</span>
+                  )
+                })}
+            </div>
+          )}
+        </div>
+
+        {/* Tiebreak priority order */}
+        <div className="card">
+          <h2 className="font-bold mb-1">סדר פריוריטי</h2>
+          <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>מי זוכה בהצעות שוות</p>
+          {typedTeams.filter(t => t.tiebreak_rank !== null).length === 0 ? (
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>הגרלה טרם בוצעה</p>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {typedTeams
+                .filter(t => t.tiebreak_rank !== null)
+                .sort((a, b) => (a.tiebreak_rank ?? 99) - (b.tiebreak_rank ?? 99))
+                .map((team, i) => {
+                  const isFirst = i === 0
+                  const isMe = team.user_id === user?.id
+                  return (
+                    <div key={team.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm"
+                      style={{
+                        background: isMe ? 'rgba(99,102,241,0.1)' : 'var(--background)',
+                        border: isMe ? '1px solid rgba(99,102,241,0.3)' : '1px solid transparent',
+                      }}>
+                      <span className="font-bold w-5 text-center" style={{ color: isFirst ? 'var(--success)' : 'var(--muted)' }}>{i + 1}</span>
+                      <span className="font-medium flex-1">{team.name}</span>
+                      {team.is_complete && <span className="badge badge-gray text-xs">הושלם</span>}
+                      {isMe && <span className="badge badge-blue text-xs">אתה</span>}
                     </div>
-                  </div>
-                )
-              })}
-          </div>
-        )}
+                  )
+                })}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

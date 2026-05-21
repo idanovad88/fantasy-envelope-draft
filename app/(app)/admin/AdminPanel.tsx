@@ -135,7 +135,7 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
     const approvedTeams = teams.filter(t => t.approved && !t.is_complete)
     const shuffled = [...approvedTeams].sort(() => Math.random() - 0.5)
     const updates = shuffled.map((t, i) =>
-      supabase.from('teams').update({ priority_rank: i + 1, updated_at: new Date().toISOString() }).eq('id', t.id)
+      supabase.from('teams').update({ priority_rank: i + 1, tiebreak_rank: i + 1, updated_at: new Date().toISOString() }).eq('id', t.id)
     )
     await Promise.all(updates)
     await setLeagueStatus('active')

@@ -30,6 +30,7 @@ export interface Team {
   player_count: number
   is_complete: boolean
   priority_rank: number | null
+  tiebreak_rank: number | null
   approved: boolean
   created_at: string
   updated_at: string
