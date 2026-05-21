@@ -4,6 +4,7 @@ import BidForm from '@/components/BidForm'
 import Countdown from '@/components/Countdown'
 import AuctionHistory from '@/components/AuctionHistory'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
+import BidRevealOverlay from '@/components/BidRevealOverlay'
 import type { Auction, Team, League } from '@/types'
 
 export const dynamic = 'force-dynamic'
@@ -13,7 +14,7 @@ export default async function AuctionPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const [{ data: league }, { data: myTeam }, { data: auctions }, { data: myBids }] =
+  const [{ data: league }, { data: myTeam }, { data: auctions }, { data: myBids }, { data: recentCompleted }] =
     await Promise.all([
       supabase.from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle(),
       supabase.from('teams').select('*').eq('user_id', user!.id).maybeSingle(),
@@ -23,10 +24,27 @@ export default async function AuctionPage() {
         .order('scheduled_start', { ascending: false })
         .limit(20),
       supabase.from('bids').select('*').eq('team_id', (await supabase.from('teams').select('id').eq('user_id', user!.id).maybeSingle()).data?.id ?? ''),
+      supabase.from('auctions')
+        .select('id, updated_at, winning_team_id, winning_bid, player:players(name)')
+        .eq('status', 'completed')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ])
 
   const typedLeague = league as League | null
   const typedMyTeam = myTeam as Team | null
+
+  const REVEAL_WINDOW_MS = 60000
+  const recentlyCompleted = recentCompleted && (
+    Date.now() - new Date(recentCompleted.updated_at).getTime() < REVEAL_WINDOW_MS
+  ) ? {
+    id: recentCompleted.id,
+    updatedAt: recentCompleted.updated_at,
+    winningTeamId: recentCompleted.winning_team_id,
+    winningBid: recentCompleted.winning_bid,
+    playerName: (recentCompleted.player as unknown as { name: string } | null)?.name ?? 'שחקן',
+  } : undefined
   const typedAuctions = (auctions || []) as (Auction & { player: { name: string; position: string | null; nba_team: string | null }; nominating_team: { name: string } | null; winning_team: { name: string } | null; bids: { id: string; team_id: string; amount: number; team: { name: string } | null }[] })[]
   const myBidMap = Object.fromEntries((myBids || []).map(b => [b.auction_id, b.amount]))
 
@@ -80,6 +98,13 @@ export default async function AuctionPage() {
       )}
 
       {typedLeague && <RealtimeRefresher leagueId={typedLeague.id} />}
+      {typedLeague && (
+        <BidRevealOverlay
+          leagueId={typedLeague.id}
+          activeAuctionId={activeAuction?.id ?? null}
+          recentlyCompleted={recentlyCompleted}
+        />
+      )}
     </div>
   )
 }
