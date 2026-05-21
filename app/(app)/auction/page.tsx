@@ -3,6 +3,7 @@ import { formatTime } from '@/lib/utils'
 import BidForm from '@/components/BidForm'
 import Countdown from '@/components/Countdown'
 import AuctionHistory from '@/components/AuctionHistory'
+import RealtimeRefresher from '@/components/RealtimeRefresher'
 import type { Auction, Team, League } from '@/types'
 
 export const dynamic = 'force-dynamic'
@@ -77,6 +78,8 @@ export default async function AuctionPage() {
       {pastAuctions.length > 0 && (
         <AuctionHistory auctions={pastAuctions} />
       )}
+
+      {typedLeague && <RealtimeRefresher leagueId={typedLeague.id} />}
     </div>
   )
 }

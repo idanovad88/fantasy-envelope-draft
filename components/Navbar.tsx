@@ -10,7 +10,6 @@ const NAV = [
   { href: '/auction', label: 'מכרז', icon: ShoppingBag },
   { href: '/players', label: 'שחקנים', icon: List },
   { href: '/teams', label: 'קבוצות', icon: Users },
-  { href: '/join', label: 'הצטרפות', icon: Users },
 ]
 
 interface NavbarProps {
