@@ -5,15 +5,18 @@ import { createClient } from '@/lib/supabase/client'
 import { formatDateTime, formatTime } from '@/lib/utils'
 import type { League, Team, Auction } from '@/types'
 
+type PastAuction = { id: string; scheduled_start: string; winning_bid: number | null; player: { name: string } | null; winning_team: { name: string } | null }
+
 interface Props {
   league: League | null
   teams: Team[]
   pendingTeams: Team[]
   activeAuction: (Auction & { player: { name: string }; bids: { id: string }[] }) | null
   players: { id: string; name: string; status: string; ranking: number | null; position: string | null }[]
+  pastAuctions: PastAuction[]
 }
 
-export default function AdminPanel({ league, teams, pendingTeams, activeAuction, players }: Props) {
+export default function AdminPanel({ league, teams, pendingTeams, activeAuction, players, pastAuctions }: Props) {
   const supabase = createClient()
   const [tab, setTab] = useState<'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league'>('overview')
   const [loading, setLoading] = useState('')
@@ -322,6 +325,34 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
                   style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}>
                   {loading === 'cancel_' + activeAuction.id ? '...' : '✕ בטל מכרז'}
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* Past auctions */}
+          {pastAuctions.length > 0 && (
+            <div className="card">
+              <h2 className="font-bold mb-3">היסטוריית מכרזים</h2>
+              <div className="flex flex-col gap-1">
+                {pastAuctions.map(a => (
+                  <div key={a.id} className="flex items-center justify-between py-2 border-t text-sm" style={{ borderColor: 'var(--border)' }}>
+                    <div>
+                      <span className="font-medium">{a.player?.name ?? '—'}</span>
+                      {a.winning_team && (
+                        <span style={{ color: 'var(--muted)' }}> · {a.winning_team.name} · <span style={{ color: 'var(--success)' }}>${a.winning_bid}</span></span>
+                      )}
+                      {!a.winning_team && <span style={{ color: 'var(--muted)' }}> · לא נרכש</span>}
+                    </div>
+                    <button
+                      className="text-xs px-2 py-1 rounded"
+                      style={{ color: 'var(--danger)', border: '1px solid var(--danger)' }}
+                      onClick={() => cancelAuction(a.id)}
+                      disabled={!!loading}
+                    >
+                      בטל
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
           )}

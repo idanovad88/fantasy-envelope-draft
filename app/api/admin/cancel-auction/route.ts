@@ -14,13 +14,31 @@ export async function POST(req: NextRequest) {
 
   const { data: auction } = await supabase
     .from('auctions')
-    .select('player_id, nominating_team_id')
+    .select('player_id, nominating_team_id, status, winning_team_id, winning_bid')
     .eq('id', auctionId)
     .maybeSingle()
 
   if (!auction) return NextResponse.json({ error: 'Auction not found' }, { status: 404 })
 
-  // Delete all bids for this auction (including auto $1)
+  // If already completed and had a winner — refund budget and fix player count
+  if (auction.status === 'completed' && auction.winning_team_id && auction.winning_bid) {
+    const { data: team } = await supabase
+      .from('teams')
+      .select('budget_remaining, player_count')
+      .eq('id', auction.winning_team_id)
+      .maybeSingle()
+
+    if (team) {
+      await supabase.from('teams').update({
+        budget_remaining: team.budget_remaining + auction.winning_bid,
+        player_count: Math.max(0, team.player_count - 1),
+        is_complete: false,
+        updated_at: new Date().toISOString(),
+      }).eq('id', auction.winning_team_id)
+    }
+  }
+
+  // Delete all bids
   await supabase.from('bids').delete().eq('auction_id', auctionId)
 
   // Return player to available pool
@@ -28,10 +46,8 @@ export async function POST(req: NextRequest) {
     .update({ status: 'available', drafted_by_team_id: null, draft_price: null })
     .eq('id', auction.player_id)
 
-  // Mark auction as cancelled
-  await supabase.from('auctions')
-    .update({ status: 'completed', updated_at: new Date().toISOString() })
-    .eq('id', auctionId)
+  // Delete the auction record entirely
+  await supabase.from('auctions').delete().eq('id', auctionId)
 
   return NextResponse.json({ ok: true })
 }
