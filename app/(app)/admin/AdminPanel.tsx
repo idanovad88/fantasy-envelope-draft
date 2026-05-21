@@ -24,6 +24,7 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
   const [numTeams, setNumTeams] = useState(league?.num_teams ?? 12)
   const [playersPerTeam, setPlayersPerTeam] = useState(league?.players_per_team ?? 13)
   const [budgetPerTeam, setBudgetPerTeam] = useState(league?.budget_per_team ?? 200)
+  const [joinCode, setJoinCode] = useState(league?.join_code ?? '')
 
   // Auction nomination state
   const [selectedPlayer, setSelectedPlayer] = useState('')
@@ -36,13 +37,27 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
 
   const availablePlayers = players.filter(p => p.status === 'available')
 
+  function generateCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    const code = Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+    setJoinCode(code)
+  }
+
   async function saveLeague() {
     setLoading('league')
+    const payload = {
+      name: leagueName,
+      num_teams: numTeams,
+      players_per_team: playersPerTeam,
+      budget_per_team: budgetPerTeam,
+      join_code: joinCode.trim().toUpperCase() || null,
+      updated_at: new Date().toISOString(),
+    }
     if (league) {
-      await supabase.from('leagues').update({ name: leagueName, num_teams: numTeams, players_per_team: playersPerTeam, budget_per_team: budgetPerTeam, updated_at: new Date().toISOString() }).eq('id', league.id)
+      await supabase.from('leagues').update(payload).eq('id', league.id)
     } else {
       const { data: { user } } = await supabase.auth.getUser()
-      await supabase.from('leagues').insert({ name: leagueName, num_teams: numTeams, players_per_team: playersPerTeam, budget_per_team: budgetPerTeam, created_by: user?.id })
+      await supabase.from('leagues').insert({ ...payload, created_by: user?.id })
     }
     setMsg('הליגה נשמרה')
     setLoading('')
@@ -381,6 +396,29 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
                 <input type="number" className="input text-center" value={budgetPerTeam} onChange={e => setBudgetPerTeam(Number(e.target.value))} min={1} dir="ltr" />
               </div>
             </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1.5">קוד הצטרפות לליגה</label>
+              <div className="flex gap-2">
+                <input
+                  className="input text-center font-bold tracking-widest uppercase flex-1"
+                  placeholder="ABC123"
+                  value={joinCode}
+                  onChange={e => setJoinCode(e.target.value.toUpperCase())}
+                  maxLength={10}
+                  dir="ltr"
+                />
+                <button type="button" className="btn btn-outline" onClick={generateCode}>
+                  🎲 צור
+                </button>
+              </div>
+              {joinCode && (
+                <p className="text-xs mt-1.5" style={{ color: 'var(--muted)' }}>
+                  שתף את הקוד <strong style={{ color: 'var(--primary)' }}>{joinCode}</strong> עם המשתתפים — יכנסו דרך /join
+                </p>
+              )}
+            </div>
+
             <button className="btn btn-primary" onClick={saveLeague} disabled={loading === 'league'}>
               {loading === 'league' ? 'שומר...' : 'שמור הגדרות'}
             </button>
