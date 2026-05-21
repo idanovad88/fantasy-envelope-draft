@@ -20,11 +20,7 @@ export default function DraftCountdown({ targetDate }: { targetDate: string }) {
     return () => clearInterval(timer)
   }, [targetDate])
 
-  if (!cd) return (
-    <div className="card mt-4 text-center" style={{ borderColor: 'var(--success)' }}>
-      <p className="font-bold text-lg" style={{ color: 'var(--success)' }}>הדראפט התחיל!</p>
-    </div>
-  )
+  if (!cd) return null
 
   const units = [
     { value: cd.days, label: 'ימים' },
