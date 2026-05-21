@@ -4,6 +4,7 @@ import { formatTime } from '@/lib/utils'
 import type { League, Team, Auction } from '@/types'
 import DraftCountdown from '@/components/DraftCountdown'
 import BidForm from '@/components/BidForm'
+import RealtimeRefresher from '@/components/RealtimeRefresher'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -110,9 +111,13 @@ export default async function DashboardPage() {
               </Link>
             </div>
           ) : (
-            <div className="text-center py-6" style={{ color: 'var(--muted)' }}>
-              <p>הקבוצה שלך טרם אושרה</p>
-              <p className="text-sm mt-1">פנה לאדמין</p>
+            <div className="text-center py-6">
+              <p className="text-3xl mb-3">🏀</p>
+              <p className="font-medium mb-4">ברוך הבא!</p>
+              <div className="flex flex-col gap-2">
+                <Link href="/join" className="btn btn-primary">הצטרף לליגה קיימת</Link>
+                <Link href="/join?tab=create" className="btn btn-outline">הקם ליגה חדשה</Link>
+              </div>
             </div>
           )}
         </div>
@@ -122,6 +127,8 @@ export default async function DashboardPage() {
       {typedLeague?.draft_start_time && ['setup', 'lottery'].includes(typedLeague.status) && (
         <DraftCountdown targetDate={typedLeague.draft_start_time} />
       )}
+
+      {typedLeague && <RealtimeRefresher leagueId={typedLeague.id} />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
         {/* Nomination order */}

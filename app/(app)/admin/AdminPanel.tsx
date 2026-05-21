@@ -14,9 +14,10 @@ interface Props {
   activeAuction: (Auction & { player: { name: string }; bids: { id: string }[] }) | null
   players: { id: string; name: string; status: string; ranking: number | null; position: string | null }[]
   pastAuctions: PastAuction[]
+  leagueCreators: string[]
 }
 
-export default function AdminPanel({ league, teams, pendingTeams, activeAuction, players, pastAuctions }: Props) {
+export default function AdminPanel({ league, teams, pendingTeams, activeAuction, players, pastAuctions, leagueCreators }: Props) {
   const supabase = createClient()
   const [tab, setTab] = useState<'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league'>('overview')
   const [loading, setLoading] = useState('')
@@ -40,6 +41,9 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
 
   // Admin management state
   const [adminEmail, setAdminEmail] = useState('')
+
+  // League creator whitelist state
+  const [creatorEmail, setCreatorEmail] = useState('')
 
   // Reveal time edit state
   const [newRevealTime, setNewRevealTime] = useState(() => {
@@ -81,6 +85,23 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
     await supabase.from('players').delete().eq('id', playerId)
     setMsg(`${name} הוסר`)
     setLoading('')
+    window.location.reload()
+  }
+
+  async function addCreator() {
+    if (!creatorEmail.trim()) return
+    setLoading('add_creator')
+    const { error } = await supabase.from('league_creator_whitelist').insert({ email: creatorEmail.trim().toLowerCase() })
+    if (error) setMsg('שגיאה: ' + error.message)
+    else { setMsg('מייל נוסף לרשימה'); setCreatorEmail('') }
+    setLoading('')
+    window.location.reload()
+  }
+
+  async function removeCreator(email: string) {
+    if (!confirm(`להסיר ${email} מהרשימה?`)) return
+    await supabase.from('league_creator_whitelist').delete().eq('email', email)
+    setMsg('מייל הוסר')
     window.location.reload()
   }
 
@@ -684,6 +705,47 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
                 disabled={!adminEmail.trim() || loading === 'add_admin'}
               >
                 {loading === 'add_admin' ? '...' : 'הוסף'}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-6 pt-6" style={{ borderTop: '1px solid var(--border)' }}>
+            <h2 className="font-bold mb-1">מורשים להקמת ליגה</h2>
+            <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
+              מיילים ברשימה יוכלו להקים ליגה חדשה עצמאית.
+            </p>
+            {leagueCreators.length > 0 && (
+              <div className="flex flex-col gap-1 mb-3">
+                {leagueCreators.map(email => (
+                  <div key={email} className="flex items-center justify-between px-3 py-2 rounded text-sm" style={{ background: 'var(--background)' }}>
+                    <span dir="ltr">{email}</span>
+                    <button
+                      className="text-xs px-2 py-0.5 rounded"
+                      style={{ color: 'var(--danger)', border: '1px solid var(--danger)' }}
+                      onClick={() => removeCreator(email)}
+                    >
+                      הסר
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input
+                className="input flex-1"
+                type="email"
+                placeholder="אימייל להוספה"
+                value={creatorEmail}
+                onChange={e => setCreatorEmail(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addCreator()}
+                dir="ltr"
+              />
+              <button
+                className="btn btn-primary"
+                onClick={addCreator}
+                disabled={!creatorEmail.trim() || loading === 'add_creator'}
+              >
+                {loading === 'add_creator' ? '...' : 'הוסף'}
               </button>
             </div>
           </div>

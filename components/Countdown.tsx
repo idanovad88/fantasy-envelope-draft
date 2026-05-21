@@ -1,15 +1,26 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { getCountdown } from '@/lib/utils'
 
 export default function Countdown({ targetDate, label }: { targetDate: string; label: string }) {
   const [cd, setCd] = useState(getCountdown(targetDate))
+  const router = useRouter()
+  const refreshedRef = useRef(false)
 
   useEffect(() => {
-    const timer = setInterval(() => setCd(getCountdown(targetDate)), 1000)
+    refreshedRef.current = false
+    const timer = setInterval(() => {
+      const newCd = getCountdown(targetDate)
+      setCd(newCd)
+      if (!newCd && !refreshedRef.current) {
+        refreshedRef.current = true
+        router.refresh()
+      }
+    }, 1000)
     return () => clearInterval(timer)
-  }, [targetDate])
+  }, [targetDate, router])
 
   if (!cd) return <span className="badge badge-red">הסתיים</span>
 
