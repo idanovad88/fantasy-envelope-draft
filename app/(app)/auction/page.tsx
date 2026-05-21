@@ -1,7 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
-import { formatTime, formatDateTime } from '@/lib/utils'
+import { formatTime } from '@/lib/utils'
 import BidForm from '@/components/BidForm'
 import Countdown from '@/components/Countdown'
+import AuctionHistory from '@/components/AuctionHistory'
 import type { Auction, Team, League } from '@/types'
 
 export const dynamic = 'force-dynamic'
@@ -16,7 +17,7 @@ export default async function AuctionPage() {
       supabase.from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle(),
       supabase.from('teams').select('*').eq('user_id', user!.id).maybeSingle(),
       supabase.from('auctions')
-        .select('*, player:players(*), nominating_team:teams!nominating_team_id(name), winning_team:teams!winning_team_id(name)')
+        .select('*, player:players(*), nominating_team:teams!nominating_team_id(name), winning_team:teams!winning_team_id(name), bids(*, team:teams(name))')
         .in('status', ['active', 'revealed', 'completed'])
         .order('scheduled_start', { ascending: false })
         .limit(20),
@@ -25,7 +26,7 @@ export default async function AuctionPage() {
 
   const typedLeague = league as League | null
   const typedMyTeam = myTeam as Team | null
-  const typedAuctions = (auctions || []) as (Auction & { player: { name: string; position: string | null; nba_team: string | null }; nominating_team: { name: string } | null; winning_team: { name: string } | null })[]
+  const typedAuctions = (auctions || []) as (Auction & { player: { name: string; position: string | null; nba_team: string | null }; nominating_team: { name: string } | null; winning_team: { name: string } | null; bids: { id: string; team_id: string; amount: number; team: { name: string } | null }[] })[]
   const myBidMap = Object.fromEntries((myBids || []).map(b => [b.auction_id, b.amount]))
 
   const activeAuction = typedAuctions.find(a => a.status === 'active')
@@ -74,37 +75,7 @@ export default async function AuctionPage() {
 
       {/* Past auctions */}
       {pastAuctions.length > 0 && (
-        <div>
-          <h2 className="font-bold mb-3">היסטוריית מכרזים</h2>
-          <div className="flex flex-col gap-2">
-            {pastAuctions.map(auction => (
-              <div key={auction.id} className="card flex items-center justify-between">
-                <div>
-                  <p className="font-medium">{auction.player?.name}</p>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
-                    {formatDateTime(auction.scheduled_start)}
-                    {auction.nominating_team && ` · ${auction.nominating_team.name}`}
-                  </p>
-                </div>
-                <div className="text-left">
-                  {auction.winning_team ? (
-                    <>
-                      <p className="font-bold" style={{ color: 'var(--success)' }}>${auction.winning_bid}</p>
-                      <p className="text-xs" style={{ color: 'var(--muted)' }}>{auction.winning_team.name}</p>
-                      {auction.tie_broken_by_priority && (
-                        <span className="badge badge-yellow text-xs">פריוריטי</span>
-                      )}
-                    </>
-                  ) : auction.status === 'revealed' ? (
-                    <span className="badge badge-yellow">נחשף</span>
-                  ) : (
-                    <span className="badge badge-gray">לא נרכש</span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <AuctionHistory auctions={pastAuctions} />
       )}
     </div>
   )
