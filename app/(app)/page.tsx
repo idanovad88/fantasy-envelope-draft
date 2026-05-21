@@ -44,7 +44,7 @@ export default async function DashboardPage() {
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
-              <p className="text-2xl font-bold">{typedTeams.filter(t => t.approved).length}</p>
+              <p className="text-2xl font-bold">{typedTeams.filter(t => t.approved).length}/{typedLeague.num_teams}</p>
               <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>הצטרפו</p>
             </div>
             <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
