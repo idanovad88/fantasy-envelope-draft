@@ -41,6 +41,12 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
   // Admin management state
   const [adminEmail, setAdminEmail] = useState('')
 
+  // Reveal time edit state
+  const [newRevealTime, setNewRevealTime] = useState(() => {
+    if (!activeAuction?.reveal_time) return ''
+    return new Date(activeAuction.reveal_time).toISOString().slice(0, 16)
+  })
+
   // Auction nomination state
   const [selectedPlayer, setSelectedPlayer] = useState('')
   const [selectedNominator, setSelectedNominator] = useState('')
@@ -185,6 +191,19 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
     window.location.reload()
   }
 
+  async function updateRevealTime() {
+    if (!activeAuction || !newRevealTime) return
+    setLoading('reveal_time')
+    const { error } = await supabase
+      .from('auctions')
+      .update({ reveal_time: new Date(newRevealTime).toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', activeAuction.id)
+    if (error) setMsg('שגיאה: ' + error.message)
+    else setMsg('זמן הסגירה עודכן!')
+    setLoading('')
+    window.location.reload()
+  }
+
   async function revealAuction(auctionId: string) {
     setLoading('reveal_' + auctionId)
     await supabase.rpc('resolve_auction', { p_auction_id: auctionId })
@@ -309,12 +328,33 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
               </p>
 
               {/* Bid count only — amounts hidden until reveal */}
-              <div className="mb-4">
+              <div className="mb-3">
                 <p className="text-sm" style={{ color: 'var(--muted)' }}>
                   הצעות שהוגשו: <strong style={{ color: 'var(--text)' }}>
                     {((activeAuction as { bids?: unknown[] }).bids || []).length}
                   </strong>
                 </p>
+              </div>
+
+              {/* Edit reveal time */}
+              <div className="mb-4">
+                <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted)' }}>שנה זמן סגירה</label>
+                <div className="flex gap-2">
+                  <input
+                    type="datetime-local"
+                    className="input text-sm flex-1"
+                    value={newRevealTime}
+                    onChange={e => setNewRevealTime(e.target.value)}
+                    dir="ltr"
+                  />
+                  <button
+                    className="btn btn-outline text-sm"
+                    onClick={updateRevealTime}
+                    disabled={!!loading || !newRevealTime}
+                  >
+                    {loading === 'reveal_time' ? '...' : 'עדכן'}
+                  </button>
+                </div>
               </div>
 
               <div className="flex gap-2">
