@@ -62,15 +62,5 @@ export async function POST(req: NextRequest) {
 
   await supabase.from('players').update({ status: 'on_auction' }).eq('id', player_id)
 
-  // Auto $1 bid for the nominating team (only if there is one)
-  if (!nominatingTeamId) return NextResponse.json({ success: true })
-  const { error: bidErr } = await supabase.from('bids').insert({
-    auction_id: auction.id,
-    team_id: nominatingTeamId,
-    amount: 1,
-  })
-
-  if (bidErr) return NextResponse.json({ error: bidErr.message }, { status: 500 })
-
   return NextResponse.json({ success: true })
 }
