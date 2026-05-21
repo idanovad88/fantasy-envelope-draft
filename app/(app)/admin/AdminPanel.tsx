@@ -492,7 +492,16 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
       {/* TEAMS */}
       {tab === 'teams' && (
         <div className="card">
-          <h2 className="font-bold mb-4">ניהול קבוצות</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-bold">ניהול קבוצות</h2>
+            <a
+              href="/api/admin/export-teams"
+              download
+              className="btn btn-outline text-sm"
+            >
+              ⬇ ייצא לאקסל
+            </a>
+          </div>
           <div className="flex flex-col gap-2">
             {teams.map(team => (
               <div key={team.id} className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--background)' }}>
