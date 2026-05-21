@@ -6,18 +6,20 @@ import { formatDateTime, formatTime } from '@/lib/utils'
 import type { League, Team, Auction } from '@/types'
 
 type PastAuction = { id: string; scheduled_start: string; winning_bid: number | null; player: { name: string } | null; winning_team: { name: string } | null }
+type ScheduledAuction = { id: string; scheduled_start: string; reveal_time: string; player: { name: string } | null }
 
 interface Props {
   league: League | null
   teams: Team[]
   pendingTeams: Team[]
   activeAuction: (Auction & { player: { name: string }; bids: { id: string }[] }) | null
+  scheduledAuction: ScheduledAuction | null
   players: { id: string; name: string; status: string; ranking: number | null; position: string | null }[]
   pastAuctions: PastAuction[]
   leagueCreators: string[]
 }
 
-export default function AdminPanel({ league, teams, pendingTeams, activeAuction, players, pastAuctions, leagueCreators }: Props) {
+export default function AdminPanel({ league, teams, pendingTeams, activeAuction, scheduledAuction, players, pastAuctions, leagueCreators }: Props) {
   const supabase = createClient()
   const [tab, setTab] = useState<'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league'>('overview')
   const [loading, setLoading] = useState('')
@@ -55,6 +57,9 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
   const [selectedPlayer, setSelectedPlayer] = useState('')
   const [selectedNominator, setSelectedNominator] = useState('')
   const [nominationTime, setNominationTime] = useState(() => {
+    if (activeAuction?.reveal_time) {
+      return new Date(activeAuction.reveal_time).toISOString().slice(0, 16)
+    }
     const d = new Date()
     d.setMinutes(0, 0, 0)
     return d.toISOString().slice(0, 16)
@@ -183,13 +188,25 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
     if (!league || !selectedPlayer || !selectedNominator) return
     setLoading('nominate')
 
-    const scheduledStart = new Date(nominationTime + ':00')
+    // If active auction exists, schedule as pending starting at its reveal_time
+    const isScheduled = !!activeAuction
+
+    if (isScheduled && scheduledAuction) {
+      setMsg('כבר קיים מכרז מתוזמן — לא ניתן לתזמן שניים')
+      setLoading('')
+      return
+    }
+
+    const scheduledStart = isScheduled
+      ? new Date(activeAuction!.reveal_time)
+      : new Date(nominationTime + ':00')
     const revealMinutes = league.reveal_before_minutes ?? 30
     const nextNomination = new Date(scheduledStart.getTime() + league.nomination_interval_hours * 60 * 60 * 1000)
     const revealTime = new Date(nextNomination.getTime() - revealMinutes * 60 * 1000)
 
     const existingCount = await supabase.from('auctions').select('id', { count: 'exact' }).eq('league_id', league.id)
     const slotNum = (existingCount.count ?? 0) + 1
+    const auctionStatus = isScheduled ? 'pending' : 'active'
 
     const { error: auctionErr } = await supabase.from('auctions').insert({
       league_id: league.id,
@@ -198,12 +215,15 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
       slot_number: slotNum,
       scheduled_start: scheduledStart.toISOString(),
       reveal_time: revealTime.toISOString(),
-      status: 'active',
+      status: auctionStatus,
     })
 
     if (!auctionErr) {
+      // Mark player on_auction immediately to prevent double-nomination
       await supabase.from('players').update({ status: 'on_auction' }).eq('id', selectedPlayer)
-      setMsg('שחקן הועלה למכרז!')
+      setMsg(isScheduled
+        ? `מכרז תוזמן לפתיחה ב-${formatDateTime(scheduledStart.toISOString())}`
+        : 'שחקן הועלה למכרז!')
       setSelectedPlayer('')
     } else {
       setMsg('שגיאה: ' + auctionErr.message)
@@ -228,6 +248,8 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
   async function revealAuction(auctionId: string) {
     setLoading('reveal_' + auctionId)
     await supabase.rpc('resolve_auction', { p_auction_id: auctionId })
+    // Activate next scheduled auction if its start time has arrived
+    await fetch('/api/admin/activate-pending-auction', { method: 'POST' })
     setMsg('תוצאות נחשפו והשחקן הועבר לקבוצה הזוכה')
     setLoading('')
     window.location.reload()
@@ -390,6 +412,24 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
             </div>
           )}
 
+          {/* Scheduled (pending) auction */}
+          {scheduledAuction && (
+            <div className="card" style={{ borderColor: 'var(--muted)', opacity: 0.85 }}>
+              <h2 className="font-bold mb-1">⏰ מכרז מתוזמן: {scheduledAuction.player?.name ?? '—'}</h2>
+              <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
+                פתיחה: {formatDateTime(scheduledAuction.scheduled_start)} · סגירה: {formatDateTime(scheduledAuction.reveal_time)}
+              </p>
+              <button
+                className="btn btn-outline text-sm"
+                style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}
+                onClick={() => cancelAuction(scheduledAuction.id)}
+                disabled={!!loading}
+              >
+                {loading === 'cancel_' + scheduledAuction.id ? '...' : '✕ בטל תזמון'}
+              </button>
+            </div>
+          )}
+
           {/* Past auctions */}
           {pastAuctions.length > 0 && (
             <div className="card">
@@ -420,9 +460,21 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
 
           {/* Nominate new player */}
           <div className="card">
-            <h2 className="font-bold mb-4">העלה שחקן חדש למכרז</h2>
+            <h2 className="font-bold mb-4">
+              {activeAuction ? 'תזמן שחקן למכרז הבא' : 'העלה שחקן חדש למכרז'}
+            </h2>
 
+            {scheduledAuction ? (
+              <p className="text-sm" style={{ color: 'var(--muted)' }}>
+                כבר קיים מכרז מתוזמן ({scheduledAuction.player?.name ?? '—'}). בטל אותו תחילה כדי לתזמן שחקן אחר.
+              </p>
+            ) : (
             <div className="flex flex-col gap-3">
+              {activeAuction && (
+                <div className="p-2 rounded-lg text-sm" style={{ background: 'rgba(99,102,241,0.1)', color: 'var(--primary)' }}>
+                  המכרז יפתח אוטומטית בסיום המכרז הנוכחי — {formatDateTime(activeAuction.reveal_time)}
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium mb-1.5">שחקן</label>
                 <select className="input" value={selectedPlayer} onChange={e => setSelectedPlayer(e.target.value)}>
@@ -443,25 +495,28 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
                 </select>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium mb-1.5">זמן פתיחת מכרז</label>
-                <input
-                  type="datetime-local"
-                  className="input"
-                  value={nominationTime}
-                  onChange={e => setNominationTime(e.target.value)}
-                  dir="ltr"
-                />
-              </div>
+              {!activeAuction && (
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">זמן פתיחת מכרז</label>
+                  <input
+                    type="datetime-local"
+                    className="input"
+                    value={nominationTime}
+                    onChange={e => setNominationTime(e.target.value)}
+                    dir="ltr"
+                  />
+                </div>
+              )}
 
               <button
                 className="btn btn-primary"
                 onClick={nominatePlayer}
                 disabled={!selectedPlayer || !!loading || !league}
               >
-                {loading === 'nominate' ? 'מעלה...' : '🚀 העלה למכרז'}
+                {loading === 'nominate' ? 'מעלה...' : activeAuction ? '⏰ תזמן למכרז הבא' : '🚀 העלה למכרז'}
               </button>
             </div>
+            )}
           </div>
         </div>
       )}

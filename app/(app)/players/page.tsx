@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import PlayerSearch from '@/components/PlayerSearch'
 import type { Player, League, Team } from '@/types'
-import { getMaxBid } from '@/lib/utils'
+import { getMaxBid, formatTime } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -12,7 +12,7 @@ export default async function PlayersPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const [{ data: players }, { data: league }, { data: myTeamRow }, { data: allTeams }, { data: activeAuction }, { data: adminRow }] =
+  const [{ data: players }, { data: league }, { data: myTeamRow }, { data: allTeams }, { data: activeAuction }, { data: pendingAuction }, { data: adminRow }] =
     await Promise.all([
       supabase.from('players')
         .select('*, drafting_team:teams!drafted_by_team_id(id, name)')
@@ -27,7 +27,8 @@ export default async function PlayersPage() {
         .eq('is_complete', false)
         .not('priority_rank', 'is', null)
         .order('priority_rank', { ascending: true }),
-      supabase.from('auctions').select('id').eq('status', 'active').maybeSingle(),
+      supabase.from('auctions').select('id, player_id').eq('status', 'active').maybeSingle(),
+      supabase.from('auctions').select('id, player_id, scheduled_start').eq('status', 'pending').maybeSingle(),
       user
         ? supabase.from('admin_users').select('role').eq('user_id', user.id).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
@@ -40,7 +41,11 @@ export default async function PlayersPage() {
   const isAdmin = !!adminRow
   const currentNominatorId = allTeams?.[0]?.id ?? null
   const isMyTurn = !!typedMyTeam && typedMyTeam.id === currentNominatorId && !typedMyTeam.is_complete
-  const canNominate = isMyTurn && typedLeague?.status === 'active' && !activeAuction && !!currentNominatorId
+  const hasBlockingAuction = !!activeAuction || !!pendingAuction
+  const canNominate = isMyTurn && typedLeague?.status === 'active' && !hasBlockingAuction && !!currentNominatorId
+  const activeAuctionPlayerId = (activeAuction as { player_id?: string } | null)?.player_id ?? null
+  const pendingAuctionPlayerId = (pendingAuction as { player_id?: string; scheduled_start?: string } | null)?.player_id ?? null
+  const pendingAuctionStart = (pendingAuction as { scheduled_start?: string } | null)?.scheduled_start ?? null
 
   const available = typedPlayers.filter(p => p.status === 'available')
   const onAuction = typedPlayers.filter(p => p.status === 'on_auction')
@@ -52,7 +57,12 @@ export default async function PlayersPage() {
         <h1 className="text-2xl font-bold">שחקנים</h1>
         <div className="flex gap-2 text-sm">
           <span className="badge badge-green">{available.length} זמינים</span>
-          {onAuction.length > 0 && <span className="badge badge-yellow">{onAuction.length} במכרז</span>}
+          {onAuction.filter(p => p.id === activeAuctionPlayerId).length > 0 && (
+            <span className="badge badge-yellow">{onAuction.filter(p => p.id === activeAuctionPlayerId).length} במכרז</span>
+          )}
+          {pendingAuctionPlayerId && onAuction.some(p => p.id === pendingAuctionPlayerId) && (
+            <span className="badge badge-gray">1 מתוזמן</span>
+          )}
           <span className="badge badge-gray">{drafted.length} נרכשו</span>
         </div>
       </div>
@@ -65,7 +75,7 @@ export default async function PlayersPage() {
           </p>
         </div>
       )}
-      {isMyTurn && !canNominate && activeAuction && (
+      {isMyTurn && !canNominate && hasBlockingAuction && (
         <div className="card mb-4" style={{ borderColor: 'var(--warning)' }}>
           <p className="text-sm" style={{ color: 'var(--warning)' }}>
             זה התורך — אך יש מכרז פעיל כרגע. המתן לסיומו.
@@ -73,14 +83,21 @@ export default async function PlayersPage() {
         </div>
       )}
 
-      {/* Active auction highlight */}
-      {onAuction.map(p => (
-        <div key={p.id} className="card mb-4" style={{ borderColor: 'var(--warning)', borderWidth: 2 }}>
-          <span className="badge badge-yellow mb-2">במכרז עכשיו</span>
-          <p className="font-bold text-xl">{p.name}</p>
-          <p className="text-sm" style={{ color: 'var(--muted)' }}>{p.position} · {p.nba_team}</p>
-        </div>
-      ))}
+      {/* Active / scheduled auction highlight */}
+      {onAuction.map(p => {
+        const isPending = p.id === pendingAuctionPlayerId
+        return (
+          <div key={p.id} className="card mb-4" style={{ borderColor: isPending ? 'var(--muted)' : 'var(--warning)', borderWidth: 2 }}>
+            <span className={`badge ${isPending ? 'badge-gray' : 'badge-yellow'} mb-2`}>
+              {isPending && pendingAuctionStart
+                ? `מתוזמן — יפתח ב-${formatTime(pendingAuctionStart)}`
+                : 'במכרז עכשיו'}
+            </span>
+            <p className="font-bold text-xl">{p.name}</p>
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>{p.position} · {p.nba_team}</p>
+          </div>
+        )
+      })}
 
       {/* Available players */}
       <PlayerSearch

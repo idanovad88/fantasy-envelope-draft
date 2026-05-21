@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { formatTime } from '@/lib/utils'
+import { formatTime, formatDateTime } from '@/lib/utils'
 import BidForm from '@/components/BidForm'
 import Countdown from '@/components/Countdown'
 import AuctionHistory from '@/components/AuctionHistory'
@@ -20,7 +20,7 @@ export default async function AuctionPage() {
       supabase.from('teams').select('*').eq('user_id', user!.id).maybeSingle(),
       supabase.from('auctions')
         .select('*, player:players(*), nominating_team:teams!nominating_team_id(name), winning_team:teams!winning_team_id(name), bids(*, team:teams(name))')
-        .in('status', ['active', 'revealed', 'completed'])
+        .in('status', ['pending', 'active', 'revealed', 'completed'])
         .order('scheduled_start', { ascending: false })
         .limit(20),
       supabase.from('bids').select('*').eq('team_id', (await supabase.from('teams').select('id').eq('user_id', user!.id).maybeSingle()).data?.id ?? ''),
@@ -49,6 +49,7 @@ export default async function AuctionPage() {
   const myBidMap = Object.fromEntries((myBids || []).map(b => [b.auction_id, b.amount]))
 
   const activeAuction = typedAuctions.find(a => a.status === 'active')
+  const pendingAuction = typedAuctions.find(a => a.status === 'pending')
   const pastAuctions = typedAuctions.filter(a => a.status === 'revealed' || a.status === 'completed')
 
   return (
@@ -89,6 +90,29 @@ export default async function AuctionPage() {
         <div className="card mb-6 text-center py-8" style={{ color: 'var(--muted)' }}>
           <p className="text-4xl mb-2">🏀</p>
           <p>אין מכרז פעיל כרגע</p>
+        </div>
+      )}
+
+      {/* Pending (upcoming) auction */}
+      {pendingAuction && (
+        <div className="card mb-6" style={{ borderColor: 'var(--border)', opacity: 0.85 }}>
+          <div className="flex items-start justify-between mb-3">
+            <div>
+              <span className="badge badge-gray mb-2">⏰ המכרז הבא</span>
+              <h2 className="text-xl font-bold">{pendingAuction.player?.name}</h2>
+              <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
+                {pendingAuction.player?.position} · {pendingAuction.player?.nba_team}
+              </p>
+            </div>
+            <Countdown targetDate={pendingAuction.scheduled_start} label="לפתיחה" />
+          </div>
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>
+            פתיחת הגשות: <strong style={{ color: 'var(--text)' }}>{formatDateTime(pendingAuction.scheduled_start)}</strong>
+            {' · '}סגירה: <strong style={{ color: 'var(--text)' }}>{formatTime(pendingAuction.reveal_time)}</strong>
+          </p>
+          <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>
+            הגשת הצעות תיפתח עם תחילת המכרז
+          </p>
         </div>
       )}
 
