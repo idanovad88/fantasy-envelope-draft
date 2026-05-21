@@ -557,6 +557,7 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
                 type="datetime-local"
                 className="input"
                 value={draftStartTime}
+                min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
                 onChange={e => setDraftStartTime(e.target.value)}
                 dir="ltr"
               />
