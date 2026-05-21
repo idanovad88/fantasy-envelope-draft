@@ -128,7 +128,7 @@ export default async function DashboardPage() {
 
       {/* Priority table */}
       <div className="card mt-4">
-        <h2 className="font-bold mb-3">טבלת פריוריטי</h2>
+        <h2 className="font-bold mb-3">סדר העלאות</h2>
         {typedTeams.filter(t => !t.is_complete && t.priority_rank !== null).length === 0 ? (
           <p style={{ color: 'var(--muted)' }}>הגרלה טרם בוצעה</p>
         ) : (
@@ -136,28 +136,35 @@ export default async function DashboardPage() {
             {typedTeams
               .filter(t => !t.is_complete && t.priority_rank !== null)
               .sort((a, b) => (a.priority_rank ?? 99) - (b.priority_rank ?? 99))
-              .map((team, i) => (
-                <div
-                  key={team.id}
-                  className="flex items-center justify-between px-3 py-2 rounded-lg"
-                  style={{
-                    background: team.user_id === user?.id ? 'rgba(99,102,241,0.1)' : 'var(--background)',
-                    border: team.user_id === user?.id ? '1px solid rgba(99,102,241,0.3)' : '1px solid transparent',
-                  }}
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-bold w-6 text-center" style={{ color: i === 0 ? 'var(--warning)' : 'var(--muted)' }}>
-                      {team.priority_rank}
-                    </span>
-                    <span className="font-medium">{team.name}</span>
-                    {team.user_id === user?.id && <span className="badge badge-blue text-xs">אתה</span>}
+              .map((team, i, arr) => {
+                const isFirst = i === 0
+                const isLast = i === arr.length - 1
+                const isMe = team.user_id === user?.id
+                return (
+                  <div
+                    key={team.id}
+                    className="flex items-center justify-between px-3 py-2 rounded-lg"
+                    style={{
+                      background: isMe ? 'rgba(99,102,241,0.1)' : isFirst ? 'rgba(234,179,8,0.08)' : 'var(--background)',
+                      border: isMe ? '1px solid rgba(99,102,241,0.3)' : isFirst ? '1px solid rgba(234,179,8,0.3)' : '1px solid transparent',
+                    }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-bold w-6 text-center" style={{ color: isFirst ? 'var(--warning)' : 'var(--muted)' }}>
+                        {i + 1}
+                      </span>
+                      <span className="font-medium">{team.name}</span>
+                      {isFirst && <span className="badge badge-yellow text-xs">עולה הבא</span>}
+                      {isLast && !isFirst && <span className="text-xs" style={{ color: 'var(--muted)' }}>העלה אחרון</span>}
+                      {isMe && <span className="badge badge-blue text-xs">אתה</span>}
+                    </div>
+                    <div className="flex items-center gap-4 text-sm" style={{ color: 'var(--muted)' }}>
+                      <span>{team.player_count} שחקנים</span>
+                      <span style={{ color: 'var(--success)' }}>${team.budget_remaining}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-4 text-sm" style={{ color: 'var(--muted)' }}>
-                    <span>{team.player_count} שחקנים</span>
-                    <span style={{ color: 'var(--success)' }}>${team.budget_remaining}</span>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
           </div>
         )}
       </div>

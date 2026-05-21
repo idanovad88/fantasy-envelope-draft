@@ -38,7 +38,7 @@ export default async function PlayersPage() {
   const isAdmin = !!adminRow
   const currentNominatorId = allTeams?.[0]?.id ?? null
   const isMyTurn = !!typedMyTeam && typedMyTeam.id === currentNominatorId && !typedMyTeam.is_complete
-  const canNominate = (isMyTurn || isAdmin) && typedLeague?.status === 'active' && !activeAuction && !!currentNominatorId
+  const canNominate = isMyTurn && typedLeague?.status === 'active' && !activeAuction && !!currentNominatorId
 
   const available = typedPlayers.filter(p => p.status === 'available')
   const onAuction = typedPlayers.filter(p => p.status === 'on_auction')
