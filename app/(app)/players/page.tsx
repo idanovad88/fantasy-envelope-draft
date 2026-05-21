@@ -65,13 +65,6 @@ export default async function PlayersPage() {
           </p>
         </div>
       )}
-      {canNominate && (
-        <div className="card mb-4" style={{ borderColor: 'var(--success)', background: 'rgba(34,197,94,0.08)' }}>
-          <p className="font-bold" style={{ color: 'var(--success)' }}>
-            זה התורך! לחץ + ליד שחקן להעלאה למכרז ב-$1
-          </p>
-        </div>
-      )}
       {isMyTurn && !canNominate && activeAuction && (
         <div className="card mb-4" style={{ borderColor: 'var(--warning)' }}>
           <p className="text-sm" style={{ color: 'var(--warning)' }}>
