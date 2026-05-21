@@ -13,12 +13,13 @@ export async function POST(req: NextRequest) {
   const { auctionId } = await req.json()
   if (!auctionId) return NextResponse.json({ error: 'Missing auctionId' }, { status: 400 })
 
-  const { data: auction } = await supabase
+  const { data: auction, error: fetchErr } = await supabase
     .from('auctions')
     .select('player_id, nominating_team_id, status, winning_team_id, winning_bid')
     .eq('id', auctionId)
     .maybeSingle()
 
+  if (fetchErr) return NextResponse.json({ error: fetchErr.message }, { status: 500 })
   if (!auction) return NextResponse.json({ error: 'Auction not found' }, { status: 404 })
 
   // If already completed and had a winner — refund budget and fix player count
@@ -43,12 +44,16 @@ export async function POST(req: NextRequest) {
   await supabase.from('bids').delete().eq('auction_id', auctionId)
 
   // Return player to available pool
-  await supabase.from('players')
+  const { error: playerErr } = await supabase.from('players')
     .update({ status: 'available', drafted_by_team_id: null, draft_price: null })
     .eq('id', auction.player_id)
 
+  if (playerErr) return NextResponse.json({ error: 'שגיאה בעדכון שחקן: ' + playerErr.message }, { status: 500 })
+
   // Delete the auction record entirely
-  await supabase.from('auctions').delete().eq('id', auctionId)
+  const { error: deleteErr } = await supabase.from('auctions').delete().eq('id', auctionId)
+  if (deleteErr) return NextResponse.json({ error: 'שגיאה במחיקת מכרז: ' + deleteErr.message }, { status: 500 })
 
   return NextResponse.json({ ok: true })
 }
+
