@@ -184,16 +184,8 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
 
   async function revealAuction(auctionId: string) {
     setLoading('reveal_' + auctionId)
-    await supabase.from('auctions').update({ status: 'revealed', updated_at: new Date().toISOString() }).eq('id', auctionId)
-    setMsg('תוצאות נחשפו')
-    setLoading('')
-    window.location.reload()
-  }
-
-  async function resolveAuction(auctionId: string) {
-    setLoading('resolve_' + auctionId)
     await supabase.rpc('resolve_auction', { p_auction_id: auctionId })
-    setMsg('מכרז הוסדר')
+    setMsg('תוצאות נחשפו והשחקן הועבר לקבוצה הזוכה')
     setLoading('')
     window.location.reload()
   }
@@ -305,14 +297,9 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
                 </p>
               </div>
 
-              <div className="flex gap-2">
-                <button className="btn btn-primary flex-1" onClick={() => revealAuction(activeAuction.id)} disabled={!!loading}>
-                  👁 חשוף תוצאות
-                </button>
-                <button className="btn btn-success flex-1" onClick={() => resolveAuction(activeAuction.id)} disabled={!!loading}>
-                  ✅ הסדר מכרז
-                </button>
-              </div>
+              <button className="btn btn-primary w-full" onClick={() => revealAuction(activeAuction.id)} disabled={!!loading}>
+                {loading === 'reveal_' + activeAuction.id ? 'מסדר...' : '👁 חשוף תוצאות והעבר לקבוצה'}
+              </button>
             </div>
           )}
 
