@@ -66,6 +66,7 @@ export default async function DashboardPage() {
                   team={typedMyTeam}
                   league={typedLeague}
                   existingBid={myActiveBid?.amount}
+                  revealTime={typedActiveAuction.reveal_time}
                 />
               ) : (
                 <Link href="/auction" className="btn btn-outline w-full text-sm">

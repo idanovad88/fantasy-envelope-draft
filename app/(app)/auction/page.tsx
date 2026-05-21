@@ -61,6 +61,7 @@ export default async function AuctionPage() {
               team={typedMyTeam}
               league={typedLeague}
               existingBid={myBidMap[activeAuction.id]}
+              revealTime={activeAuction.reveal_time}
             />
           )}
         </div>
