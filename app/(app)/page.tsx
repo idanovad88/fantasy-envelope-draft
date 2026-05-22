@@ -10,14 +10,18 @@ export default async function DashboardPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const { data: league } = await supabase
-    .from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle()
+  // Find user's team first — determines which league to show on dashboard
+  const { data: myTeam } = await supabase
+    .from('teams').select('*').eq('user_id', user!.id)
+    .order('created_at', { ascending: false }).limit(1).maybeSingle()
 
-  const [{ data: myTeam }, { data: featuredAuction }, { data: teams }] =
+  // Show the league the user belongs to; admins/guests see the latest league
+  const { data: league } = myTeam?.league_id
+    ? await supabase.from('leagues').select('*').eq('id', myTeam.league_id).maybeSingle()
+    : await supabase.from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle()
+
+  const [{ data: featuredAuction }, { data: teams }] =
     await Promise.all([
-      league
-        ? supabase.from('teams').select('*').eq('user_id', user!.id).eq('league_id', league.id).maybeSingle()
-        : Promise.resolve({ data: null }),
       // Active auction first (earliest scheduled_start = active), otherwise soonest pending
       league
         ? supabase.from('auctions')
