@@ -701,7 +701,7 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  {team.user_id !== league?.created_by && (
+                  {team.user_id !== currentUserId && (
                     localAdminIds.includes(team.user_id) ? (
                       <button
                         className="btn text-xs"

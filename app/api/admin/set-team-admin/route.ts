@@ -23,6 +23,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'אין הרשאה לליגה זו' }, { status: 403 })
   }
 
+  // Prevent revoking own admin access
+  if (!grant && team.user_id === user.id) {
+    return NextResponse.json({ error: 'לא ניתן לבטל את הרשאות הניהול שלך' }, { status: 400 })
+  }
+
   if (grant) {
     const { error } = await admin.from('admin_users').upsert(
       { user_id: team.user_id, league_id: team.league_id, role: 'admin' },
