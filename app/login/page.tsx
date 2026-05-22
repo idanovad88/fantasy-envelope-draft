@@ -128,7 +128,7 @@ export default function LandingPage() {
       return
     }
 
-    router.push('/admin')
+    router.push('/create-league')
     router.refresh()
   }
 

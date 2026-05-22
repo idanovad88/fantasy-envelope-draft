@@ -133,7 +133,7 @@ export default async function DashboardPage() {
               <p className="font-medium mb-4">ברוך הבא!</p>
               <div className="flex flex-col gap-2">
                 <Link href="/join" className="btn btn-primary">הצטרף לליגה קיימת</Link>
-                <Link href="/join?tab=create" className="btn btn-outline">הקם ליגה חדשה</Link>
+                <Link href="/create-league" className="btn btn-outline">הקם ליגה חדשה</Link>
               </div>
             </div>
           )}
