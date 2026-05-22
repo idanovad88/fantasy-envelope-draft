@@ -22,6 +22,16 @@ export async function POST(req: Request) {
 
   const admin = createAdminClient()
 
+  const { data: existing } = await admin
+    .from('leagues')
+    .select('id')
+    .ilike('name', leagueName.trim())
+    .maybeSingle()
+
+  if (existing) {
+    return NextResponse.json({ error: 'ליגה בשם זה כבר קיימת — בחר שם אחר' }, { status: 400 })
+  }
+
   const { data: league, error: leagueErr } = await admin
     .from('leagues')
     .insert({
