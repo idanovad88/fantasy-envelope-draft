@@ -10,18 +10,27 @@ export default async function DashboardPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const [{ data: league }, { data: myTeam }, { data: featuredAuction }, { data: teams }] =
+  const { data: league } = await supabase
+    .from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle()
+
+  const [{ data: myTeam }, { data: featuredAuction }, { data: teams }] =
     await Promise.all([
-      supabase.from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle(),
-      supabase.from('teams').select('*').eq('user_id', user!.id).maybeSingle(),
+      league
+        ? supabase.from('teams').select('*').eq('user_id', user!.id).eq('league_id', league.id).maybeSingle()
+        : Promise.resolve({ data: null }),
       // Active auction first (earliest scheduled_start = active), otherwise soonest pending
-      supabase.from('auctions')
-        .select('*, player:players(*), nominating_team:teams!nominating_team_id(name)')
-        .in('status', ['active', 'pending'])
-        .order('scheduled_start', { ascending: true })
-        .limit(1)
-        .maybeSingle(),
-      supabase.from('teams').select('*').order('priority_rank', { ascending: true, nullsFirst: false }),
+      league
+        ? supabase.from('auctions')
+            .select('*, player:players(*), nominating_team:teams!nominating_team_id(name)')
+            .eq('league_id', league.id)
+            .in('status', ['active', 'pending'])
+            .order('scheduled_start', { ascending: true })
+            .limit(1)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+      league
+        ? supabase.from('teams').select('*').eq('league_id', league.id).order('priority_rank', { ascending: true, nullsFirst: false })
+        : Promise.resolve({ data: [] }),
     ])
 
   const myTeamId = (myTeam as Team | null)?.id

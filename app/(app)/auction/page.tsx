@@ -14,22 +14,35 @@ export default async function AuctionPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const [{ data: league }, { data: myTeam }, { data: auctions }, { data: myBids }, { data: recentCompleted }] =
+  const { data: league } = await supabase
+    .from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle()
+
+  const { data: myTeam } = league
+    ? await supabase.from('teams').select('*').eq('user_id', user!.id).eq('league_id', league.id).maybeSingle()
+    : { data: null }
+
+  const [{ data: auctions }, { data: myBids }, { data: recentCompleted }] =
     await Promise.all([
-      supabase.from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle(),
-      supabase.from('teams').select('*').eq('user_id', user!.id).maybeSingle(),
-      supabase.from('auctions')
-        .select('*, player:players(*), nominating_team:teams!nominating_team_id(name), winning_team:teams!winning_team_id(name), bids(*, team:teams(name))')
-        .in('status', ['pending', 'active', 'revealed', 'completed'])
-        .order('scheduled_start', { ascending: true })
-        .limit(50),
-      supabase.from('bids').select('*').eq('team_id', (await supabase.from('teams').select('id').eq('user_id', user!.id).maybeSingle()).data?.id ?? ''),
-      supabase.from('auctions')
-        .select('id, updated_at, winning_team_id, winning_bid, player:players(name)')
-        .eq('status', 'completed')
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle(),
+      league
+        ? supabase.from('auctions')
+            .select('*, player:players(*), nominating_team:teams!nominating_team_id(name), winning_team:teams!winning_team_id(name), bids(*, team:teams(name))')
+            .eq('league_id', league.id)
+            .in('status', ['pending', 'active', 'revealed', 'completed'])
+            .order('scheduled_start', { ascending: true })
+            .limit(50)
+        : Promise.resolve({ data: [] }),
+      myTeam
+        ? supabase.from('bids').select('*').eq('team_id', myTeam.id)
+        : Promise.resolve({ data: [] }),
+      league
+        ? supabase.from('auctions')
+            .select('id, updated_at, winning_team_id, winning_bid, player:players(name)')
+            .eq('league_id', league.id)
+            .eq('status', 'completed')
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
     ])
 
   const typedLeague = league as League | null

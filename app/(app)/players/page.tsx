@@ -22,8 +22,12 @@ export default async function PlayersPage() {
             .eq('league_id', league.id)
             .order('ranking', { ascending: true, nullsFirst: false })
         : Promise.resolve({ data: [] }),
-      supabase.from('auctions').select('id, player_id').eq('status', 'active').maybeSingle(),
-      supabase.from('auctions').select('id, player_id, scheduled_start').eq('status', 'pending').order('scheduled_start', { ascending: true }),
+      league
+        ? supabase.from('auctions').select('id, player_id').eq('league_id', league.id).eq('status', 'active').maybeSingle()
+        : Promise.resolve({ data: null }),
+      league
+        ? supabase.from('auctions').select('id, player_id, scheduled_start').eq('league_id', league.id).eq('status', 'pending').order('scheduled_start', { ascending: true })
+        : Promise.resolve({ data: [] }),
     ])
 
   const typedLeague = league as League | null

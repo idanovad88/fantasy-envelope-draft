@@ -8,10 +8,16 @@ export default async function TeamsPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const [{ data: league }, { data: teams }, { data: players }] = await Promise.all([
-    supabase.from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle(),
-    supabase.from('teams').select('*').order('priority_rank', { ascending: true, nullsFirst: false }),
-    supabase.from('players').select('*').eq('status', 'drafted'),
+  const { data: league } = await supabase
+    .from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle()
+
+  const [{ data: teams }, { data: players }] = await Promise.all([
+    league
+      ? supabase.from('teams').select('*').eq('league_id', league.id).order('priority_rank', { ascending: true, nullsFirst: false })
+      : Promise.resolve({ data: [] }),
+    league
+      ? supabase.from('players').select('*').eq('league_id', league.id).eq('status', 'drafted')
+      : Promise.resolve({ data: [] }),
   ])
 
   const typedTeams = (teams || []) as Team[]

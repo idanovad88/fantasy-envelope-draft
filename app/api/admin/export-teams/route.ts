@@ -8,20 +8,24 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const supabase = createAdminClient()
-  const { data: adminRow } = await supabase.from('admin_users').select('role').eq('user_id', user.id).maybeSingle()
+  const { data: adminRow } = await supabase.from('admin_users').select('role, league_id').eq('user_id', user.id).maybeSingle()
   if (!adminRow) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { data: league } = await supabase
-    .from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle()
+  const leagueId = adminRow.league_id
+  const { data: league } = leagueId
+    ? await supabase.from('leagues').select('*').eq('id', leagueId).maybeSingle()
+    : await supabase.from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle()
 
-  const { data: teams } = await supabase
-    .from('teams').select('*').order('priority_rank', { ascending: true, nullsFirst: false })
-
-  const { data: players } = await supabase
-    .from('players')
-    .select('name, position, draft_price, drafted_by_team_id')
-    .eq('status', 'drafted')
-    .order('draft_price', { ascending: false })
+  const [{ data: teams }, { data: players }] = await Promise.all([
+    supabase.from('teams').select('*')
+      .eq('league_id', league?.id ?? '')
+      .order('priority_rank', { ascending: true, nullsFirst: false }),
+    supabase.from('players')
+      .select('name, position, draft_price, drafted_by_team_id')
+      .eq('league_id', league?.id ?? '')
+      .eq('status', 'drafted')
+      .order('draft_price', { ascending: false }),
+  ])
 
   const wb = XLSX.utils.book_new()
 
