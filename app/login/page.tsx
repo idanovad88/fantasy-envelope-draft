@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { Eye, EyeOff } from 'lucide-react'
 
 type Mode = 'join' | 'create' | null
 
@@ -10,6 +11,8 @@ export default function LandingPage() {
   const [mode, setMode] = useState<Mode>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [showLeaguePassword, setShowLeaguePassword] = useState(false)
   const [leagueName, setLeagueName] = useState('')
   const [leaguePassword, setLeaguePassword] = useState('')
   const [teamName, setTeamName] = useState('')
@@ -154,15 +157,25 @@ export default function LandingPage() {
             </div>
             <div>
               <label className="block text-sm font-medium mb-1.5">סיסמת הליגה</label>
-              <input
-                className="input"
-                type="password"
-                placeholder="הסיסמה שקיבלת מהמנהל"
-                value={leaguePassword}
-                onChange={e => setLeaguePassword(e.target.value)}
-                required
-                dir="ltr"
-              />
+              <div className="relative">
+                <input
+                  className="input"
+                  type={showLeaguePassword ? 'text' : 'password'}
+                  placeholder="הסיסמה שקיבלת מהמנהל"
+                  value={leaguePassword}
+                  onChange={e => setLeaguePassword(e.target.value)}
+                  required
+                  dir="ltr"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowLeaguePassword(p => !p)}
+                  className="absolute left-3 top-1/2 -translate-y-1/2"
+                  style={{ color: 'var(--muted)' }}
+                >
+                  {showLeaguePassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1.5">שם הקבוצה שלך</label>
@@ -206,15 +219,25 @@ export default function LandingPage() {
             </div>
             <div>
               <label className="block text-sm font-medium mb-1.5">סיסמה</label>
-              <input
-                className="input"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-                dir="ltr"
-              />
+              <div className="relative">
+                <input
+                  className="input"
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  required
+                  dir="ltr"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(p => !p)}
+                  className="absolute left-3 top-1/2 -translate-y-1/2"
+                  style={{ color: 'var(--muted)' }}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
 
             {error && <p className="text-sm" style={{ color: 'var(--danger)' }}>{error}</p>}
