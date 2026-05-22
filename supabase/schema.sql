@@ -19,6 +19,7 @@ CREATE TABLE leagues (
   draft_end_hour INTEGER NOT NULL DEFAULT 22,
   nomination_interval_hours INTEGER NOT NULL DEFAULT 2,
   reveal_before_minutes INTEGER NOT NULL DEFAULT 30,
+  auction_duration_hours DECIMAL(4,2) NOT NULL DEFAULT 1.5,
   created_by UUID REFERENCES auth.users(id),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
