@@ -34,7 +34,7 @@ export default function LandingPage() {
     setLoading(true)
     setError('')
 
-    // 1. Find league by name + password
+    // 1. Find league by name + join code
     const { data: league } = await supabase
       .from('leagues')
       .select('id, name, budget_per_team, status')
@@ -53,28 +53,21 @@ export default function LandingPage() {
       return
     }
 
-    // 2. Auth — try sign in first, then sign up
+    // 2. Auth — reuse existing session or sign in anonymously
+    // Requires "Anonymous sign-ins" enabled in Supabase Auth settings
     let userId: string
-    const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({ email, password })
+    const { data: { user: existingUser } } = await supabase.auth.getUser()
 
-    if (signInErr) {
-      const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
-        email, password,
-        options: { emailRedirectTo: `${window.location.origin}/` },
-      })
-      if (signUpErr || !signUpData.user) {
-        setError('שגיאת כניסה: ' + (signUpErr?.message ?? signInErr.message))
-        setLoading(false)
-        return
-      }
-      if (!signUpData.session) {
-        setInfo('נשלח מייל אישור לכתובת שלך — אשר ונסה שוב.')
-        setLoading(false)
-        return
-      }
-      userId = signUpData.user.id
+    if (existingUser) {
+      userId = existingUser.id
     } else {
-      userId = signInData.user.id
+      const { data: anonData, error: anonErr } = await supabase.auth.signInAnonymously()
+      if (anonErr || !anonData.user) {
+        setError('שגיאת כניסה: ' + (anonErr?.message ?? 'לא ניתן להתחבר'))
+        setLoading(false)
+        return
+      }
+      userId = anonData.user.id
     }
 
     // 3. Check not already in league
@@ -86,8 +79,8 @@ export default function LandingPage() {
       .maybeSingle()
 
     if (existing) {
-      setError('כבר הצטרפת לליגה זו')
-      setLoading(false)
+      router.push('/')
+      router.refresh()
       return
     }
 
@@ -220,34 +213,7 @@ export default function LandingPage() {
               />
             </div>
 
-            <div className="border-t pt-4" style={{ borderColor: 'var(--border)' }}>
-              <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
-                פרטי הכניסה האישיים שלך
-              </p>
-              <div className="flex flex-col gap-3">
-                <input
-                  className="input"
-                  type="email"
-                  placeholder="אימייל"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  required
-                  dir="ltr"
-                />
-                <input
-                  className="input"
-                  type="password"
-                  placeholder="סיסמה אישית"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  required
-                  dir="ltr"
-                />
-              </div>
-            </div>
-
             {error && <p className="text-sm" style={{ color: 'var(--danger)' }}>{error}</p>}
-            {info && <p className="text-sm" style={{ color: 'var(--success)' }}>{info}</p>}
 
             <button type="submit" className="btn btn-primary" disabled={loading}>
               {loading ? 'מצטרף...' : 'הצטרף לליגה'}
