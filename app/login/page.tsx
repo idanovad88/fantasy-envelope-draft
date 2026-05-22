@@ -81,13 +81,13 @@ export default function LandingPage() {
       return
     }
 
-    const { data: adminRow } = await supabase
-      .from('admin_users')
-      .select('role')
-      .eq('user_id', signInData.user.id)
+    const { data: whitelistRow } = await supabase
+      .from('league_creator_whitelist')
+      .select('email')
+      .eq('email', signInData.user.email)
       .maybeSingle()
 
-    if (!adminRow) {
+    if (!whitelistRow) {
       setError('אין לך הרשאה להקים ליגה — פנה למנהל המערכת')
       await supabase.auth.signOut()
       setLoading(false)
