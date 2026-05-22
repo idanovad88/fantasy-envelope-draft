@@ -216,17 +216,30 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
     window.location.reload()
   }
 
-  async function runLottery() {
+  async function runNominationLottery() {
     if (!league) return
-    setLoading('lottery')
+    setLoading('lottery_nomination')
     const approvedTeams = teams.filter(t => t.approved && !t.is_complete)
     const shuffled = [...approvedTeams].sort(() => Math.random() - 0.5)
     const updates = shuffled.map((t, i) =>
-      supabase.from('teams').update({ priority_rank: i + 1, tiebreak_rank: i + 1, updated_at: new Date().toISOString() }).eq('id', t.id)
+      supabase.from('teams').update({ priority_rank: i + 1, updated_at: new Date().toISOString() }).eq('id', t.id)
     )
     await Promise.all(updates)
-    await setLeagueStatus('active')
-    setMsg('הגרלה בוצעה! סדר פריוריטי נקבע.')
+    setMsg('הגרלת סדר העלאות בוצעה!')
+    setLoading('')
+    window.location.reload()
+  }
+
+  async function runTiebreakLottery() {
+    if (!league) return
+    setLoading('lottery_tiebreak')
+    const approvedTeams = teams.filter(t => t.approved && !t.is_complete)
+    const shuffled = [...approvedTeams].sort(() => Math.random() - 0.5)
+    const updates = shuffled.map((t, i) =>
+      supabase.from('teams').update({ tiebreak_rank: i + 1, updated_at: new Date().toISOString() }).eq('id', t.id)
+    )
+    await Promise.all(updates)
+    setMsg('הגרלת סדר פריוריטי בוצעה!')
     setLoading('')
     window.location.reload()
   }
@@ -718,30 +731,78 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
 
       {/* LOTTERY */}
       {tab === 'lottery' && (
-        <div className="card">
-          <h2 className="font-bold mb-2">הגרלת פריוריטי 🎲</h2>
-          <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>
-            ההגרלה תקבע את סדר הקבוצות לנומינציה. הסדר ייקבע רנדומלית על כל הקבוצות המאושרות.
-          </p>
-
-          <div className="mb-4 flex flex-col gap-1">
-            {teams.filter(t => t.approved).map(t => (
-              <div key={t.id} className="flex items-center justify-between text-sm px-3 py-2 rounded" style={{ background: 'var(--background)' }}>
-                <span>{t.name}</span>
-                <span className="badge badge-gray">
-                  {t.priority_rank ? `#${t.priority_rank}` : 'ממתין'}
-                </span>
-              </div>
-            ))}
+        <div className="flex flex-col gap-4">
+          {/* Nomination order lottery */}
+          <div className="card">
+            <h2 className="font-bold mb-1">🎲 הגרלת סדר העלאות</h2>
+            <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
+              קובע איזו קבוצה מעלה שחקן למכרז בכל תור. הסדר סימטרי וקבוע — כל קבוצה מקבלת תורה לפי הסדר.
+            </p>
+            <div className="mb-4 flex flex-col gap-1">
+              {teams.filter(t => t.approved).sort((a, b) => (a.priority_rank ?? 999) - (b.priority_rank ?? 999)).map(t => (
+                <div key={t.id} className="flex items-center justify-between text-sm px-3 py-2 rounded" style={{ background: 'var(--background)' }}>
+                  <span>{t.name}</span>
+                  <span className="badge badge-gray">
+                    {t.priority_rank ? `#${t.priority_rank}` : 'ממתין'}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <button
+              className="btn btn-primary w-full"
+              onClick={runNominationLottery}
+              disabled={!!loading || !league || teams.filter(t => t.approved).length < 2}
+            >
+              {loading === 'lottery_nomination' ? 'מגריל...' : '🎲 הגרל סדר העלאות'}
+            </button>
           </div>
 
-          <button
-            className="btn btn-primary w-full"
-            onClick={runLottery}
-            disabled={!!loading || !league || teams.filter(t => t.approved).length < 2}
-          >
-            {loading === 'lottery' ? 'מגריל...' : '🎲 הפעל הגרלה'}
-          </button>
+          {/* Tiebreak priority lottery */}
+          <div className="card">
+            <h2 className="font-bold mb-1">🏆 הגרלת סדר פריוריטי</h2>
+            <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
+              שובר שוויון בהצעות זהות. הקבוצה הגבוהה בסדר זוכה — ולאחר מכן יורדת לתחתית. הגרלה עצמאית מסדר העלאות.
+            </p>
+            <div className="mb-4 flex flex-col gap-1">
+              {teams.filter(t => t.approved).sort((a, b) => (a.tiebreak_rank ?? 999) - (b.tiebreak_rank ?? 999)).map(t => (
+                <div key={t.id} className="flex items-center justify-between text-sm px-3 py-2 rounded" style={{ background: 'var(--background)' }}>
+                  <span>{t.name}</span>
+                  <span className="badge badge-gray">
+                    {t.tiebreak_rank ? `#${t.tiebreak_rank}` : 'ממתין'}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <button
+              className="btn btn-primary w-full"
+              onClick={runTiebreakLottery}
+              disabled={!!loading || !league || teams.filter(t => t.approved).length < 2}
+            >
+              {loading === 'lottery_tiebreak' ? 'מגריל...' : '🏆 הגרל סדר פריוריטי'}
+            </button>
+          </div>
+
+          {/* Activate league after both lotteries */}
+          {league?.status === 'lottery' && (
+            <div className="card" style={{ border: '1px solid var(--success)' }}>
+              <h2 className="font-bold mb-1">הפעל ליגה</h2>
+              <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
+                לאחר ביצוע שתי ההגרלות ניתן להפעיל את הדראפט.
+              </p>
+              {(!teams.some(t => t.priority_rank) || !teams.some(t => t.tiebreak_rank)) && (
+                <p className="text-sm mb-3" style={{ color: 'var(--warning)' }}>
+                  ⚠️ יש להגריל את שני הסדרים לפני ההפעלה
+                </p>
+              )}
+              <button
+                className="btn btn-success w-full"
+                onClick={() => setLeagueStatus('active')}
+                disabled={!!loading || !teams.some(t => t.priority_rank) || !teams.some(t => t.tiebreak_rank)}
+              >
+                {loading === 'status_active' ? 'מפעיל...' : '▶ הפעל דראפט'}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
