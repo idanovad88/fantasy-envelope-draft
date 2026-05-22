@@ -14,11 +14,19 @@ export default async function AuctionPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const { data: league } = await supabase
-    .from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle()
+  const { data: myTeam } = await supabase
+    .from('teams').select('*').eq('user_id', user!.id)
+    .order('created_at', { ascending: false }).limit(1).maybeSingle()
 
-  const { data: myTeam } = league
-    ? await supabase.from('teams').select('*').eq('user_id', user!.id).eq('league_id', league.id).maybeSingle()
+  const [{ data: adminRow }, { data: createdLeague }] = await Promise.all([
+    supabase.from('admin_users').select('league_id').eq('user_id', user!.id).maybeSingle(),
+    supabase.from('leagues').select('id').eq('created_by', user!.id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+  ])
+
+  const leagueId = myTeam?.league_id ?? adminRow?.league_id ?? createdLeague?.id ?? null
+
+  const { data: league } = leagueId
+    ? await supabase.from('leagues').select('*').eq('id', leagueId).maybeSingle()
     : { data: null }
 
   const [{ data: auctions }, { data: myBids }, { data: recentCompleted }] =

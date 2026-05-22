@@ -20,12 +20,12 @@ export default async function DashboardPage() {
     ? await supabase.from('leagues').select('*').eq('created_by', user!.id).order('created_at', { ascending: false }).limit(1).maybeSingle()
     : { data: null }
 
-  // Show the league the user belongs to; admins/guests see the latest league
+  // Only show a league the user actually belongs to or created
   const { data: league } = myTeam?.league_id
     ? await supabase.from('leagues').select('*').eq('id', myTeam.league_id).maybeSingle()
     : createdLeague
       ? { data: createdLeague }
-      : await supabase.from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle()
+      : { data: null }
 
   const [{ data: featuredAuction }, { data: teams }] =
     await Promise.all([
