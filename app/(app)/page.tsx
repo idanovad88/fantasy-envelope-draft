@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
-import { formatTime } from '@/lib/utils'
+import { formatTime, formatDateTime } from '@/lib/utils'
 import type { League, Team, Auction } from '@/types'
 import DraftCountdown from '@/components/DraftCountdown'
 import BidForm from '@/components/BidForm'
@@ -10,22 +10,30 @@ export default async function DashboardPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const [{ data: league }, { data: myTeam }, { data: activeAuction }, { data: teams }] =
+  const [{ data: league }, { data: myTeam }, { data: featuredAuction }, { data: teams }] =
     await Promise.all([
       supabase.from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle(),
       supabase.from('teams').select('*').eq('user_id', user!.id).maybeSingle(),
-      supabase.from('auctions').select('*, player:players(*), nominating_team:teams!nominating_team_id(name)').eq('status', 'active').maybeSingle(),
+      // Active auction first (earliest scheduled_start = active), otherwise soonest pending
+      supabase.from('auctions')
+        .select('*, player:players(*), nominating_team:teams!nominating_team_id(name)')
+        .in('status', ['active', 'pending'])
+        .order('scheduled_start', { ascending: true })
+        .limit(1)
+        .maybeSingle(),
       supabase.from('teams').select('*').order('priority_rank', { ascending: true, nullsFirst: false }),
     ])
 
   const myTeamId = (myTeam as Team | null)?.id
-  const { data: myActiveBid } = myTeamId && (activeAuction as Auction | null)?.id
-    ? await supabase.from('bids').select('amount').eq('auction_id', (activeAuction as Auction).id).eq('team_id', myTeamId).maybeSingle()
+  const typedFeatured = featuredAuction as (Auction & { player: { name: string }; nominating_team: { name: string } | null }) | null
+  const isActive = typedFeatured?.status === 'active'
+
+  const { data: myActiveBid } = myTeamId && isActive && typedFeatured?.id
+    ? await supabase.from('bids').select('amount').eq('auction_id', typedFeatured.id).eq('team_id', myTeamId).maybeSingle()
     : { data: null }
 
   const typedLeague = league as League | null
   const typedMyTeam = myTeam as Team | null
-  const typedActiveAuction = activeAuction as (Auction & { player: { name: string }; nominating_team: { name: string } | null }) | null
   const typedTeams = (teams || []) as Team[]
 
   return (
@@ -48,26 +56,35 @@ export default async function DashboardPage() {
         )}
       </div>
 
-      <div className={`grid gap-4 ${typedActiveAuction ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2'}`}>
-        {/* Current auction card */}
+      <div className={`grid gap-4 ${typedFeatured && isActive ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2'}`}>
+        {/* Current / upcoming auction card */}
         <div className="card">
           <h2 className="font-bold mb-3">מכרז נוכחי</h2>
-          {typedActiveAuction ? (
+          {typedFeatured ? (
             <div>
               <div className="flex items-center justify-between mb-1">
-                <span className="font-bold text-2xl">{typedActiveAuction.player?.name}</span>
-                <span className="badge badge-green">פעיל</span>
+                <span className="font-bold text-2xl">{typedFeatured.player?.name}</span>
+                {isActive
+                  ? <span className="badge badge-green">פעיל</span>
+                  : <span className="badge badge-gray">⏰ מתוזמן</span>
+                }
               </div>
-              <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
-                מועלה על ידי: {typedActiveAuction.nominating_team?.name ?? '—'} · חשיפה: {formatTime(typedActiveAuction.reveal_time)}
-              </p>
-              {typedMyTeam && typedLeague && !typedMyTeam.is_complete ? (
+              {isActive ? (
+                <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
+                  חשיפה: {formatTime(typedFeatured.reveal_time)}
+                </p>
+              ) : (
+                <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
+                  פתיחת הגשות: {formatDateTime(typedFeatured.scheduled_start)}
+                </p>
+              )}
+              {isActive && typedMyTeam && typedLeague && !typedMyTeam.is_complete ? (
                 <BidForm
-                  auctionId={typedActiveAuction.id}
+                  auctionId={typedFeatured.id}
                   team={typedMyTeam}
                   league={typedLeague}
                   existingBid={myActiveBid?.amount}
-                  revealTime={typedActiveAuction.reveal_time}
+                  revealTime={typedFeatured.reveal_time}
                 />
               ) : (
                 <Link href="/auction" className="btn btn-outline w-full text-sm">

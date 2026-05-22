@@ -21,8 +21,8 @@ export default async function AuctionPage() {
       supabase.from('auctions')
         .select('*, player:players(*), nominating_team:teams!nominating_team_id(name), winning_team:teams!winning_team_id(name), bids(*, team:teams(name))')
         .in('status', ['pending', 'active', 'revealed', 'completed'])
-        .order('scheduled_start', { ascending: false })
-        .limit(20),
+        .order('scheduled_start', { ascending: true })
+        .limit(50),
       supabase.from('bids').select('*').eq('team_id', (await supabase.from('teams').select('id').eq('user_id', user!.id).maybeSingle()).data?.id ?? ''),
       supabase.from('auctions')
         .select('id, updated_at, winning_team_id, winning_bid, player:players(name)')
@@ -45,12 +45,20 @@ export default async function AuctionPage() {
     winningBid: recentCompleted.winning_bid,
     playerName: (recentCompleted.player as unknown as { name: string } | null)?.name ?? 'שחקן',
   } : undefined
-  const typedAuctions = (auctions || []) as (Auction & { player: { name: string; position: string | null; nba_team: string | null }; nominating_team: { name: string } | null; winning_team: { name: string } | null; bids: { id: string; team_id: string; amount: number; team: { name: string } | null }[] })[]
+
+  const typedAuctions = (auctions || []) as (Auction & {
+    player: { name: string; position: string | null; nba_team: string | null }
+    nominating_team: { name: string } | null
+    winning_team: { name: string } | null
+    bids: { id: string; team_id: string; amount: number; team: { name: string } | null }[]
+  })[]
   const myBidMap = Object.fromEntries((myBids || []).map(b => [b.auction_id, b.amount]))
 
   const activeAuction = typedAuctions.find(a => a.status === 'active')
-  const pendingAuction = typedAuctions.find(a => a.status === 'pending')
+  // Pending auctions sorted ascending by scheduled_start (closest first)
+  const pendingAuctions = typedAuctions.filter(a => a.status === 'pending')
   const pastAuctions = typedAuctions.filter(a => a.status === 'revealed' || a.status === 'completed')
+    .sort((a, b) => new Date(b.reveal_time).getTime() - new Date(a.reveal_time).getTime())
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -93,28 +101,28 @@ export default async function AuctionPage() {
         </div>
       )}
 
-      {/* Pending (upcoming) auction */}
-      {pendingAuction && (
-        <div className="card mb-6" style={{ borderColor: 'var(--border)', opacity: 0.85 }}>
+      {/* Pending (upcoming) auctions — sorted by reveal_time ascending */}
+      {pendingAuctions.map(auction => (
+        <div key={auction.id} className="card mb-4" style={{ borderColor: 'var(--border)', opacity: 0.85 }}>
           <div className="flex items-start justify-between mb-3">
             <div>
-              <span className="badge badge-gray mb-2">⏰ המכרז הבא</span>
-              <h2 className="text-xl font-bold">{pendingAuction.player?.name}</h2>
+              <span className="badge badge-gray mb-2">⏰ ממתין</span>
+              <h2 className="text-xl font-bold">{auction.player?.name}</h2>
               <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-                {pendingAuction.player?.position} · {pendingAuction.player?.nba_team}
+                {auction.player?.position} · {auction.player?.nba_team}
               </p>
             </div>
-            <Countdown targetDate={pendingAuction.scheduled_start} label="לפתיחה" />
+            <Countdown targetDate={auction.scheduled_start} label="לפתיחה" />
           </div>
           <p className="text-sm" style={{ color: 'var(--muted)' }}>
-            פתיחת הגשות: <strong style={{ color: 'var(--text)' }}>{formatDateTime(pendingAuction.scheduled_start)}</strong>
-            {' · '}סגירה: <strong style={{ color: 'var(--text)' }}>{formatTime(pendingAuction.reveal_time)}</strong>
+            פתיחת הגשות: <strong style={{ color: 'var(--text)' }}>{formatDateTime(auction.scheduled_start)}</strong>
+            {' · '}סגירה: <strong style={{ color: 'var(--text)' }}>{formatTime(auction.reveal_time)}</strong>
           </p>
           <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>
             הגשת הצעות תיפתח עם תחילת המכרז
           </p>
         </div>
-      )}
+      ))}
 
       {/* Past auctions */}
       {pastAuctions.length > 0 && (

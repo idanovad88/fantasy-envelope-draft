@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import PlayerSearch from '@/components/PlayerSearch'
 import type { Player, League, Team } from '@/types'
-import { getMaxBid, formatTime } from '@/lib/utils'
+import { formatTime } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -10,42 +10,25 @@ type PlayerWithTeam = Player & { drafting_team: { id: string; name: string } | n
 
 export default async function PlayersPage() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
 
-  const [{ data: players }, { data: league }, { data: myTeamRow }, { data: allTeams }, { data: activeAuction }, { data: pendingAuction }, { data: adminRow }] =
+  const [{ data: players }, { data: league }, { data: activeAuction }, { data: pendingAuctions }] =
     await Promise.all([
       supabase.from('players')
         .select('*, drafting_team:teams!drafted_by_team_id(id, name)')
         .order('ranking', { ascending: true, nullsFirst: false }),
       supabase.from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle(),
-      user
-        ? supabase.from('teams').select('*').eq('user_id', user.id).maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-      supabase.from('teams')
-        .select('id, priority_rank')
-        .eq('approved', true)
-        .eq('is_complete', false)
-        .not('priority_rank', 'is', null)
-        .order('priority_rank', { ascending: true }),
       supabase.from('auctions').select('id, player_id').eq('status', 'active').maybeSingle(),
-      supabase.from('auctions').select('id, player_id, scheduled_start').eq('status', 'pending').maybeSingle(),
-      user
-        ? supabase.from('admin_users').select('role').eq('user_id', user.id).maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
+      supabase.from('auctions').select('id, player_id, scheduled_start').eq('status', 'pending').order('scheduled_start', { ascending: true }),
     ])
 
   const typedLeague = league as League | null
-  const typedMyTeam = myTeamRow as Team | null
   const typedPlayers = (players || []) as PlayerWithTeam[]
 
-  const isAdmin = !!adminRow
-  const currentNominatorId = allTeams?.[0]?.id ?? null
-  const isMyTurn = !!typedMyTeam && typedMyTeam.id === currentNominatorId && !typedMyTeam.is_complete
-  const hasBlockingAuction = !!activeAuction || !!pendingAuction
-  const canNominate = isMyTurn && typedLeague?.status === 'active' && !hasBlockingAuction && !!currentNominatorId
   const activeAuctionPlayerId = (activeAuction as { player_id?: string } | null)?.player_id ?? null
-  const pendingAuctionPlayerId = (pendingAuction as { player_id?: string; scheduled_start?: string } | null)?.player_id ?? null
-  const pendingAuctionStart = (pendingAuction as { scheduled_start?: string } | null)?.scheduled_start ?? null
+  const pendingPlayerIds = new Set((pendingAuctions || []).map((a: { player_id: string }) => a.player_id))
+  const pendingStartByPlayerId = Object.fromEntries(
+    (pendingAuctions || []).map((a: { player_id: string; scheduled_start: string }) => [a.player_id, a.scheduled_start])
+  )
 
   const available = typedPlayers.filter(p => p.status === 'available')
   const onAuction = typedPlayers.filter(p => p.status === 'on_auction')
@@ -60,37 +43,31 @@ export default async function PlayersPage() {
           {onAuction.filter(p => p.id === activeAuctionPlayerId).length > 0 && (
             <span className="badge badge-yellow">{onAuction.filter(p => p.id === activeAuctionPlayerId).length} במכרז</span>
           )}
-          {pendingAuctionPlayerId && onAuction.some(p => p.id === pendingAuctionPlayerId) && (
-            <span className="badge badge-gray">1 מתוזמן</span>
+          {onAuction.filter(p => pendingPlayerIds.has(p.id)).length > 0 && (
+            <span className="badge badge-gray">{onAuction.filter(p => pendingPlayerIds.has(p.id)).length} מתוזמן</span>
           )}
           <span className="badge badge-gray">{drafted.length} נרכשו</span>
         </div>
       </div>
 
-      {/* Status / turn banners */}
-      {typedLeague && typedLeague.status !== 'active' && typedMyTeam && (
+      {/* Status banner — draft not active */}
+      {typedLeague && typedLeague.status !== 'active' && (
         <div className="card mb-4" style={{ borderColor: 'var(--border)' }}>
           <p className="text-sm" style={{ color: 'var(--muted)' }}>
             הדראפט טרם החל — כפתורי ההעלאה יופיעו כשהדראפט יהיה פעיל.
           </p>
         </div>
       )}
-      {isMyTurn && !canNominate && hasBlockingAuction && (
-        <div className="card mb-4" style={{ borderColor: 'var(--warning)' }}>
-          <p className="text-sm" style={{ color: 'var(--warning)' }}>
-            זה התורך — אך יש מכרז פעיל כרגע. המתן לסיומו.
-          </p>
-        </div>
-      )}
 
       {/* Active / scheduled auction highlight */}
       {onAuction.map(p => {
-        const isPending = p.id === pendingAuctionPlayerId
+        const isPending = pendingPlayerIds.has(p.id)
+        const pendingStart = pendingStartByPlayerId[p.id]
         return (
           <div key={p.id} className="card mb-4" style={{ borderColor: isPending ? 'var(--muted)' : 'var(--warning)', borderWidth: 2 }}>
             <span className={`badge ${isPending ? 'badge-gray' : 'badge-yellow'} mb-2`}>
-              {isPending && pendingAuctionStart
-                ? `מתוזמן — יפתח ב-${formatTime(pendingAuctionStart)}`
+              {isPending && pendingStart
+                ? `מתוזמן — יפתח ב-${formatTime(pendingStart)}`
                 : 'במכרז עכשיו'}
             </span>
             <p className="font-bold text-xl">{p.name}</p>
@@ -102,13 +79,6 @@ export default async function PlayersPage() {
       {/* Available players */}
       <PlayerSearch
         players={available.map(p => ({ id: p.id, name: p.name, position: p.position, nba_team: p.nba_team, ranking: p.ranking }))}
-        canNominate={canNominate}
-        leagueId={typedLeague?.id ?? null}
-        teamId={typedMyTeam?.id ?? null}
-        budgetRemaining={typedMyTeam?.budget_remaining ?? 0}
-        playerCount={typedMyTeam?.player_count ?? 0}
-        playersPerTeam={typedLeague?.players_per_team ?? 13}
-        maxBid={typedMyTeam && typedLeague ? getMaxBid(typedMyTeam.budget_remaining, typedMyTeam.player_count, typedLeague.players_per_team) : 1}
       />
 
       {/* Drafted players */}

@@ -13,13 +13,13 @@ interface Props {
   teams: Team[]
   pendingTeams: Team[]
   activeAuction: (Auction & { player: { name: string }; bids: { id: string }[] }) | null
-  scheduledAuction: ScheduledAuction | null
+  scheduledAuctions: ScheduledAuction[]
   players: { id: string; name: string; status: string; ranking: number | null; position: string | null }[]
   pastAuctions: PastAuction[]
   leagueCreators: string[]
 }
 
-export default function AdminPanel({ league, teams, pendingTeams, activeAuction, scheduledAuction, players, pastAuctions, leagueCreators }: Props) {
+export default function AdminPanel({ league, teams, pendingTeams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators }: Props) {
   const supabase = createClient()
   const [tab, setTab] = useState<'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league'>('overview')
   const [loading, setLoading] = useState('')
@@ -58,9 +58,6 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
   const [selectedPlayer, setSelectedPlayer] = useState('')
   const [selectedNominator, setSelectedNominator] = useState('')
   const [nominationTime, setNominationTime] = useState(() => {
-    if (activeAuction?.reveal_time) {
-      return new Date(activeAuction.reveal_time).toISOString().slice(0, 16)
-    }
     const d = new Date()
     d.setMinutes(0, 0, 0)
     return d.toISOString().slice(0, 16)
@@ -189,25 +186,23 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
     if (!league || !selectedPlayer || !selectedNominator) return
     setLoading('nominate')
 
-    // If active auction exists, schedule as pending starting at its reveal_time
-    const isScheduled = !!activeAuction
+    // Compute the latest reveal_time among active + all pending auctions
+    const revealTimes: Date[] = []
+    if (activeAuction?.reveal_time) revealTimes.push(new Date(activeAuction.reveal_time))
+    scheduledAuctions.forEach(a => revealTimes.push(new Date(a.reveal_time)))
 
-    if (isScheduled && scheduledAuction) {
-      setMsg('כבר קיים מכרז מתוזמן — לא ניתן לתזמן שניים')
-      setLoading('')
-      return
-    }
-
-    const scheduledStart = isScheduled
-      ? new Date(activeAuction!.reveal_time)
+    const hasExisting = revealTimes.length > 0
+    const scheduledStart = hasExisting
+      ? new Date(Math.max(...revealTimes.map(d => d.getTime())))
       : new Date(nominationTime + ':00')
+
     const revealMinutes = league.reveal_before_minutes ?? 30
     const nextNomination = new Date(scheduledStart.getTime() + league.nomination_interval_hours * 60 * 60 * 1000)
     const revealTime = new Date(nextNomination.getTime() - revealMinutes * 60 * 1000)
 
     const existingCount = await supabase.from('auctions').select('id', { count: 'exact' }).eq('league_id', league.id)
     const slotNum = (existingCount.count ?? 0) + 1
-    const auctionStatus = isScheduled ? 'pending' : 'active'
+    const auctionStatus = hasExisting ? 'pending' : 'active'
 
     const { error: auctionErr } = await supabase.from('auctions').insert({
       league_id: league.id,
@@ -220,9 +215,8 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
     })
 
     if (!auctionErr) {
-      // Mark player on_auction immediately to prevent double-nomination
       await supabase.from('players').update({ status: 'on_auction' }).eq('id', selectedPlayer)
-      setMsg(isScheduled
+      setMsg(hasExisting
         ? `מכרז תוזמן לפתיחה ב-${formatDateTime(scheduledStart.toISOString())}`
         : 'שחקן הועלה למכרז!')
       setSelectedPlayer('')
@@ -413,21 +407,30 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
             </div>
           )}
 
-          {/* Scheduled (pending) auction */}
-          {scheduledAuction && (
-            <div className="card" style={{ borderColor: 'var(--muted)', opacity: 0.85 }}>
-              <h2 className="font-bold mb-1">⏰ מכרז מתוזמן: {scheduledAuction.player?.name ?? '—'}</h2>
-              <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
-                פתיחה: {formatDateTime(scheduledAuction.scheduled_start)} · סגירה: {formatDateTime(scheduledAuction.reveal_time)}
-              </p>
-              <button
-                className="btn btn-outline text-sm"
-                style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}
-                onClick={() => cancelAuction(scheduledAuction.id)}
-                disabled={!!loading}
-              >
-                {loading === 'cancel_' + scheduledAuction.id ? '...' : '✕ בטל תזמון'}
-              </button>
+          {/* Scheduled (pending) auctions queue */}
+          {scheduledAuctions.length > 0 && (
+            <div className="card" style={{ borderColor: 'var(--muted)', opacity: 0.9 }}>
+              <h2 className="font-bold mb-3">⏰ תור מכרזים ({scheduledAuctions.length})</h2>
+              <div className="flex flex-col gap-2">
+                {scheduledAuctions.map((a, i) => (
+                  <div key={a.id} className="flex items-center justify-between py-2 border-t text-sm" style={{ borderColor: 'var(--border)' }}>
+                    <div>
+                      <span className="font-medium">{i + 1}. {a.player?.name ?? '—'}</span>
+                      <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
+                        פתיחה: {formatDateTime(a.scheduled_start)} · סגירה: {formatDateTime(a.reveal_time)}
+                      </p>
+                    </div>
+                    <button
+                      className="text-xs px-2 py-1 rounded flex-shrink-0"
+                      style={{ color: 'var(--danger)', border: '1px solid var(--danger)' }}
+                      onClick={() => cancelAuction(a.id)}
+                      disabled={!!loading}
+                    >
+                      {loading === 'cancel_' + a.id ? '...' : '✕'}
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -470,20 +473,22 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
           {/* Nominate new player */}
           <div className="card">
             <h2 className="font-bold mb-4">
-              {activeAuction ? 'תזמן שחקן למכרז הבא' : 'העלה שחקן חדש למכרז'}
+              {activeAuction || scheduledAuctions.length > 0 ? 'הוסף לתור המכרזים' : 'העלה שחקן חדש למכרז'}
             </h2>
 
-            {scheduledAuction ? (
-              <p className="text-sm" style={{ color: 'var(--muted)' }}>
-                כבר קיים מכרז מתוזמן ({scheduledAuction.player?.name ?? '—'}). בטל אותו תחילה כדי לתזמן שחקן אחר.
-              </p>
-            ) : (
             <div className="flex flex-col gap-3">
-              {activeAuction && (
-                <div className="p-2 rounded-lg text-sm" style={{ background: 'rgba(99,102,241,0.1)', color: 'var(--primary)' }}>
-                  המכרז יפתח אוטומטית בסיום המכרז הנוכחי — {formatDateTime(activeAuction.reveal_time)}
-                </div>
-              )}
+              {(activeAuction || scheduledAuctions.length > 0) && (() => {
+                const allRevealTimes = [
+                  activeAuction?.reveal_time,
+                  ...scheduledAuctions.map(a => a.reveal_time),
+                ].filter(Boolean) as string[]
+                const latestReveal = allRevealTimes.reduce((max, t) => t > max ? t : max, allRevealTimes[0])
+                return (
+                  <div className="p-2 rounded-lg text-sm" style={{ background: 'rgba(99,102,241,0.1)', color: 'var(--primary)' }}>
+                    המכרז יפתח אוטומטית ב-{formatDateTime(latestReveal)}
+                  </div>
+                )
+              })()}
               <div>
                 <label className="block text-sm font-medium mb-1.5">שחקן</label>
                 <select className="input" value={selectedPlayer} onChange={e => setSelectedPlayer(e.target.value)}>
@@ -504,7 +509,7 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
                 </select>
               </div>
 
-              {!activeAuction && (
+              {!activeAuction && scheduledAuctions.length === 0 && (
                 <div>
                   <label className="block text-sm font-medium mb-1.5">זמן פתיחת מכרז</label>
                   <input
@@ -522,10 +527,9 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
                 onClick={nominatePlayer}
                 disabled={!selectedPlayer || !!loading || !league}
               >
-                {loading === 'nominate' ? 'מעלה...' : activeAuction ? '⏰ תזמן למכרז הבא' : '🚀 העלה למכרז'}
+                {loading === 'nominate' ? 'מעלה...' : (activeAuction || scheduledAuctions.length > 0) ? '⏰ הוסף לתור' : '🚀 העלה למכרז'}
               </button>
             </div>
-            )}
           </div>
         </div>
       )}

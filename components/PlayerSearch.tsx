@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import NominateButton from '@/components/NominateButton'
 
 type Player = {
   id: string
@@ -13,16 +12,9 @@ type Player = {
 
 interface Props {
   players: Player[]
-  canNominate: boolean
-  leagueId: string | null
-  teamId: string | null
-  budgetRemaining: number
-  playerCount: number
-  playersPerTeam: number
-  maxBid: number
 }
 
-export default function PlayerSearch({ players, canNominate, leagueId, teamId, budgetRemaining, playerCount, playersPerTeam, maxBid }: Props) {
+export default function PlayerSearch({ players }: Props) {
   const [query, setQuery] = useState('')
 
   const filtered = query.trim()
@@ -32,14 +24,7 @@ export default function PlayerSearch({ players, canNominate, leagueId, teamId, b
   return (
     <div className="card">
       <div className="flex items-center justify-between mb-1 gap-3">
-        <div className="flex items-center gap-2">
-          <h2 className="font-bold whitespace-nowrap">שחקנים זמינים ({players.length})</h2>
-          {canNominate && (
-            <span style={{ background: 'rgba(34,197,94,0.15)', color: 'var(--success)', fontSize: '12px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', border: '1px solid var(--success)' }}>
-              תורך
-            </span>
-          )}
-        </div>
+        <h2 className="font-bold whitespace-nowrap">שחקנים זמינים ({players.length})</h2>
         <input
           className="input text-sm flex-1 max-w-48"
           placeholder="חיפוש שחקן..."
@@ -48,11 +33,6 @@ export default function PlayerSearch({ players, canNominate, leagueId, teamId, b
           dir="ltr"
         />
       </div>
-      {canNominate && (
-        <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
-          להעלאה למכרז לחץ על ה&nbsp;<strong>+</strong>
-        </p>
-      )}
 
       {filtered.length === 0 ? (
         <p className="text-sm text-center py-4" style={{ color: 'var(--muted)' }}>לא נמצאו שחקנים</p>
@@ -63,7 +43,6 @@ export default function PlayerSearch({ players, canNominate, leagueId, teamId, b
               <tr style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
                 <th className="text-right pb-2 pr-2 w-8">#</th>
                 <th className="text-right pb-2">שחקן</th>
-                <th className="pb-2 w-10"></th>
               </tr>
             </thead>
             <tbody>
@@ -79,16 +58,6 @@ export default function PlayerSearch({ players, canNominate, leagueId, teamId, b
                       )}
                       <span className="font-medium">{p.name}</span>
                     </div>
-                  </td>
-                  <td className="py-1 pl-1">
-                    {canNominate && leagueId && teamId ? (
-                      <NominateButton
-                        playerId={p.id}
-                        leagueId={leagueId}
-                        playerName={p.name}
-                        maxBid={maxBid}
-                      />
-                    ) : null}
                   </td>
                 </tr>
               ))}
