@@ -34,92 +34,31 @@ export default function LandingPage() {
     setLoading(true)
     setError('')
 
-    // 1. Find league by name + join code
-    const { data: league } = await supabase
-      .from('leagues')
-      .select('id, name, budget_per_team, num_teams, status')
-      .ilike('name', leagueName.trim())
-      .eq('join_code', leaguePassword.trim().toUpperCase())
-      .maybeSingle()
-
-    if (!league) {
-      setError('שם הליגה או הסיסמה שגויים')
-      setLoading(false)
-      return
-    }
-    if (league.status === 'completed') {
-      setError('הדראפט הסתיים — לא ניתן להצטרף')
-      setLoading(false)
-      return
-    }
-
-    // 2. Auth — reuse existing session or sign in anonymously
-    // Requires "Anonymous sign-ins" enabled in Supabase Auth settings
-    let userId: string
+    // 1. Auth — reuse existing session or sign in anonymously
     const { data: { user: existingUser } } = await supabase.auth.getUser()
-
-    if (existingUser) {
-      userId = existingUser.id
-    } else {
+    if (!existingUser) {
       const { data: anonData, error: anonErr } = await supabase.auth.signInAnonymously()
       if (anonErr || !anonData.user) {
         setError('שגיאת כניסה: ' + (anonErr?.message ?? 'לא ניתן להתחבר'))
         setLoading(false)
         return
       }
-      userId = anonData.user.id
     }
 
-    // 3. Check not already in league by user_id
-    const { data: existingByUser } = await supabase
-      .from('teams')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('league_id', league.id)
-      .maybeSingle()
-
-    if (existingByUser) {
-      window.location.href = '/'
-      return
-    }
-
-    // 4. Check if team name already exists — re-link to current user and redirect
-    const { data: existingByName } = await supabase
-      .from('teams')
-      .select('id')
-      .eq('league_id', league.id)
-      .ilike('name', teamName.trim())
-      .maybeSingle()
-
-    if (existingByName) {
-      await supabase.from('teams').update({ user_id: userId }).eq('id', existingByName.id)
-      window.location.href = '/'
-      return
-    }
-
-    // 5. Check league capacity
-    const { count: teamCount } = await supabase
-      .from('teams')
-      .select('id', { count: 'exact', head: true })
-      .eq('league_id', league.id)
-
-    if (teamCount !== null && league.num_teams !== null && teamCount >= league.num_teams) {
-      setError('הליגה מלאה — לא ניתן להצטרף')
-      setLoading(false)
-      return
-    }
-
-    // 6. Create team
-    const { error: insertErr } = await supabase.from('teams').insert({
-      league_id: league.id,
-      name: teamName.trim(),
-      user_id: userId,
-      budget_remaining: league.budget_per_team,
-      approved: true,
+    // 2. Delegate all join logic to API route (uses admin client to bypass RLS)
+    const res = await fetch('/api/join-league', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        leagueName: leagueName.trim(),
+        joinCode: leaguePassword.trim(),
+        teamName: teamName.trim(),
+      }),
     })
 
-    if (insertErr) {
-      setError(insertErr.message)
+    const json = await res.json()
+    if (!res.ok) {
+      setError(json.error ?? 'שגיאה בהצטרפות לליגה')
       setLoading(false)
       return
     }
