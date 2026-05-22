@@ -38,11 +38,11 @@ export async function POST(req: Request) {
 
   if (leagueErr) return NextResponse.json({ error: leagueErr.message }, { status: 500 })
 
-  const { error: adminErr } = await admin.from('admin_users').insert({
+  const { error: adminErr } = await admin.from('admin_users').upsert({
     user_id: user.id,
     league_id: league.id,
     role: 'admin',
-  })
+  }, { onConflict: 'user_id' })
 
   if (adminErr) return NextResponse.json({ error: adminErr.message }, { status: 500 })
 
