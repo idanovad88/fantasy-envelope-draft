@@ -101,6 +101,14 @@ export default function Navbar({ isAdmin }: NavbarProps) {
             ניהול
           </Link>
         )}
+        <button
+          onClick={logout}
+          className="flex-1 flex flex-col items-center py-3 gap-1 text-xs font-medium"
+          style={{ color: 'var(--muted)' }}
+        >
+          <LogOut size={20} />
+          יציאה
+        </button>
       </nav>
     </>
   )
