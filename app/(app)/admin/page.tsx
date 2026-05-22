@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import AdminPanel from './AdminPanel'
 import type { League, Team, Auction } from '@/types'
@@ -13,6 +13,7 @@ export default async function AdminPage() {
   const { data: adminRow } = await supabase.from('admin_users').select('*').eq('user_id', user.id).maybeSingle()
   if (!adminRow) redirect('/')
 
+  const adminDb = createAdminClient()
   const leagueId = adminRow?.league_id
 
   // Resolve the league first so all subsequent queries use a consistent id
@@ -41,8 +42,8 @@ export default async function AdminPage() {
         : supabase.from('auctions').select('id, scheduled_start, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)').eq('status', 'completed').order('scheduled_start', { ascending: false }).limit(50),
       supabase.from('league_creator_whitelist').select('email').order('created_at', { ascending: true }),
       lid
-        ? supabase.from('admin_users').select('user_id').eq('league_id', lid)
-        : supabase.from('admin_users').select('user_id'),
+        ? adminDb.from('admin_users').select('user_id').eq('league_id', lid)
+        : adminDb.from('admin_users').select('user_id'),
     ])
 
   return (

@@ -31,9 +31,24 @@ export async function POST(req: Request) {
 
   // Team name exists → re-link to current user (admin client bypasses RLS)
   const { data: existingByName } = await admin
-    .from('teams').select('id').eq('league_id', league.id).ilike('name', teamName.trim()).maybeSingle()
+    .from('teams').select('id, user_id').eq('league_id', league.id).ilike('name', teamName.trim()).maybeSingle()
   if (existingByName) {
+    const oldUserId = existingByName.user_id
     await admin.from('teams').update({ user_id: user.id }).eq('id', existingByName.id)
+
+    // Transfer admin permissions from old session to new session
+    if (oldUserId && oldUserId !== user.id) {
+      const { data: oldAdminRow } = await admin
+        .from('admin_users').select('league_id, role').eq('user_id', oldUserId).maybeSingle()
+      if (oldAdminRow) {
+        await admin.from('admin_users').upsert(
+          { user_id: user.id, league_id: oldAdminRow.league_id, role: oldAdminRow.role },
+          { onConflict: 'user_id' }
+        )
+        await admin.from('admin_users').delete().eq('user_id', oldUserId)
+      }
+    }
+
     return NextResponse.json({ success: true })
   }
 
