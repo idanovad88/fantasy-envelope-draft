@@ -23,6 +23,22 @@ export default async function AdminPage() {
 
   const lid = league?.id
 
+  // Auto-activate any pending auction whose scheduled_start has passed
+  if (lid) {
+    const nowIso = new Date().toISOString()
+    const [{ data: alreadyActive }, { data: overdue }] = await Promise.all([
+      adminDb.from('auctions').select('id').eq('league_id', lid).eq('status', 'active').maybeSingle(),
+      adminDb.from('auctions').select('id, player_id').eq('league_id', lid).eq('status', 'pending')
+        .lte('scheduled_start', nowIso).order('scheduled_start', { ascending: true }).limit(1).maybeSingle(),
+    ])
+    if (!alreadyActive && overdue) {
+      await Promise.all([
+        adminDb.from('auctions').update({ status: 'active' }).eq('id', overdue.id),
+        adminDb.from('players').update({ status: 'on_auction' }).eq('id', overdue.player_id),
+      ])
+    }
+  }
+
   const [{ data: teams }, { data: activeAuction }, { data: scheduledAuctions }, { data: players }, { data: pastAuctions }, { data: leagueCreators }, { data: leagueAdminUsers }] =
     await Promise.all([
       lid
