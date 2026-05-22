@@ -37,7 +37,7 @@ export default function LandingPage() {
     // 1. Find league by name + join code
     const { data: league } = await supabase
       .from('leagues')
-      .select('id, name, budget_per_team, status')
+      .select('id, name, budget_per_team, num_teams, status')
       .ilike('name', leagueName.trim())
       .eq('join_code', leaguePassword.trim().toUpperCase())
       .maybeSingle()
@@ -70,21 +70,46 @@ export default function LandingPage() {
       userId = anonData.user.id
     }
 
-    // 3. Check not already in league
-    const { data: existing } = await supabase
+    // 3. Check not already in league by user_id
+    const { data: existingByUser } = await supabase
       .from('teams')
       .select('id')
       .eq('user_id', userId)
       .eq('league_id', league.id)
       .maybeSingle()
 
-    if (existing) {
-      router.push('/')
-      router.refresh()
+    if (existingByUser) {
+      window.location.href = '/'
       return
     }
 
-    // 4. Create team
+    // 4. Check if team name already exists — re-link to current user and redirect
+    const { data: existingByName } = await supabase
+      .from('teams')
+      .select('id')
+      .eq('league_id', league.id)
+      .ilike('name', teamName.trim())
+      .maybeSingle()
+
+    if (existingByName) {
+      await supabase.from('teams').update({ user_id: userId }).eq('id', existingByName.id)
+      window.location.href = '/'
+      return
+    }
+
+    // 5. Check league capacity
+    const { count: teamCount } = await supabase
+      .from('teams')
+      .select('id', { count: 'exact', head: true })
+      .eq('league_id', league.id)
+
+    if (teamCount !== null && league.num_teams !== null && teamCount >= league.num_teams) {
+      setError('הליגה מלאה — לא ניתן להצטרף')
+      setLoading(false)
+      return
+    }
+
+    // 6. Create team
     const { error: insertErr } = await supabase.from('teams').insert({
       league_id: league.id,
       name: teamName.trim(),
@@ -94,7 +119,7 @@ export default function LandingPage() {
     })
 
     if (insertErr) {
-      setError(insertErr.code === '23505' ? 'שם קבוצה זה כבר תפוס — בחר שם אחר' : insertErr.message)
+      setError(insertErr.message)
       setLoading(false)
       return
     }
