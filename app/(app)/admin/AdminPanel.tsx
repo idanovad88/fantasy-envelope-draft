@@ -24,6 +24,7 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
   const [tab, setTab] = useState<'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league'>('overview')
   const [loading, setLoading] = useState('')
   const [msg, setMsg] = useState('')
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   // League settings state
   const [leagueName, setLeagueName] = useState(league?.name ?? 'פנטזי דראפט 25-26')
@@ -430,31 +431,39 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
             </div>
           )}
 
-          {/* Past auctions */}
+          {/* Past auctions — collapsible */}
           {pastAuctions.length > 0 && (
             <div className="card">
-              <h2 className="font-bold mb-3">היסטוריית מכרזים</h2>
-              <div className="flex flex-col gap-1">
-                {pastAuctions.map(a => (
-                  <div key={a.id} className="flex items-center justify-between py-2 border-t text-sm" style={{ borderColor: 'var(--border)' }}>
-                    <div>
-                      <span className="font-medium">{a.player?.name ?? '—'}</span>
-                      {a.winning_team && (
-                        <span style={{ color: 'var(--muted)' }}> · {a.winning_team.name} · <span style={{ color: 'var(--success)' }}>${a.winning_bid}</span></span>
-                      )}
-                      {!a.winning_team && <span style={{ color: 'var(--muted)' }}> · לא נרכש</span>}
+              <button
+                className="flex items-center justify-between w-full text-right"
+                onClick={() => setHistoryOpen(o => !o)}
+              >
+                <span className="font-bold">היסטוריית מכרזים ({pastAuctions.length})</span>
+                <span style={{ color: 'var(--muted)', fontSize: '1.1rem' }}>{historyOpen ? '▲' : '▼'}</span>
+              </button>
+              {historyOpen && (
+                <div className="flex flex-col gap-1 mt-3">
+                  {pastAuctions.map(a => (
+                    <div key={a.id} className="flex items-center justify-between py-2 border-t text-sm" style={{ borderColor: 'var(--border)' }}>
+                      <div>
+                        <span className="font-medium">{a.player?.name ?? '—'}</span>
+                        {a.winning_team && (
+                          <span style={{ color: 'var(--muted)' }}> · {a.winning_team.name} · <span style={{ color: 'var(--success)' }}>${a.winning_bid}</span></span>
+                        )}
+                        {!a.winning_team && <span style={{ color: 'var(--muted)' }}> · לא נרכש</span>}
+                      </div>
+                      <button
+                        className="text-xs px-2 py-1 rounded"
+                        style={{ color: 'var(--danger)', border: '1px solid var(--danger)' }}
+                        onClick={() => cancelAuction(a.id)}
+                        disabled={!!loading}
+                      >
+                        בטל
+                      </button>
                     </div>
-                    <button
-                      className="text-xs px-2 py-1 rounded"
-                      style={{ color: 'var(--danger)', border: '1px solid var(--danger)' }}
-                      onClick={() => cancelAuction(a.id)}
-                      disabled={!!loading}
-                    >
-                      בטל
-                    </button>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
