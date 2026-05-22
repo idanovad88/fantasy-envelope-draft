@@ -47,6 +47,7 @@ CREATE TABLE teams (
   player_count INTEGER NOT NULL DEFAULT 0,
   is_complete BOOLEAN NOT NULL DEFAULT FALSE,
   priority_rank INTEGER,
+  tiebreak_rank INTEGER,
   approved BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
@@ -244,16 +245,16 @@ BEGIN
     FROM bids b JOIN teams t ON t.id = b.team_id
     WHERE b.auction_id = p_auction_id AND b.amount = v_max_bid AND t.is_complete = FALSE;
   ELSE
-    -- Tie: winner is team with best (lowest) priority_rank
+    -- Tie: winner is team with best (lowest) tiebreak_rank
     v_tie_broken := TRUE;
-    SELECT b.team_id, t.priority_rank INTO v_winning_team_id, v_best_priority
+    SELECT b.team_id, t.tiebreak_rank INTO v_winning_team_id, v_best_priority
     FROM bids b JOIN teams t ON t.id = b.team_id
     WHERE b.auction_id = p_auction_id AND b.amount = v_max_bid
-      AND t.is_complete = FALSE AND t.priority_rank IS NOT NULL
-    ORDER BY t.priority_rank ASC
+      AND t.is_complete = FALSE AND t.tiebreak_rank IS NOT NULL
+    ORDER BY t.tiebreak_rank ASC
     LIMIT 1;
 
-    -- Push winner to bottom of priority table
+    -- Push winner to bottom of tiebreak order (nomination order is unaffected)
     PERFORM demote_priority(v_winning_team_id, v_league_id);
   END IF;
 
@@ -291,19 +292,19 @@ BEGIN
 END;
 $$;
 
--- Demote a team to bottom of priority
+-- Demote a team to bottom of tiebreak order (nomination order is unaffected)
 CREATE OR REPLACE FUNCTION demote_priority(p_team_id UUID, p_league_id UUID)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE v_max_rank INTEGER;
 BEGIN
-  SELECT MAX(priority_rank) INTO v_max_rank
-  FROM teams WHERE league_id = p_league_id AND is_complete = FALSE AND priority_rank IS NOT NULL;
+  SELECT MAX(tiebreak_rank) INTO v_max_rank
+  FROM teams WHERE league_id = p_league_id AND is_complete = FALSE AND tiebreak_rank IS NOT NULL;
 
   INSERT INTO priority_log(league_id, team_id, old_rank, new_rank, reason)
-  SELECT p_league_id, p_team_id, priority_rank, v_max_rank + 1, 'tie_break_demotion'
+  SELECT p_league_id, p_team_id, tiebreak_rank, v_max_rank + 1, 'tie_break_demotion'
   FROM teams WHERE id = p_team_id;
 
-  UPDATE teams SET priority_rank = v_max_rank + 1, updated_at = NOW() WHERE id = p_team_id;
+  UPDATE teams SET tiebreak_rank = v_max_rank + 1, updated_at = NOW() WHERE id = p_team_id;
 END;
 $$;
 
