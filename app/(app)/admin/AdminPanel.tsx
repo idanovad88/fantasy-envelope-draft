@@ -694,20 +694,20 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{team.name}</span>
                     {team.is_complete && <span className="badge badge-green text-xs">✅</span>}
-                    {localAdminIds.includes(team.user_id) && <span className="badge badge-blue text-xs">מנהל</span>}
+                    {team.user_id && localAdminIds.includes(team.user_id) && <span className="badge badge-blue text-xs">מנהל</span>}
                   </div>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
                     פריוריטי #{team.priority_rank ?? '—'} · {team.player_count} שחקנים · ${team.budget_remaining}
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  {team.user_id !== currentUserId && (
-                    localAdminIds.includes(team.user_id) ? (
+                  {team.user_id && team.user_id !== currentUserId && (
+                    team.user_id && localAdminIds.includes(team.user_id) ? (
                       <button
                         className="btn text-xs"
                         style={{ background: 'var(--muted)', color: 'white', opacity: togglingAdminTeamId === team.id ? 0.5 : 1 }}
                         disabled={togglingAdminTeamId === team.id}
-                        onClick={() => toggleTeamAdmin(team.id, team.user_id, false)}
+                        onClick={() => toggleTeamAdmin(team.id, team.user_id!, false)}
                       >
                         {togglingAdminTeamId === team.id ? '...' : 'בטל ניהול'}
                       </button>
@@ -716,7 +716,7 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
                         className="btn text-xs"
                         style={{ background: 'var(--success)', color: 'white', opacity: togglingAdminTeamId === team.id ? 0.5 : 1 }}
                         disabled={togglingAdminTeamId === team.id}
-                        onClick={() => toggleTeamAdmin(team.id, team.user_id, true)}
+                        onClick={() => toggleTeamAdmin(team.id, team.user_id!, true)}
                       >
                         {togglingAdminTeamId === team.id ? '...' : 'הענק ניהול'}
                       </button>
