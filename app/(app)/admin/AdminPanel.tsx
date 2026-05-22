@@ -439,7 +439,57 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
       {/* AUCTION */}
       {tab === 'auction' && (
         <div className="flex flex-col gap-4">
-          {/* Nominate new player — always at top */}
+          {/* Active auction */}
+          {activeAuction && (
+            <div className="card" style={{ borderColor: 'var(--primary)' }}>
+              <h2 className="font-bold mb-3">מכרז פעיל: {(activeAuction as { player?: { name: string } }).player?.name}</h2>
+              <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
+                חשיפה: {formatDateTime(activeAuction.reveal_time)}
+              </p>
+
+              {/* Bid count only — amounts hidden until reveal */}
+              <div className="mb-3">
+                <p className="text-sm" style={{ color: 'var(--muted)' }}>
+                  הצעות שהוגשו: <strong style={{ color: 'var(--text)' }}>
+                    {((activeAuction as { bids?: unknown[] }).bids || []).length}
+                  </strong>
+                </p>
+              </div>
+
+              {/* Edit reveal time */}
+              <div className="mb-4">
+                <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted)' }}>שנה זמן סגירה</label>
+                <div className="flex gap-2">
+                  <input
+                    type="datetime-local"
+                    className="input text-sm flex-1"
+                    value={newRevealTime}
+                    onChange={e => setNewRevealTime(e.target.value)}
+                    dir="ltr"
+                  />
+                  <button
+                    className="btn btn-outline text-sm"
+                    onClick={updateRevealTime}
+                    disabled={!!loading || !newRevealTime}
+                  >
+                    {loading === 'reveal_time' ? '...' : 'עדכן'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <button className="btn btn-primary flex-1" onClick={() => revealAuction(activeAuction.id)} disabled={!!loading}>
+                  {loading === 'reveal_' + activeAuction.id ? 'מסדר...' : '👁 חשוף תוצאות'}
+                </button>
+                <button className="btn btn-outline flex-shrink-0" onClick={() => cancelAuction(activeAuction.id)} disabled={!!loading}
+                  style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}>
+                  {loading === 'cancel_' + activeAuction.id ? '...' : '✕ בטל מכרז'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Nominate new player */}
           <div className="card">
             <h2 className="font-bold mb-4">
               {activeAuction || scheduledAuctions.length > 0 ? 'הוסף לתור המכרזים' : 'העלה שחקן חדש למכרז'}
@@ -555,56 +605,6 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
               </button>
             </div>
           </div>
-
-          {/* Active auction */}
-          {activeAuction && (
-            <div className="card" style={{ borderColor: 'var(--primary)' }}>
-              <h2 className="font-bold mb-3">מכרז פעיל: {(activeAuction as { player?: { name: string } }).player?.name}</h2>
-              <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
-                חשיפה: {formatDateTime(activeAuction.reveal_time)}
-              </p>
-
-              {/* Bid count only — amounts hidden until reveal */}
-              <div className="mb-3">
-                <p className="text-sm" style={{ color: 'var(--muted)' }}>
-                  הצעות שהוגשו: <strong style={{ color: 'var(--text)' }}>
-                    {((activeAuction as { bids?: unknown[] }).bids || []).length}
-                  </strong>
-                </p>
-              </div>
-
-              {/* Edit reveal time */}
-              <div className="mb-4">
-                <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted)' }}>שנה זמן סגירה</label>
-                <div className="flex gap-2">
-                  <input
-                    type="datetime-local"
-                    className="input text-sm flex-1"
-                    value={newRevealTime}
-                    onChange={e => setNewRevealTime(e.target.value)}
-                    dir="ltr"
-                  />
-                  <button
-                    className="btn btn-outline text-sm"
-                    onClick={updateRevealTime}
-                    disabled={!!loading || !newRevealTime}
-                  >
-                    {loading === 'reveal_time' ? '...' : 'עדכן'}
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <button className="btn btn-primary flex-1" onClick={() => revealAuction(activeAuction.id)} disabled={!!loading}>
-                  {loading === 'reveal_' + activeAuction.id ? 'מסדר...' : '👁 חשוף תוצאות'}
-                </button>
-                <button className="btn btn-outline flex-shrink-0" onClick={() => cancelAuction(activeAuction.id)} disabled={!!loading}
-                  style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}>
-                  {loading === 'cancel_' + activeAuction.id ? '...' : '✕ בטל מכרז'}
-                </button>
-              </div>
-            </div>
-          )}
 
           {/* Scheduled (pending) auctions queue */}
           {scheduledAuctions.length > 0 && (
