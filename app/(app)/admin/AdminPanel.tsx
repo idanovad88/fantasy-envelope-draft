@@ -25,6 +25,8 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
   const [loading, setLoading] = useState('')
   const [msg, setMsg] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [deletingTeamId, setDeletingTeamId] = useState<string | null>(null)
+  const [localTeams, setLocalTeams] = useState(teams)
 
   // League settings state
   const [leagueName, setLeagueName] = useState(league?.name ?? 'פנטזי דראפט 25-26')
@@ -64,6 +66,21 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
   })
 
   const availablePlayers = players.filter(p => p.status === 'available')
+
+  async function deleteTeam(teamId: string, teamName: string) {
+    if (!confirm(`למחוק את הקבוצה "${teamName}"? הפעולה בלתי הפיכה.`)) return
+    setDeletingTeamId(teamId)
+    const res = await fetch('/api/admin/delete-team', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ teamId }),
+    })
+    const json = await res.json()
+    if (!res.ok) { setMsg('שגיאה: ' + json.error); setDeletingTeamId(null); return }
+    setLocalTeams(prev => prev.filter(t => t.id !== teamId))
+    setDeletingTeamId(null)
+    setMsg(`הקבוצה "${teamName}" נמחקה`)
+  }
 
   async function addPlayer() {
     if (!league || !newPlayerName.trim()) return
@@ -611,7 +628,7 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
             </a>
           </div>
           <div className="flex flex-col gap-2">
-            {teams.map(team => (
+            {localTeams.map(team => (
               <div key={team.id} className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--background)' }}>
                 <div>
                   <div className="flex items-center gap-2">
@@ -622,8 +639,14 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
                     פריוריטי #{team.priority_rank ?? '—'} · {team.player_count} שחקנים · ${team.budget_remaining}
                   </p>
                 </div>
-                <div className="flex gap-2">
-                </div>
+                <button
+                  className="btn text-xs"
+                  style={{ background: 'var(--danger)', color: 'white', opacity: deletingTeamId === team.id ? 0.5 : 1 }}
+                  disabled={deletingTeamId === team.id}
+                  onClick={() => deleteTeam(team.id, team.name)}
+                >
+                  {deletingTeamId === team.id ? '...' : 'מחק'}
+                </button>
               </div>
             ))}
           </div>

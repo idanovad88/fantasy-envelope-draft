@@ -7,15 +7,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: adminRow } = await supabase
-    .from('admin_users')
-    .select('role')
-    .eq('user_id', user.id)
-    .maybeSingle()
+  const [{ data: adminRow }, { data: createdLeague }] = await Promise.all([
+    supabase.from('admin_users').select('role').eq('user_id', user.id).maybeSingle(),
+    supabase.from('leagues').select('id').eq('created_by', user.id).maybeSingle(),
+  ])
 
   return (
     <div className="flex min-h-screen">
-      <Navbar isAdmin={!!adminRow} />
+      <Navbar isAdmin={!!adminRow || !!createdLeague} />
       <main className="flex-1 p-4 md:p-6 pb-20 md:pb-6 w-full">
         {children}
       </main>
