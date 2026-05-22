@@ -18,9 +18,10 @@ interface Props {
   pastAuctions: PastAuction[]
   leagueCreators: string[]
   adminUserIds: string[]
+  currentUserId: string
 }
 
-export default function AdminPanel({ league, teams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators, adminUserIds }: Props) {
+export default function AdminPanel({ league, teams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators, adminUserIds, currentUserId }: Props) {
   const supabase = createClient()
   const [tab, setTab] = useState<'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league'>('overview')
   const [loading, setLoading] = useState('')
@@ -30,6 +31,10 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
   const [localTeams, setLocalTeams] = useState(teams)
   const [localAdminIds, setLocalAdminIds] = useState<string[]>(adminUserIds)
   const [togglingAdminTeamId, setTogglingAdminTeamId] = useState<string | null>(null)
+  const [adminTeamName, setAdminTeamName] = useState('')
+  const [joiningDraft, setJoiningDraft] = useState(false)
+
+  const adminHasTeam = localTeams.some(t => t.user_id === currentUserId)
 
   // League settings state
   const [leagueName, setLeagueName] = useState(league?.name ?? 'פנטזי דראפט 25-26')
@@ -81,6 +86,25 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
     if (!res.ok) { setMsg('שגיאה: ' + json.error); setTogglingAdminTeamId(null); return }
     setLocalAdminIds(prev => grant ? [...prev, teamUserId] : prev.filter(id => id !== teamUserId))
     setTogglingAdminTeamId(null)
+  }
+
+  async function joinDraftAsAdmin(e: React.FormEvent) {
+    e.preventDefault()
+    if (!league || !adminTeamName.trim()) return
+    setJoiningDraft(true)
+    const res = await fetch('/api/join-league', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        leagueName: league.name,
+        joinCode: league.join_code ?? '',
+        teamName: adminTeamName.trim(),
+      }),
+    })
+    const json = await res.json()
+    if (!res.ok) { setMsg('שגיאה: ' + json.error); setJoiningDraft(false); return }
+    setMsg('הצטרפת לדראפט!')
+    window.location.reload()
   }
 
   async function deleteTeam(teamId: string, teamName: string) {
@@ -360,6 +384,26 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
               <p style={{ color: 'var(--muted)' }}>ליגה טרם נוצרה. עבור להגדרות.</p>
             )}
           </div>
+
+          {league && !adminHasTeam && (
+            <div className="card">
+              <h2 className="font-bold mb-1">הצטרפות לדראפט כשחקן</h2>
+              <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>אתה מנהל הליגה — תוכל גם להשתתף עם קבוצה משלך.</p>
+              <form onSubmit={joinDraftAsAdmin} className="flex gap-2">
+                <input
+                  className="input flex-1"
+                  placeholder="שם הקבוצה שלך"
+                  value={adminTeamName}
+                  onChange={e => setAdminTeamName(e.target.value)}
+                  required
+                  maxLength={40}
+                />
+                <button type="submit" className="btn btn-primary" disabled={joiningDraft}>
+                  {joiningDraft ? '...' : 'הצטרף'}
+                </button>
+              </form>
+            </div>
+          )}
 
         </div>
       )}

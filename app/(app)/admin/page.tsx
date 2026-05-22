@@ -56,6 +56,7 @@ export default async function AdminPage() {
         pastAuctions={(pastAuctions || []) as unknown as { id: string; scheduled_start: string; winning_bid: number | null; player: { name: string } | null; winning_team: { name: string } | null }[]}
         leagueCreators={(leagueCreators || []).map(r => r.email)}
         adminUserIds={(leagueAdminUsers || []).map(r => r.user_id)}
+        currentUserId={user.id}
       />
     </>
   )

@@ -160,6 +160,7 @@ export default function LandingPage() {
               <div className="relative">
                 <input
                   className="input"
+                  style={{ paddingLeft: '2rem' }}
                   type={showLeaguePassword ? 'text' : 'password'}
                   placeholder="הסיסמה שקיבלת מהמנהל"
                   value={leaguePassword}
@@ -170,8 +171,7 @@ export default function LandingPage() {
                 <button
                   type="button"
                   onClick={() => setShowLeaguePassword(p => !p)}
-                  className="absolute left-3 top-1/2 -translate-y-1/2"
-                  style={{ color: 'var(--muted)' }}
+                  style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                 >
                   {showLeaguePassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
@@ -222,6 +222,7 @@ export default function LandingPage() {
               <div className="relative">
                 <input
                   className="input"
+                  style={{ paddingLeft: '2rem' }}
                   type={showPassword ? 'text' : 'password'}
                   placeholder="••••••••"
                   value={password}
@@ -232,8 +233,7 @@ export default function LandingPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(p => !p)}
-                  className="absolute left-3 top-1/2 -translate-y-1/2"
-                  style={{ color: 'var(--muted)' }}
+                  style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                 >
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
