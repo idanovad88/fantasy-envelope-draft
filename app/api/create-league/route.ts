@@ -6,7 +6,7 @@ export async function POST(req: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'לא מחובר' }, { status: 401 })
 
-  const { leagueName, joinCode, numTeams, playersPerTeam, budgetPerTeam, minBid } = await req.json()
+  const { leagueName, joinCode, numTeams, playersPerTeam, budgetPerTeam, minBid, teamName } = await req.json()
   if (!leagueName?.trim()) return NextResponse.json({ error: 'שם ליגה נדרש' }, { status: 400 })
 
   // Check whitelist via user's session (RLS: can only see own email row)
@@ -45,6 +45,16 @@ export async function POST(req: Request) {
   }, { onConflict: 'user_id' })
 
   if (adminErr) return NextResponse.json({ error: adminErr.message }, { status: 500 })
+
+  if (teamName?.trim()) {
+    await admin.from('teams').insert({
+      league_id: league.id,
+      name: teamName.trim(),
+      user_id: user.id,
+      budget_remaining: budgetPerTeam ?? 200,
+      approved: true,
+    })
+  }
 
   return NextResponse.json({ success: true })
 }

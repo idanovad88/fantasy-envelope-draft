@@ -15,10 +15,17 @@ export default async function DashboardPage() {
     .from('teams').select('*').eq('user_id', user!.id)
     .order('created_at', { ascending: false }).limit(1).maybeSingle()
 
+  // Check if this user created a league (for spectator-admin case)
+  const { data: createdLeague } = !myTeam
+    ? await supabase.from('leagues').select('*').eq('created_by', user!.id).order('created_at', { ascending: false }).limit(1).maybeSingle()
+    : { data: null }
+
   // Show the league the user belongs to; admins/guests see the latest league
   const { data: league } = myTeam?.league_id
     ? await supabase.from('leagues').select('*').eq('id', myTeam.league_id).maybeSingle()
-    : await supabase.from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle()
+    : createdLeague
+      ? { data: createdLeague }
+      : await supabase.from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle()
 
   const [{ data: featuredAuction }, { data: teams }] =
     await Promise.all([
@@ -137,12 +144,28 @@ export default async function DashboardPage() {
                 צפה בקבוצה
               </Link>
             </div>
+          ) : createdLeague ? (
+            <div>
+              <p className="font-bold text-xl mb-1">מנהל הליגה</p>
+              <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>{createdLeague.name}</p>
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
+                  <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>קבוצות</p>
+                  <p className="font-bold text-lg">{typedTeams.length}/{createdLeague.num_teams}</p>
+                </div>
+                <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
+                  <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>סטטוס</p>
+                  <p className="font-bold text-lg capitalize">{createdLeague.status}</p>
+                </div>
+              </div>
+              <Link href="/admin" className="btn btn-primary w-full mt-3 text-sm">פאנל ניהול</Link>
+            </div>
           ) : (
             <div className="text-center py-6">
               <p className="text-3xl mb-3">🏀</p>
               <p className="font-medium mb-4">ברוך הבא!</p>
               <div className="flex flex-col gap-2">
-                <Link href="/join" className="btn btn-primary">הצטרף לליגה קיימת</Link>
+                <Link href="/login" className="btn btn-primary">הצטרף לליגה קיימת</Link>
                 <Link href="/create-league" className="btn btn-outline">הקם ליגה חדשה</Link>
               </div>
             </div>

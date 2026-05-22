@@ -17,9 +17,10 @@ interface Props {
   players: { id: string; name: string; status: string; ranking: number | null; position: string | null }[]
   pastAuctions: PastAuction[]
   leagueCreators: string[]
+  adminUserIds: string[]
 }
 
-export default function AdminPanel({ league, teams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators }: Props) {
+export default function AdminPanel({ league, teams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators, adminUserIds }: Props) {
   const supabase = createClient()
   const [tab, setTab] = useState<'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league'>('overview')
   const [loading, setLoading] = useState('')
@@ -27,6 +28,8 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
   const [historyOpen, setHistoryOpen] = useState(false)
   const [deletingTeamId, setDeletingTeamId] = useState<string | null>(null)
   const [localTeams, setLocalTeams] = useState(teams)
+  const [localAdminIds, setLocalAdminIds] = useState<string[]>(adminUserIds)
+  const [togglingAdminTeamId, setTogglingAdminTeamId] = useState<string | null>(null)
 
   // League settings state
   const [leagueName, setLeagueName] = useState(league?.name ?? 'פנטזי דראפט 25-26')
@@ -66,6 +69,19 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
   })
 
   const availablePlayers = players.filter(p => p.status === 'available')
+
+  async function toggleTeamAdmin(teamId: string, teamUserId: string, grant: boolean) {
+    setTogglingAdminTeamId(teamId)
+    const res = await fetch('/api/admin/set-team-admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ teamId, grant }),
+    })
+    const json = await res.json()
+    if (!res.ok) { setMsg('שגיאה: ' + json.error); setTogglingAdminTeamId(null); return }
+    setLocalAdminIds(prev => grant ? [...prev, teamUserId] : prev.filter(id => id !== teamUserId))
+    setTogglingAdminTeamId(null)
+  }
 
   async function deleteTeam(teamId: string, teamName: string) {
     if (!confirm(`למחוק את הקבוצה "${teamName}"? הפעולה בלתי הפיכה.`)) return
@@ -634,19 +650,43 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{team.name}</span>
                     {team.is_complete && <span className="badge badge-green text-xs">✅</span>}
+                    {localAdminIds.includes(team.user_id) && <span className="badge badge-blue text-xs">מנהל</span>}
                   </div>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
                     פריוריטי #{team.priority_rank ?? '—'} · {team.player_count} שחקנים · ${team.budget_remaining}
                   </p>
                 </div>
-                <button
-                  className="btn text-xs"
-                  style={{ background: 'var(--danger)', color: 'white', opacity: deletingTeamId === team.id ? 0.5 : 1 }}
-                  disabled={deletingTeamId === team.id}
-                  onClick={() => deleteTeam(team.id, team.name)}
-                >
-                  {deletingTeamId === team.id ? '...' : 'מחק'}
-                </button>
+                <div className="flex gap-2">
+                  {team.user_id !== league?.created_by && (
+                    localAdminIds.includes(team.user_id) ? (
+                      <button
+                        className="btn text-xs"
+                        style={{ background: 'var(--muted)', color: 'white', opacity: togglingAdminTeamId === team.id ? 0.5 : 1 }}
+                        disabled={togglingAdminTeamId === team.id}
+                        onClick={() => toggleTeamAdmin(team.id, team.user_id, false)}
+                      >
+                        {togglingAdminTeamId === team.id ? '...' : 'בטל ניהול'}
+                      </button>
+                    ) : (
+                      <button
+                        className="btn text-xs"
+                        style={{ background: 'var(--success)', color: 'white', opacity: togglingAdminTeamId === team.id ? 0.5 : 1 }}
+                        disabled={togglingAdminTeamId === team.id}
+                        onClick={() => toggleTeamAdmin(team.id, team.user_id, true)}
+                      >
+                        {togglingAdminTeamId === team.id ? '...' : 'הענק ניהול'}
+                      </button>
+                    )
+                  )}
+                  <button
+                    className="btn text-xs"
+                    style={{ background: 'var(--danger)', color: 'white', opacity: deletingTeamId === team.id ? 0.5 : 1 }}
+                    disabled={deletingTeamId === team.id}
+                    onClick={() => deleteTeam(team.id, team.name)}
+                  >
+                    {deletingTeamId === team.id ? '...' : 'מחק'}
+                  </button>
+                </div>
               </div>
             ))}
           </div>

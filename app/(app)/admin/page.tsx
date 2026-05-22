@@ -22,7 +22,7 @@ export default async function AdminPage() {
 
   const lid = league?.id
 
-  const [{ data: teams }, { data: activeAuction }, { data: scheduledAuctions }, { data: players }, { data: pastAuctions }, { data: leagueCreators }] =
+  const [{ data: teams }, { data: activeAuction }, { data: scheduledAuctions }, { data: players }, { data: pastAuctions }, { data: leagueCreators }, { data: leagueAdminUsers }] =
     await Promise.all([
       lid
         ? supabase.from('teams').select('*').eq('league_id', lid).order('priority_rank', { ascending: true, nullsFirst: false })
@@ -40,6 +40,9 @@ export default async function AdminPage() {
         ? supabase.from('auctions').select('id, scheduled_start, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)').eq('league_id', lid).eq('status', 'completed').order('scheduled_start', { ascending: false }).limit(50)
         : supabase.from('auctions').select('id, scheduled_start, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)').eq('status', 'completed').order('scheduled_start', { ascending: false }).limit(50),
       supabase.from('league_creator_whitelist').select('email').order('created_at', { ascending: true }),
+      lid
+        ? supabase.from('admin_users').select('user_id').eq('league_id', lid)
+        : supabase.from('admin_users').select('user_id'),
     ])
 
   return (
@@ -52,6 +55,7 @@ export default async function AdminPage() {
         players={players || []}
         pastAuctions={(pastAuctions || []) as unknown as { id: string; scheduled_start: string; winning_bid: number | null; player: { name: string } | null; winning_team: { name: string } | null }[]}
         leagueCreators={(leagueCreators || []).map(r => r.email)}
+        adminUserIds={(leagueAdminUsers || []).map(r => r.user_id)}
       />
     </>
   )

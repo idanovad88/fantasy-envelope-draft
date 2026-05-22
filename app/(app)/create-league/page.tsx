@@ -12,6 +12,8 @@ export default function CreateLeaguePage() {
   const [playersPerTeam, setPlayersPerTeam] = useState(13)
   const [budgetPerTeam, setBudgetPerTeam] = useState(200)
   const [minBid, setMinBid] = useState(1)
+  const [joinDraft, setJoinDraft] = useState(false)
+  const [teamName, setTeamName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const supabase = createClient()
@@ -44,6 +46,7 @@ export default function CreateLeaguePage() {
         playersPerTeam,
         budgetPerTeam,
         minBid,
+        teamName: joinDraft ? teamName.trim() : null,
       }),
     })
 
@@ -162,6 +165,49 @@ export default function CreateLeaguePage() {
               />
             </div>
           </div>
+        </div>
+
+        <div className="border-t pt-4" style={{ borderColor: 'var(--border)' }}>
+          <p className="text-sm font-medium mb-3">השתתפות בדראפט</p>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              className="flex-1 py-2 rounded-lg text-sm font-medium border transition-colors"
+              style={{
+                background: !joinDraft ? 'var(--primary)' : 'transparent',
+                color: !joinDraft ? 'white' : 'var(--muted)',
+                borderColor: !joinDraft ? 'var(--primary)' : 'var(--border)',
+              }}
+              onClick={() => setJoinDraft(false)}
+            >
+              צופה-מנהל בלבד
+            </button>
+            <button
+              type="button"
+              className="flex-1 py-2 rounded-lg text-sm font-medium border transition-colors"
+              style={{
+                background: joinDraft ? 'var(--primary)' : 'transparent',
+                color: joinDraft ? 'white' : 'var(--muted)',
+                borderColor: joinDraft ? 'var(--primary)' : 'var(--border)',
+              }}
+              onClick={() => setJoinDraft(true)}
+            >
+              אצטרף כשחקן
+            </button>
+          </div>
+          {joinDraft && (
+            <div className="mt-3">
+              <label className="block text-sm mb-1.5" style={{ color: 'var(--muted)' }}>שם הקבוצה שלך</label>
+              <input
+                className="input"
+                placeholder="שם הקבוצה"
+                value={teamName}
+                onChange={e => setTeamName(e.target.value)}
+                required={joinDraft}
+                maxLength={40}
+              />
+            </div>
+          )}
         </div>
 
         {error && <p className="text-sm" style={{ color: 'var(--danger)' }}>{error}</p>}
