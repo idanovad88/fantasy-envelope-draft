@@ -25,7 +25,9 @@ export default async function AdminPage() {
       supabase.from('teams').select('*').eq('approved', false),
       supabase.from('auctions').select('*, player:players(*), bids(id)').eq('status', 'active').order('scheduled_start', { ascending: false }).limit(1).maybeSingle(),
       supabase.from('auctions').select('id, scheduled_start, reveal_time, player:players(name)').eq('status', 'pending').order('scheduled_start', { ascending: true }),
-      supabase.from('players').select('id, name, status, ranking, position').order('ranking', { ascending: true }),
+      leagueId
+        ? supabase.from('players').select('id, name, status, ranking, position').eq('league_id', leagueId).order('ranking', { ascending: true })
+        : supabase.from('players').select('id, name, status, ranking, position').order('ranking', { ascending: true }),
       supabase.from('auctions')
         .select('id, scheduled_start, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)')
         .eq('status', 'completed')

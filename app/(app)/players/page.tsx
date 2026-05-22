@@ -11,12 +11,17 @@ type PlayerWithTeam = Player & { drafting_team: { id: string; name: string } | n
 export default async function PlayersPage() {
   const supabase = await createClient()
 
-  const [{ data: players }, { data: league }, { data: activeAuction }, { data: pendingAuctions }] =
+  const { data: league } = await supabase
+    .from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle()
+
+  const [{ data: players }, { data: activeAuction }, { data: pendingAuctions }] =
     await Promise.all([
-      supabase.from('players')
-        .select('*, drafting_team:teams!drafted_by_team_id(id, name)')
-        .order('ranking', { ascending: true, nullsFirst: false }),
-      supabase.from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle(),
+      league
+        ? supabase.from('players')
+            .select('*, drafting_team:teams!drafted_by_team_id(id, name)')
+            .eq('league_id', league.id)
+            .order('ranking', { ascending: true, nullsFirst: false })
+        : Promise.resolve({ data: [] }),
       supabase.from('auctions').select('id, player_id').eq('status', 'active').maybeSingle(),
       supabase.from('auctions').select('id, player_id, scheduled_start').eq('status', 'pending').order('scheduled_start', { ascending: true }),
     ])
