@@ -1,7 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import AdminPanel from './AdminPanel'
-import ImportPlayers from './ImportPlayers'
 import type { League, Team, Auction } from '@/types'
 
 export const dynamic = 'force-dynamic'
@@ -58,7 +57,6 @@ export default async function AdminPage() {
         pastAuctions={(pastAuctions || []) as unknown as { id: string; scheduled_start: string; winning_bid: number | null; player: { name: string } | null; winning_team: { name: string } | null }[]}
         leagueCreators={(leagueCreators || []).map(r => r.email)}
       />
-      {league && <ImportPlayers leagueId={league.id} />}
     </>
   )
 }

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatDateTime, formatTime } from '@/lib/utils'
 import type { League, Team, Auction } from '@/types'
+import ImportPlayers from './ImportPlayers'
 
 type PastAuction = { id: string; scheduled_start: string; winning_bid: number | null; player: { name: string } | null; winning_team: { name: string } | null }
 type ScheduledAuction = { id: string; scheduled_start: string; reveal_time: string; player: { name: string } | null }
@@ -615,6 +616,8 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
                 ))}
             </div>
           </div>
+
+          {league && <ImportPlayers leagueId={league.id} />}
         </div>
       )}
 
