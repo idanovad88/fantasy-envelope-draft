@@ -99,8 +99,7 @@ export default function LandingPage() {
       return
     }
 
-    router.push('/')
-    router.refresh()
+    window.location.href = '/'
   }
 
   async function handleCreate(e: React.FormEvent) {
