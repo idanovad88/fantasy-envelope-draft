@@ -90,7 +90,7 @@ export default function LandingPage() {
       name: teamName.trim(),
       user_id: userId,
       budget_remaining: league.budget_per_team,
-      approved: false,
+      approved: true,
     })
 
     if (insertErr) {

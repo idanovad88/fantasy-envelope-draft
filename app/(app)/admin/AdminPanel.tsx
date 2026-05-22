@@ -12,7 +12,6 @@ type ScheduledAuction = { id: string; scheduled_start: string; reveal_time: stri
 interface Props {
   league: League | null
   teams: Team[]
-  pendingTeams: Team[]
   activeAuction: (Auction & { player: { name: string }; bids: { id: string }[] }) | null
   scheduledAuctions: ScheduledAuction[]
   players: { id: string; name: string; status: string; ranking: number | null; position: string | null }[]
@@ -20,7 +19,7 @@ interface Props {
   leagueCreators: string[]
 }
 
-export default function AdminPanel({ league, teams, pendingTeams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators }: Props) {
+export default function AdminPanel({ league, teams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators }: Props) {
   const supabase = createClient()
   const [tab, setTab] = useState<'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league'>('overview')
   const [loading, setLoading] = useState('')
@@ -171,14 +170,6 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
     await Promise.all(updates)
     await setLeagueStatus('active')
     setMsg('הגרלה בוצעה! סדר פריוריטי נקבע.')
-    setLoading('')
-    window.location.reload()
-  }
-
-  async function approveTeam(teamId: string) {
-    setLoading('team_' + teamId)
-    await supabase.from('teams').update({ approved: true, budget_remaining: league?.budget_per_team ?? 200, updated_at: new Date().toISOString() }).eq('id', teamId)
-    setMsg('קבוצה אושרה')
     setLoading('')
     window.location.reload()
   }
@@ -337,21 +328,6 @@ export default function AdminPanel({ league, teams, pendingTeams, activeAuction,
             )}
           </div>
 
-          {pendingTeams.length > 0 && (
-            <div className="card" style={{ borderColor: 'var(--warning)' }}>
-              <h2 className="font-bold mb-3 flex items-center gap-2">
-                ⚠️ קבוצות ממתינות לאישור ({pendingTeams.length})
-              </h2>
-              {pendingTeams.map(t => (
-                <div key={t.id} className="flex items-center justify-between py-2 border-t" style={{ borderColor: 'var(--border)' }}>
-                  <span className="font-medium">{t.name}</span>
-                  <button className="btn btn-success text-sm" onClick={() => approveTeam(t.id)} disabled={loading === 'team_' + t.id}>
-                    {loading === 'team_' + t.id ? '...' : 'אשר'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
 

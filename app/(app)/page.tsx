@@ -58,10 +58,7 @@ export default async function DashboardPage() {
         </h1>
         {typedLeague && (
           <p className="text-sm" style={{ color: 'var(--muted)' }}>
-            <span>{typedTeams.filter(t => t.approved).length}/{typedLeague.num_teams} הצטרפו</span>
-            {typedTeams.filter(t => !t.approved).length > 0 && (
-              <span style={{ color: 'var(--warning)' }}> · {typedTeams.filter(t => !t.approved).length} ממתינים לאישור</span>
-            )}
+            <span>{typedTeams.length}/{typedLeague.num_teams} הצטרפו</span>
             {typedTeams.filter(t => t.is_complete).length > 0 && (
               <span> · {typedTeams.filter(t => t.is_complete).length} השלימו דראפט</span>
             )}

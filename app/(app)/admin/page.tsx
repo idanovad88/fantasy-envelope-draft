@@ -22,14 +22,11 @@ export default async function AdminPage() {
 
   const lid = league?.id
 
-  const [{ data: teams }, { data: pendingTeams }, { data: activeAuction }, { data: scheduledAuctions }, { data: players }, { data: pastAuctions }, { data: leagueCreators }] =
+  const [{ data: teams }, { data: activeAuction }, { data: scheduledAuctions }, { data: players }, { data: pastAuctions }, { data: leagueCreators }] =
     await Promise.all([
       lid
         ? supabase.from('teams').select('*').eq('league_id', lid).order('priority_rank', { ascending: true, nullsFirst: false })
         : supabase.from('teams').select('*').order('priority_rank', { ascending: true, nullsFirst: false }),
-      lid
-        ? supabase.from('teams').select('*').eq('league_id', lid).eq('approved', false)
-        : supabase.from('teams').select('*').eq('approved', false),
       lid
         ? supabase.from('auctions').select('*, player:players(*), bids(id)').eq('league_id', lid).eq('status', 'active').order('scheduled_start', { ascending: false }).limit(1).maybeSingle()
         : supabase.from('auctions').select('*, player:players(*), bids(id)').eq('status', 'active').order('scheduled_start', { ascending: false }).limit(1).maybeSingle(),
@@ -50,7 +47,6 @@ export default async function AdminPage() {
       <AdminPanel
         league={league as League | null}
         teams={(teams || []) as Team[]}
-        pendingTeams={(pendingTeams || []) as Team[]}
         activeAuction={activeAuction as (Auction & { player: { name: string }; bids: { id: string }[] }) | null}
         scheduledAuctions={(scheduledAuctions || []) as unknown as { id: string; scheduled_start: string; reveal_time: string; player: { name: string } | null }[]}
         players={players || []}
