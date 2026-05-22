@@ -617,18 +617,12 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{team.name}</span>
                     {team.is_complete && <span className="badge badge-green text-xs">✅</span>}
-                    {!team.approved && <span className="badge badge-yellow text-xs">ממתין</span>}
                   </div>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
                     פריוריטי #{team.priority_rank ?? '—'} · {team.player_count} שחקנים · ${team.budget_remaining}
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  {!team.approved && (
-                    <button className="btn btn-success text-xs" onClick={() => approveTeam(team.id)}>
-                      אשר
-                    </button>
-                  )}
                 </div>
               </div>
             ))}
