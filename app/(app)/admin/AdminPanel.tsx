@@ -42,6 +42,7 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
   const [playersPerTeam, setPlayersPerTeam] = useState(league?.players_per_team ?? 13)
   const [budgetPerTeam, setBudgetPerTeam] = useState(league?.budget_per_team ?? 200)
   const [joinCode, setJoinCode] = useState(league?.join_code ?? '')
+  const [auctionDurationHours, setAuctionDurationHours] = useState(league?.auction_duration_hours ?? 1.5)
   const [draftStartTime, setDraftStartTime] = useState(() => {
     if (!league?.draft_start_time) return ''
     return new Date(league.draft_start_time).toISOString().slice(0, 16)
@@ -66,6 +67,8 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
 
   // Auction nomination state
   const [selectedPlayer, setSelectedPlayer] = useState('')
+  const [playerSearch, setPlayerSearch] = useState('')
+  const [showPlayerResults, setShowPlayerResults] = useState(false)
   const [selectedNominator, setSelectedNominator] = useState('')
   const [nominationTime, setNominationTime] = useState(() => {
     const d = new Date()
@@ -206,6 +209,7 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
       budget_per_team: budgetPerTeam,
       join_code: joinCode.trim().toUpperCase() || null,
       draft_start_time: draftStartTime ? new Date(draftStartTime).toISOString() : null,
+      auction_duration_hours: auctionDurationHours,
       updated_at: new Date().toISOString(),
     }
     if (league) {
@@ -270,9 +274,8 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
       ? new Date(Math.max(...revealTimes.map(d => d.getTime())))
       : new Date(nominationTime + ':00')
 
-    const revealMinutes = league.reveal_before_minutes ?? 30
-    const nextNomination = new Date(scheduledStart.getTime() + league.nomination_interval_hours * 60 * 60 * 1000)
-    const revealTime = new Date(nextNomination.getTime() - revealMinutes * 60 * 1000)
+    const durationHours = league.auction_duration_hours ?? 1.5
+    const revealTime = new Date(scheduledStart.getTime() + durationHours * 60 * 60 * 1000)
 
     const existingCount = await supabase.from('auctions').select('id', { count: 'exact' }).eq('league_id', league.id)
     const slotNum = (existingCount.count ?? 0) + 1
@@ -436,6 +439,123 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
       {/* AUCTION */}
       {tab === 'auction' && (
         <div className="flex flex-col gap-4">
+          {/* Nominate new player — always at top */}
+          <div className="card">
+            <h2 className="font-bold mb-4">
+              {activeAuction || scheduledAuctions.length > 0 ? 'הוסף לתור המכרזים' : 'העלה שחקן חדש למכרז'}
+            </h2>
+
+            <div className="flex flex-col gap-3">
+              {(activeAuction || scheduledAuctions.length > 0) && (() => {
+                const allRevealTimes = [
+                  activeAuction?.reveal_time,
+                  ...scheduledAuctions.map(a => a.reveal_time),
+                ].filter(Boolean) as string[]
+                const latestReveal = allRevealTimes.reduce((max, t) => t > max ? t : max, allRevealTimes[0])
+                return (
+                  <div className="p-2 rounded-lg text-sm" style={{ background: 'rgba(99,102,241,0.1)', color: 'var(--primary)' }}>
+                    המכרז יפתח אוטומטית ב-{formatDateTime(latestReveal)}
+                  </div>
+                )
+              })()}
+
+              {/* Player search */}
+              <div>
+                <label className="block text-sm font-medium mb-1.5">שחקן</label>
+                {selectedPlayer ? (
+                  <div className="flex items-center gap-2">
+                    <div className="input flex-1 text-sm" style={{ background: 'rgba(99,102,241,0.08)', color: 'var(--primary)', fontWeight: 500 }}>
+                      {(() => {
+                        const p = availablePlayers.find(p => p.id === selectedPlayer)
+                        return p ? `${p.ranking ? `#${p.ranking} ` : ''}${p.name}` : '—'
+                      })()}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-outline text-sm flex-shrink-0"
+                      onClick={() => { setSelectedPlayer(''); setPlayerSearch('') }}
+                    >
+                      שנה
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      className="input"
+                      placeholder="חפש לפי שם..."
+                      value={playerSearch}
+                      onChange={e => { setPlayerSearch(e.target.value); setShowPlayerResults(true) }}
+                      onFocus={() => setShowPlayerResults(true)}
+                      onBlur={() => setTimeout(() => setShowPlayerResults(false), 150)}
+                      dir="rtl"
+                    />
+                    {showPlayerResults && (
+                      <div
+                        style={{
+                          position: 'absolute', top: '100%', right: 0, left: 0, zIndex: 50,
+                          background: 'var(--card)', border: '1px solid var(--border)',
+                          borderRadius: '8px', maxHeight: '220px', overflowY: 'auto',
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.15)', marginTop: '4px',
+                        }}
+                      >
+                        {availablePlayers
+                          .filter(p => !playerSearch || p.name.toLowerCase().includes(playerSearch.toLowerCase()))
+                          .slice(0, 30)
+                          .map(p => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              className="w-full text-right px-3 py-2 text-sm"
+                              style={{ display: 'block', borderBottom: '1px solid var(--border)' }}
+                              onMouseDown={() => { setSelectedPlayer(p.id); setPlayerSearch(''); setShowPlayerResults(false) }}
+                            >
+                              {p.ranking ? <span style={{ color: 'var(--muted)', marginLeft: '6px' }}>#{p.ranking}</span> : null}
+                              {p.name}
+                              {p.position ? <span style={{ color: 'var(--muted)', fontSize: '0.75rem', marginRight: '6px' }}>{p.position}</span> : null}
+                            </button>
+                          ))}
+                        {availablePlayers.filter(p => !playerSearch || p.name.toLowerCase().includes(playerSearch.toLowerCase())).length === 0 && (
+                          <p className="px-3 py-2 text-sm" style={{ color: 'var(--muted)' }}>לא נמצאו שחקנים</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1.5">קבוצה מעלה (מנומינייטור)</label>
+                <select className="input" value={selectedNominator} onChange={e => setSelectedNominator(e.target.value)}>
+                  <option value="">בחר קבוצה...</option>
+                  {teams.filter(t => t.approved && !t.is_complete).sort((a, b) => (a.priority_rank ?? 99) - (b.priority_rank ?? 99)).map(t => (
+                    <option key={t.id} value={t.id}>#{t.priority_rank} {t.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {!activeAuction && scheduledAuctions.length === 0 && (
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">זמן פתיחת מכרז</label>
+                  <input
+                    type="datetime-local"
+                    className="input"
+                    value={nominationTime}
+                    onChange={e => setNominationTime(e.target.value)}
+                    dir="ltr"
+                  />
+                </div>
+              )}
+
+              <button
+                className="btn btn-primary"
+                onClick={nominatePlayer}
+                disabled={!selectedPlayer || !!loading || !league}
+              >
+                {loading === 'nominate' ? 'מעלה...' : (activeAuction || scheduledAuctions.length > 0) ? '⏰ הוסף לתור' : '🚀 העלה למכרז'}
+              </button>
+            </div>
+          </div>
+
           {/* Active auction */}
           {activeAuction && (
             <div className="card" style={{ borderColor: 'var(--primary)' }}>
@@ -548,68 +668,6 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
               )}
             </div>
           )}
-
-          {/* Nominate new player */}
-          <div className="card">
-            <h2 className="font-bold mb-4">
-              {activeAuction || scheduledAuctions.length > 0 ? 'הוסף לתור המכרזים' : 'העלה שחקן חדש למכרז'}
-            </h2>
-
-            <div className="flex flex-col gap-3">
-              {(activeAuction || scheduledAuctions.length > 0) && (() => {
-                const allRevealTimes = [
-                  activeAuction?.reveal_time,
-                  ...scheduledAuctions.map(a => a.reveal_time),
-                ].filter(Boolean) as string[]
-                const latestReveal = allRevealTimes.reduce((max, t) => t > max ? t : max, allRevealTimes[0])
-                return (
-                  <div className="p-2 rounded-lg text-sm" style={{ background: 'rgba(99,102,241,0.1)', color: 'var(--primary)' }}>
-                    המכרז יפתח אוטומטית ב-{formatDateTime(latestReveal)}
-                  </div>
-                )
-              })()}
-              <div>
-                <label className="block text-sm font-medium mb-1.5">שחקן</label>
-                <select className="input" value={selectedPlayer} onChange={e => setSelectedPlayer(e.target.value)}>
-                  <option value="">בחר שחקן...</option>
-                  {availablePlayers.map(p => (
-                    <option key={p.id} value={p.id}>{p.ranking ? `#${p.ranking} ` : ''}{p.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1.5">קבוצה מעלה (מנומינייטור)</label>
-                <select className="input" value={selectedNominator} onChange={e => setSelectedNominator(e.target.value)}>
-                  <option value="">בחר קבוצה...</option>
-                  {teams.filter(t => t.approved && !t.is_complete).sort((a, b) => (a.priority_rank ?? 99) - (b.priority_rank ?? 99)).map(t => (
-                    <option key={t.id} value={t.id}>#{t.priority_rank} {t.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {!activeAuction && scheduledAuctions.length === 0 && (
-                <div>
-                  <label className="block text-sm font-medium mb-1.5">זמן פתיחת מכרז</label>
-                  <input
-                    type="datetime-local"
-                    className="input"
-                    value={nominationTime}
-                    onChange={e => setNominationTime(e.target.value)}
-                    dir="ltr"
-                  />
-                </div>
-              )}
-
-              <button
-                className="btn btn-primary"
-                onClick={nominatePlayer}
-                disabled={!selectedPlayer || !!loading || !league}
-              >
-                {loading === 'nominate' ? 'מעלה...' : (activeAuction || scheduledAuctions.length > 0) ? '⏰ הוסף לתור' : '🚀 העלה למכרז'}
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
@@ -731,7 +789,7 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
                     {team.user_id && localAdminIds.includes(team.user_id) && <span className="badge badge-blue text-xs">מנהל</span>}
                   </div>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
-                    פריוריטי #{team.priority_rank ?? '—'} · {team.player_count} שחקנים · ${team.budget_remaining}
+                    {team.player_count} שחקנים · ${team.budget_remaining}
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -871,6 +929,23 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
                   שתף: שם הליגה <strong style={{ color: 'var(--primary)' }}>{leagueName}</strong> + סיסמה <strong style={{ color: 'var(--primary)' }}>{joinCode}</strong>
                 </p>
               )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1.5">משך מכרז (שעות)</label>
+              <input
+                type="number"
+                className="input text-center"
+                value={auctionDurationHours}
+                onChange={e => setAuctionDurationHours(Number(e.target.value))}
+                min={0.25}
+                max={24}
+                step={0.25}
+                dir="ltr"
+              />
+              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                זמן הסגירה של כל מכרז — ברירת מחדל: 1.5 שעות (90 דקות)
+              </p>
             </div>
 
             <div>

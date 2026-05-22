@@ -14,6 +14,7 @@ export interface League {
   draft_end_hour: number
   nomination_interval_hours: number
   reveal_before_minutes: number
+  auction_duration_hours: number
   join_code: string | null
   draft_start_time: string | null
   created_by: string

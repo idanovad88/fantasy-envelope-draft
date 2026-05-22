@@ -22,9 +22,8 @@ export async function POST(req: NextRequest) {
   if (player.status !== 'available') return NextResponse.json({ error: 'שחקן לא זמין' }, { status: 400 })
 
   const now = new Date()
-  const revealMinutes = league.reveal_before_minutes ?? 30
-  const nextNomination = new Date(now.getTime() + league.nomination_interval_hours * 60 * 60 * 1000)
-  const revealTime = new Date(nextNomination.getTime() - revealMinutes * 60 * 1000)
+  const auctionDurationHours = league.auction_duration_hours ?? 1.5
+  const revealTime = new Date(now.getTime() + auctionDurationHours * 60 * 60 * 1000)
 
   const { count: slotCount } = await supabase.from('auctions').select('id', { count: 'exact', head: true }).eq('league_id', league_id)
   const slotNum = (slotCount ?? 0) + 1
