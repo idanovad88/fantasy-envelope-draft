@@ -701,27 +701,6 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  {team.user_id && team.user_id !== currentUserId && (
-                    team.user_id && localAdminIds.includes(team.user_id) ? (
-                      <button
-                        className="btn text-xs"
-                        style={{ background: 'var(--muted)', color: 'white', opacity: togglingAdminTeamId === team.id ? 0.5 : 1 }}
-                        disabled={togglingAdminTeamId === team.id}
-                        onClick={() => toggleTeamAdmin(team.id, team.user_id!, false)}
-                      >
-                        {togglingAdminTeamId === team.id ? '...' : 'בטל ניהול'}
-                      </button>
-                    ) : (
-                      <button
-                        className="btn text-xs"
-                        style={{ background: 'var(--success)', color: 'white', opacity: togglingAdminTeamId === team.id ? 0.5 : 1 }}
-                        disabled={togglingAdminTeamId === team.id}
-                        onClick={() => toggleTeamAdmin(team.id, team.user_id!, true)}
-                      >
-                        {togglingAdminTeamId === team.id ? '...' : 'הענק ניהול'}
-                      </button>
-                    )
-                  )}
                   <button
                     className="btn text-xs"
                     style={{ background: 'var(--danger)', color: 'white', opacity: deletingTeamId === team.id ? 0.5 : 1 }}
@@ -833,27 +812,40 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
           </div>
 
           <div className="mt-6 pt-6" style={{ borderTop: '1px solid var(--border)' }}>
-            <h2 className="font-bold mb-3">הוסף מנהל ליגה</h2>
-            <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
-              המשתמש חייב להיות רשום במערכת לפני ההוספה.
-            </p>
-            <div className="flex gap-2">
-              <input
-                className="input flex-1"
-                type="email"
-                placeholder="אימייל המנהל"
-                value={adminEmail}
-                onChange={e => setAdminEmail(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && addAdmin()}
-                dir="ltr"
-              />
-              <button
-                className="btn btn-primary"
-                onClick={addAdmin}
-                disabled={!adminEmail.trim() || loading === 'add_admin'}
-              >
-                {loading === 'add_admin' ? '...' : 'הוסף'}
-              </button>
+            <h2 className="font-bold mb-3">הרשאות מנהל לקבוצות</h2>
+            <div className="flex flex-col gap-2">
+              {localTeams.filter(t => t.user_id && t.user_id !== currentUserId).map(team => (
+                <div key={team.id} className="flex items-center justify-between px-3 py-2 rounded" style={{ background: 'var(--background)' }}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{team.name}</span>
+                    {team.user_id && localAdminIds.includes(team.user_id) && (
+                      <span className="badge badge-blue text-xs">מנהל</span>
+                    )}
+                  </div>
+                  {team.user_id && localAdminIds.includes(team.user_id) ? (
+                    <button
+                      className="btn text-xs"
+                      style={{ background: 'var(--muted)', color: 'white', opacity: togglingAdminTeamId === team.id ? 0.5 : 1 }}
+                      disabled={togglingAdminTeamId === team.id}
+                      onClick={() => toggleTeamAdmin(team.id, team.user_id!, false)}
+                    >
+                      {togglingAdminTeamId === team.id ? '...' : 'בטל ניהול'}
+                    </button>
+                  ) : (
+                    <button
+                      className="btn text-xs"
+                      style={{ background: 'var(--success)', color: 'white', opacity: togglingAdminTeamId === team.id ? 0.5 : 1 }}
+                      disabled={togglingAdminTeamId === team.id}
+                      onClick={() => toggleTeamAdmin(team.id, team.user_id!, true)}
+                    >
+                      {togglingAdminTeamId === team.id ? '...' : 'הענק ניהול'}
+                    </button>
+                  )}
+                </div>
+              ))}
+              {localTeams.filter(t => t.user_id && t.user_id !== currentUserId).length === 0 && (
+                <p className="text-sm" style={{ color: 'var(--muted)' }}>אין קבוצות אחרות בליגה</p>
+              )}
             </div>
           </div>
 
