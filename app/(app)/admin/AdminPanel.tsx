@@ -148,6 +148,18 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
     window.location.reload()
   }
 
+  async function removeAllPlayers() {
+    if (!league) return
+    const availableCount = players.filter(p => p.status === 'available').length
+    if (availableCount === 0) { setMsg('אין שחקנים זמינים להסרה'); return }
+    if (!confirm(`למחוק את כל ${availableCount} השחקנים הזמינים? לא ניתן לבטל פעולה זו.`)) return
+    setLoading('remove_all')
+    await supabase.from('players').delete().eq('league_id', league.id).eq('status', 'available')
+    setMsg(`${availableCount} שחקנים הוסרו`)
+    setLoading('')
+    window.location.reload()
+  }
+
   async function addCreator() {
     if (!creatorEmail.trim()) return
     setLoading('add_creator')
@@ -647,13 +659,22 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
           <div className="card">
             <div className="flex items-center justify-between mb-3">
               <h2 className="font-bold">רשימת שחקנים ({players.length})</h2>
-              <input
-                className="input text-sm w-40"
-                placeholder="חיפוש..."
-                value={playerFilter}
-                onChange={e => setPlayerFilter(e.target.value)}
-                dir="ltr"
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  className="input text-sm w-40"
+                  placeholder="חיפוש..."
+                  value={playerFilter}
+                  onChange={e => setPlayerFilter(e.target.value)}
+                  dir="ltr"
+                />
+                <button
+                  className="btn btn-danger text-xs"
+                  onClick={removeAllPlayers}
+                  disabled={!!loading || players.filter(p => p.status === 'available').length === 0}
+                >
+                  {loading === 'remove_all' ? '...' : 'הסר הכל'}
+                </button>
+              </div>
             </div>
             <div className="flex flex-col gap-1 max-h-[500px] overflow-y-auto">
               {players
