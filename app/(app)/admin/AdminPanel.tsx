@@ -71,6 +71,13 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
   const [showPlayerResults, setShowPlayerResults] = useState(false)
   const [selectedNominator, setSelectedNominator] = useState('')
   const [nominationTime, setNominationTime] = useState(() => {
+    const revealTimes: string[] = []
+    if (activeAuction?.reveal_time) revealTimes.push(activeAuction.reveal_time)
+    scheduledAuctions.forEach(a => revealTimes.push(a.reveal_time))
+    if (revealTimes.length > 0) {
+      const latest = revealTimes.reduce((max, t) => t > max ? t : max, revealTimes[0])
+      return new Date(latest).toISOString().slice(0, 16)
+    }
     const d = new Date()
     d.setMinutes(0, 0, 0)
     return d.toISOString().slice(0, 16)
@@ -262,24 +269,30 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
 
   async function nominatePlayer() {
     if (!league || !selectedPlayer || !selectedNominator) return
-    setLoading('nominate')
 
-    // Compute the latest reveal_time among active + all pending auctions
     const revealTimes: Date[] = []
     if (activeAuction?.reveal_time) revealTimes.push(new Date(activeAuction.reveal_time))
     scheduledAuctions.forEach(a => revealTimes.push(new Date(a.reveal_time)))
 
     const hasExisting = revealTimes.length > 0
-    const scheduledStart = hasExisting
-      ? new Date(Math.max(...revealTimes.map(d => d.getTime())))
-      : new Date(nominationTime + ':00')
+    const scheduledStart = new Date(nominationTime + ':00')
+
+    if (hasExisting) {
+      const latestReveal = new Date(Math.max(...revealTimes.map(d => d.getTime())))
+      if (scheduledStart < latestReveal) {
+        setMsg(`שעת הפתיחה חייבת להיות אחרי ${formatDateTime(latestReveal.toISOString())}`)
+        return
+      }
+    }
+
+    setLoading('nominate')
 
     const durationHours = league.auction_duration_hours ?? 1.5
     const revealTime = new Date(scheduledStart.getTime() + durationHours * 60 * 60 * 1000)
 
     const existingCount = await supabase.from('auctions').select('id', { count: 'exact' }).eq('league_id', league.id)
     const slotNum = (existingCount.count ?? 0) + 1
-    const auctionStatus = hasExisting ? 'pending' : 'active'
+    const auctionStatus = scheduledStart > new Date() ? 'pending' : 'active'
 
     const { error: auctionErr } = await supabase.from('auctions').insert({
       league_id: league.id,
@@ -489,6 +502,33 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
             </div>
           )}
 
+          {/* Scheduled (pending) auctions queue */}
+          {scheduledAuctions.length > 0 && (
+            <div className="card" style={{ borderColor: 'var(--muted)', opacity: 0.9 }}>
+              <h2 className="font-bold mb-3">⏰ תור מכרזים ({scheduledAuctions.length})</h2>
+              <div className="flex flex-col gap-2">
+                {scheduledAuctions.map((a, i) => (
+                  <div key={a.id} className="flex items-center justify-between py-2 border-t text-sm" style={{ borderColor: 'var(--border)' }}>
+                    <div>
+                      <span className="font-medium">{i + 1}. {a.player?.name ?? '—'}</span>
+                      <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
+                        פתיחה: {formatDateTime(a.scheduled_start)} · סגירה: {formatDateTime(a.reveal_time)}
+                      </p>
+                    </div>
+                    <button
+                      className="text-xs px-2 py-1 rounded flex-shrink-0"
+                      style={{ color: 'var(--danger)', border: '1px solid var(--danger)' }}
+                      onClick={() => cancelAuction(a.id)}
+                      disabled={!!loading}
+                    >
+                      {loading === 'cancel_' + a.id ? '...' : '✕'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Nominate new player */}
           <div className="card">
             <h2 className="font-bold mb-4">
@@ -496,19 +536,6 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
             </h2>
 
             <div className="flex flex-col gap-3">
-              {(activeAuction || scheduledAuctions.length > 0) && (() => {
-                const allRevealTimes = [
-                  activeAuction?.reveal_time,
-                  ...scheduledAuctions.map(a => a.reveal_time),
-                ].filter(Boolean) as string[]
-                const latestReveal = allRevealTimes.reduce((max, t) => t > max ? t : max, allRevealTimes[0])
-                return (
-                  <div className="p-2 rounded-lg text-sm" style={{ background: 'rgba(99,102,241,0.1)', color: 'var(--primary)' }}>
-                    המכרז יפתח אוטומטית ב-{formatDateTime(latestReveal)}
-                  </div>
-                )
-              })()}
-
               {/* Player search */}
               <div>
                 <label className="block text-sm font-medium mb-1.5">שחקן</label>
@@ -583,18 +610,31 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
                 </select>
               </div>
 
-              {!activeAuction && scheduledAuctions.length === 0 && (
-                <div>
-                  <label className="block text-sm font-medium mb-1.5">זמן פתיחת מכרז</label>
-                  <input
-                    type="datetime-local"
-                    className="input"
-                    value={nominationTime}
-                    onChange={e => setNominationTime(e.target.value)}
-                    dir="ltr"
-                  />
-                </div>
-              )}
+              <div>
+                <label className="block text-sm font-medium mb-1.5">זמן פתיחת מכרז</label>
+                {(() => {
+                  const allRevealTimes = [activeAuction?.reveal_time, ...scheduledAuctions.map(a => a.reveal_time)].filter(Boolean) as string[]
+                  const latestReveal = allRevealTimes.length > 0
+                    ? allRevealTimes.reduce((max, t) => t > max ? t : max, allRevealTimes[0])
+                    : null
+                  return (
+                    <>
+                      <input
+                        type="datetime-local"
+                        className="input"
+                        value={nominationTime}
+                        onChange={e => setNominationTime(e.target.value)}
+                        dir="ltr"
+                      />
+                      {latestReveal && (
+                        <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                          לא לפני {formatDateTime(latestReveal)} (סיום המכרז הקודם)
+                        </p>
+                      )}
+                    </>
+                  )
+                })()}
+              </div>
 
               <button
                 className="btn btn-primary"
@@ -605,33 +645,6 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
               </button>
             </div>
           </div>
-
-          {/* Scheduled (pending) auctions queue */}
-          {scheduledAuctions.length > 0 && (
-            <div className="card" style={{ borderColor: 'var(--muted)', opacity: 0.9 }}>
-              <h2 className="font-bold mb-3">⏰ תור מכרזים ({scheduledAuctions.length})</h2>
-              <div className="flex flex-col gap-2">
-                {scheduledAuctions.map((a, i) => (
-                  <div key={a.id} className="flex items-center justify-between py-2 border-t text-sm" style={{ borderColor: 'var(--border)' }}>
-                    <div>
-                      <span className="font-medium">{i + 1}. {a.player?.name ?? '—'}</span>
-                      <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
-                        פתיחה: {formatDateTime(a.scheduled_start)} · סגירה: {formatDateTime(a.reveal_time)}
-                      </p>
-                    </div>
-                    <button
-                      className="text-xs px-2 py-1 rounded flex-shrink-0"
-                      style={{ color: 'var(--danger)', border: '1px solid var(--danger)' }}
-                      onClick={() => cancelAuction(a.id)}
-                      disabled={!!loading}
-                    >
-                      {loading === 'cancel_' + a.id ? '...' : '✕'}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* Past auctions — collapsible */}
           {pastAuctions.length > 0 && (
