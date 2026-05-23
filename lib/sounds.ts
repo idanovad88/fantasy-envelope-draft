@@ -73,29 +73,31 @@ export function playDrumroll(duration = 2.5): void {
   } catch {}
 }
 
-// Bid reveal: sharp rising ding (A4 → A5)
+// Bid reveal: soft bell (fundamental A5 + inharmonic partial for natural bell timbre)
 export function playBidReveal(): void {
   const ctx = getCtx()
   if (!ctx) return
   try {
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-
-    osc.type = 'sine'
-    osc.frequency.setValueAtTime(440, ctx.currentTime)
-    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15)
-
-    gain.gain.setValueAtTime(0.6, ctx.currentTime)
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25)
-
-    osc.connect(gain)
-    gain.connect(ctx.destination)
-    osc.start()
-    osc.stop(ctx.currentTime + 0.25)
+    const pairs: [number, number, number][] = [
+      [880,   0.35, 0.45],  // A5 fundamental
+      [2112,  0.10, 0.20],  // 2.4× inharmonic partial — gives bell character
+    ]
+    pairs.forEach(([freq, amp, dur]) => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      gain.gain.setValueAtTime(amp, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start()
+      osc.stop(ctx.currentTime + dur)
+    })
   } catch {}
 }
 
-// Fanfare: classic C4 → E4 → G4 → C5 trumpet call
+// Fanfare: warm sine arpeggio C5→E5→G5→C6, notes cascade in and sustain together
 export function playFanfare(): void {
   const ctx = getCtx()
   if (!ctx) return
@@ -103,27 +105,29 @@ export function playFanfare(): void {
     const comp = ctx.createDynamicsCompressor()
     comp.connect(ctx.destination)
 
-    const notes =     [261.63, 329.63, 392.0, 523.25]
-    const durations = [0.14,   0.14,   0.14,  0.75]
-    let t = ctx.currentTime
+    // Higher octave (C5–C6) + sine = bell-like, pleasant, not tense
+    const notes =       [523.25, 659.25, 783.99, 1046.50]
+    const startDelays = [0,      0.22,   0.44,   0.66]
+    const totalLen = 1.9
 
     notes.forEach((freq, i) => {
       const osc = ctx.createOscillator()
       const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = freq
 
-      osc.type = 'sawtooth'
-      osc.frequency.setValueAtTime(freq, t)
+      const t = ctx.currentTime + startDelays[i]
+      const dur = totalLen - startDelays[i]
 
-      gain.gain.setValueAtTime(0.5, t)
-      gain.gain.setValueAtTime(0.5, t + durations[i] - 0.03)
-      gain.gain.exponentialRampToValueAtTime(0.001, t + durations[i])
+      gain.gain.setValueAtTime(0, t)
+      gain.gain.linearRampToValueAtTime(0.22, t + 0.07)   // gentle attack
+      gain.gain.setValueAtTime(0.22, t + dur - 0.3)
+      gain.gain.exponentialRampToValueAtTime(0.001, t + dur)
 
       osc.connect(gain)
       gain.connect(comp)
       osc.start(t)
-      osc.stop(t + durations[i])
-
-      t += durations[i] * 0.87
+      osc.stop(t + dur)
     })
   } catch {}
 }
