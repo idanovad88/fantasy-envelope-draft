@@ -103,6 +103,27 @@ const canNominate = isMyTurn && league.status === 'active' && !activeAuction
 
 The API route `/api/nominate` re-validates this server-side before creating an auction.
 
+### Bid reveal & sounds (`lib/sounds.ts`, `components/BidRevealOverlay.tsx`)
+
+The bid reveal is a three-phase animated overlay triggered by a Supabase Realtime `UPDATE` on the `auctions` table when `status = 'completed'`.
+
+**Phases:** `idle` → `revealing` (bids appear one by one every 3s) → `winner` (winner card pops) → back to `idle` (after 4s, triggers `router.refresh()`).
+
+**Sound effects** are synthesized via Web Audio API in `lib/sounds.ts` (no external assets):
+- `playDrumroll(duration)` — triangle-wave thumps accelerating 5→28 bps, played at phase start
+- `playBidReveal()` — card-flip: noise burst (bandpass 3 kHz) + descending click (900→80 Hz)
+- `playFanfare()` — sine arpeggio C5→E5→G5→C6, pleasant cascade
+
+**Autoplay policy:** `AudioContext` starts suspended outside a user gesture. Fix: `unlockAudio()` is called in `BidForm.handleSubmit` (bid submission is always before the reveal), plus document-level `click/keydown/touchstart` listeners. A floating 🔊/🔇 button is always visible; mute preference stored in `localStorage` key `auction-sound-muted`.
+
+**Late joiners:** if a reveal happened within the last 60s when the component mounts, it picks up mid-sequence using `startIndex = Math.floor(elapsed / REVEAL_INTERVAL)`.
+
+**Default $1 bid display:** if the nominating team has no bid in the DB, a synthetic `{ id: 'default-<teamId>', amount: 1 }` entry is added client-side in both `BidRevealOverlay` and `AuctionHistory`. Shown with "ברירת מחדל" label. PostgREST may omit `nominating_team_id` from `*` expansion when a join alias uses the same FK — `AuctionHistory` falls back to name-matching as a secondary check.
+
+### Nomination — auto $1 bid (`app/api/nominate/route.ts`)
+
+On every new auction, `/api/nominate` automatically inserts a `$1` bid for the nominating team immediately after creating the auction row. This ensures the nominator is always represented in the reveal even if they never submit a higher bid.
+
 ### Admin auction tab
 
 Sections appear in this order: **active auction → auction queue → add to queue → history**.
