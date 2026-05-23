@@ -10,6 +10,7 @@ type PastAuction = { id: string; scheduled_start: string; winning_bid: number | 
 type ScheduledAuction = { id: string; scheduled_start: string; reveal_time: string; player: { name: string } | null }
 
 interface Props {
+  initialTab?: 'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league'
   league: League | null
   teams: Team[]
   activeAuction: (Auction & { player: { name: string }; bids: { id: string }[] }) | null
@@ -21,9 +22,9 @@ interface Props {
   currentUserId: string
 }
 
-export default function AdminPanel({ league, teams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators, adminUserIds, currentUserId }: Props) {
+export default function AdminPanel({ initialTab = 'overview', league, teams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators, adminUserIds, currentUserId }: Props) {
   const supabase = createClient()
-  const [tab, setTab] = useState<'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league'>('overview')
+  const [tab, setTab] = useState<'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league'>(initialTab)
   const [loading, setLoading] = useState('')
   const [msg, setMsg] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -381,7 +382,7 @@ export default function AdminPanel({ league, teams, activeAuction, scheduledAuct
         {TABS.map(t => (
           <button
             key={t.id}
-            onClick={() => setTab(t.id)}
+            onClick={() => { setTab(t.id); window.history.replaceState(null, '', `?tab=${t.id}`) }}
             className="flex-1 py-2 px-2 rounded-md text-sm font-medium transition-all"
             style={tab === t.id ? { background: 'var(--primary)', color: 'white' } : { color: 'var(--muted)' }}
           >
