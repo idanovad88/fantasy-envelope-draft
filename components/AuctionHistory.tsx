@@ -15,6 +15,7 @@ type AuctionWithBids = {
   scheduled_start: string
   winning_bid: number | null
   winning_team_id: string | null
+  nominating_team_id: string | null
   tie_broken_by_priority: boolean
   status: string
   player: { name: string; position: string | null; nba_team: string | null } | null
@@ -35,7 +36,14 @@ export default function AuctionHistory({ auctions }: { auctions: AuctionWithBids
       <div className="flex flex-col gap-2">
         {auctions.map(auction => {
           const isExpanded = expandedId === auction.id
-          const sortedBids = [...auction.bids].sort((a, b) => b.amount - a.amount)
+
+          // If nominating team has no bid, synthesize a $1 default entry for display
+          const nomId = auction.nominating_team_id
+          const hasNomBid = !nomId || auction.bids.some(b => b.team_id === nomId)
+          const allBids: BidWithTeam[] = hasNomBid
+            ? auction.bids
+            : [...auction.bids, { id: 'default', team_id: nomId!, amount: 1, team: auction.nominating_team }]
+          const sortedBids = [...allBids].sort((a, b) => b.amount - a.amount)
 
           return (
             <div
@@ -91,18 +99,24 @@ export default function AuctionHistory({ auctions }: { auctions: AuctionWithBids
                       <div className="flex flex-col gap-1.5">
                         {sortedBids.map(bid => {
                           const isWinner = bid.team_id === auction.winning_team_id
+                          const isDefault = bid.id === 'default' || (bid.team_id === nomId && bid.amount === 1)
                           return (
                             <div
                               key={bid.id}
                               className="flex items-center justify-between text-sm"
                             >
-                              <span
-                                className={isWinner ? 'font-bold' : ''}
-                                style={isWinner ? { color: 'var(--success)' } : { color: 'var(--text)' }}
-                              >
-                                {bid.team?.name ?? '—'}
-                                {isWinner && ' 🏆'}
-                              </span>
+                              <div className="flex flex-col gap-0">
+                                <span
+                                  className={isWinner ? 'font-bold' : ''}
+                                  style={isWinner ? { color: 'var(--success)' } : { color: 'var(--text)' }}
+                                >
+                                  {bid.team?.name ?? '—'}
+                                  {isWinner && ' 🏆'}
+                                </span>
+                                {isDefault && (
+                                  <span style={{ fontSize: '10px', color: 'var(--muted)' }}>ברירת מחדל</span>
+                                )}
+                              </div>
                               <span
                                 className={`font-mono ${isWinner ? 'font-bold' : ''}`}
                                 style={isWinner ? { color: 'var(--success)' } : { color: 'var(--text)' }}
