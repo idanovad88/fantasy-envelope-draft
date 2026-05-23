@@ -109,6 +109,35 @@ Sections appear in this order: **active auction → auction queue → add to que
 
 When adding to the queue, the admin sets the start time manually. Validation: start time must not be before the latest `reveal_time` of existing auctions (active or pending). The helper text shows the earliest allowed time.
 
+### Middleware (`proxy.ts`)
+
+In Next.js 16, the middleware file is **`proxy.ts`** (root of the project), not `middleware.ts`. It exports a `proxy` function and a `config` with a `matcher`.
+
+The middleware refreshes the Supabase session and redirects unauthenticated users to `/login`. The matcher **excludes** static assets so they remain publicly accessible:
+
+```ts
+matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)']
+```
+
+**Important:** Any new public routes (PWA assets, open API endpoints, etc.) must be added to this matcher exclusion list, otherwise they will be blocked with a 307 redirect to `/login`.
+
+### PWA / App icons
+
+- `app/manifest.ts` — generates `/manifest.webmanifest` (Next.js metadata route, excluded from auth middleware)
+- `public/icons/icon-192.png` — 192×192 PWA icon
+- `public/icons/icon-512.png` — 512×512 PWA icon
+- `public/icons/apple-touch-icon.png` — 180×180 iOS home screen icon
+- `public/apple-touch-icon.png` — iOS fallback at root
+- `public/favicon.ico` — browser tab favicon
+- `public/logo.png` — full-size logo (used in Navbar)
+
+Icons were generated with `sharp` from `public/logo.png`. To regenerate:
+```bash
+node -e "const sharp = require('sharp'); const src = './public/logo.png'; Promise.all([sharp(src).resize(192,192).png().toFile('./public/icons/icon-192.png'), sharp(src).resize(512,512).png().toFile('./public/icons/icon-512.png'), sharp(src).resize(180,180).png().toFile('./public/icons/apple-touch-icon.png'), sharp(src).resize(180,180).png().toFile('./public/apple-touch-icon.png'), sharp(src).resize(32,32).png().toFile('./public/favicon.ico')]).then(()=>console.log('Done'))"
+```
+
+**Vercel deploy:** GitHub auto-deploy is NOT connected. Run `npx vercel --prod` to deploy manually.
+
 ### Supabase clients
 
 - `lib/supabase/server.ts` → `createClient()` for SSR (cookie auth), `createAdminClient()` for API routes (service role, bypasses RLS)
