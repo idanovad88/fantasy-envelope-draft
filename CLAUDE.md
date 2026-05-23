@@ -21,6 +21,9 @@ Required in `.env.local` and in Vercel dashboard:
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY` — used by `createAdminClient()` for all admin API routes
 
+Dev only (`.env.local` only, never in production):
+- `NEXT_PUBLIC_DEV_MODE=true` — shows quick-login buttons on login page (Team 1–6)
+
 ## Architecture
 
 Fantasy NBA auction-draft app. Users join a league, take turns nominating players for blind auction, and submit sealed bids revealed on a timer.
@@ -43,29 +46,50 @@ Mutations go through API routes in `app/api/`. These routes use `createAdminClie
 
 ### Auth model
 
-- Regular users join via **anonymous auth** (`supabase.auth.signInAnonymously()`). No email/password required.
-- League creators/admins use **email/password auth** and must be in the `league_creator_whitelist` table.
+- All users (players + admins) authenticate via **Google OAuth** (`supabase.auth.signInWithOAuth({ provider: 'google' })`).
+- OAuth callback is handled at `app/auth/callback/route.ts` — exchanges code for session, then redirects to `/leagues`.
+- League creators/admins must have their Google email in the `league_creator_whitelist` table.
 - Admin status is determined by: row in `admin_users` table OR `leagues.created_by = user.id`.
 - The layout (`app/(app)/layout.tsx`) checks both and passes `isAdmin` to `<Navbar>`.
 
-### League isolation
+**Dev mode:** when `NEXT_PUBLIC_DEV_MODE=true`, the login page also shows email/password buttons for test users (team1–6@test.local, password: `test1234`). Run `scripts/seed-test-league.mjs` once to create them.
 
-Every page scopes data to the **user's own league only**. The resolution order is:
-1. Team's `league_id` (user has a team → use that league)
-2. `admin_users.league_id` (user is admin → use their managed league)
-3. `leagues.created_by = user.id` (user created a league → use that)
-4. `null` → show empty state
+```bash
+node --env-file=.env.local scripts/seed-test-league.mjs
+```
 
-**Never fall back to "latest league"** — this would expose data from unrelated leagues to random users.
+The dev reset API (`POST /api/dev/reset-test-league`) wipes auctions/teams and re-creates the 6 test teams. Only works in `NODE_ENV=development`.
+
+### Multi-league support & league selection
+
+A user can belong to multiple leagues. The active league is stored in a `selected_league_id` **httpOnly cookie** (set via `POST /api/select-league`).
+
+**Entry flow:**
+1. User logs in with Google → redirected to `/leagues`
+2. `/leagues` shows all leagues the user is in (team member, admin, or creator) + a join form
+3. User clicks "כנס לליגה" → sets cookie → redirected to `/` (dashboard)
+4. Navbar has "הליגות שלי" link → always accessible to switch leagues
+
+**League resolution in every page:**
+```ts
+const cookieStore = await cookies()
+const selectedLeagueId = cookieStore.get('selected_league_id')?.value
+
+// Cookie takes priority; falls back to most-recent team → admin → creator
+const leagueId = selectedLeagueId ?? myTeam?.league_id ?? adminRow?.league_id ?? createdLeague?.id ?? null
+```
+
+The home page (`/`) redirects to `/leagues` if no cookie is set.
 
 ### Join flow
 
 All join logic is in `app/api/join-league/route.ts` (uses admin client to bypass RLS):
-1. Anonymous session created client-side first
+1. User must already be authenticated (Google OAuth)
 2. API finds league by name + join_code (case-insensitive)
-3. If team name already exists in league → re-link that team to the current user (handles returning users with new anon session)
-4. Check capacity: `teams.count < league.num_teams`
-5. Create new team with `approved: true`
+3. If `user_id` already has a team in this league → returns success (no duplicate)
+4. If team name already taken → error (stable identity with Google auth, no re-linking)
+5. Check capacity: `teams.count < league.num_teams`
+6. Create new team with `approved: true`
 
 ### Nomination turn logic
 
@@ -78,6 +102,12 @@ const canNominate = isMyTurn && league.status === 'active' && !activeAuction
 ```
 
 The API route `/api/nominate` re-validates this server-side before creating an auction.
+
+### Admin auction tab
+
+Sections appear in this order: **active auction → auction queue → add to queue → history**.
+
+When adding to the queue, the admin sets the start time manually. Validation: start time must not be before the latest `reveal_time` of existing auctions (active or pending). The helper text shows the earliest allowed time.
 
 ### Supabase clients
 
@@ -92,7 +122,7 @@ Tailwind CSS v4 with CSS variables for theming (`var(--primary)`, `var(--muted)`
 
 ### Admin
 
-Admin users are stored in `admin_users` table (`user_id PK`, `league_id`, `role: 'admin' | 'superadmin'`).
+Admin users are stored in `admin_users` table (`user_id PK`, `league_id`, `role: 'admin' | 'superadmin'`). Each user can be admin of at most one league.
 
 Admin API routes under `app/api/admin/`:
 - `cancel-auction` — cancel an active auction

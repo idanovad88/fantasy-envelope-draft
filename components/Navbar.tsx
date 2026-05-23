@@ -3,13 +3,14 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { Home, Users, ShoppingBag, List, Settings, LogOut } from 'lucide-react'
+import { Home, Users, ShoppingBag, List, Settings, LogOut, Trophy } from 'lucide-react'
 
 const NAV = [
   { href: '/', label: 'בית', icon: Home },
   { href: '/auction', label: 'מכרז', icon: ShoppingBag },
   { href: '/players', label: 'שחקנים', icon: List },
   { href: '/teams', label: 'קבוצות', icon: Users },
+  { href: '/leagues', label: 'הליגות שלי', icon: Trophy },
 ]
 
 interface NavbarProps {

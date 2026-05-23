@@ -1,4 +1,5 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { cookies } from 'next/headers'
 import { formatTime, formatDateTime } from '@/lib/utils'
 import BidForm from '@/components/BidForm'
 import Countdown from '@/components/Countdown'
@@ -13,17 +14,19 @@ export const revalidate = 0
 export default async function AuctionPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
+  const cookieStore = await cookies()
+  const selectedLeagueId = cookieStore.get('selected_league_id')?.value
 
-  const { data: myTeam } = await supabase
-    .from('teams').select('*').eq('user_id', user!.id)
-    .order('created_at', { ascending: false }).limit(1).maybeSingle()
+  const { data: myTeam } = selectedLeagueId
+    ? await supabase.from('teams').select('*').eq('user_id', user!.id).eq('league_id', selectedLeagueId).maybeSingle()
+    : await supabase.from('teams').select('*').eq('user_id', user!.id).order('created_at', { ascending: false }).limit(1).maybeSingle()
 
   const [{ data: adminRow }, { data: createdLeague }] = await Promise.all([
     supabase.from('admin_users').select('league_id').eq('user_id', user!.id).maybeSingle(),
     supabase.from('leagues').select('id').eq('created_by', user!.id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
   ])
 
-  const leagueId = myTeam?.league_id ?? adminRow?.league_id ?? createdLeague?.id ?? null
+  const leagueId = selectedLeagueId ?? myTeam?.league_id ?? adminRow?.league_id ?? createdLeague?.id ?? null
 
   const { data: league } = leagueId
     ? await supabase.from('leagues').select('*').eq('id', leagueId).maybeSingle()

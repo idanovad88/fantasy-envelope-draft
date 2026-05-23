@@ -1,31 +1,40 @@
 import { createClient } from '@/lib/supabase/server'
+import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { formatTime, formatDateTime } from '@/lib/utils'
 import type { League, Team, Auction } from '@/types'
 import DraftCountdown from '@/components/DraftCountdown'
 import BidForm from '@/components/BidForm'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
+import JoinLeagueForm from '@/components/JoinLeagueForm'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
+  const cookieStore = await cookies()
+  const selectedLeagueId = cookieStore.get('selected_league_id')?.value
 
-  // Find user's team first — determines which league to show on dashboard
+  // If no league selected yet → go to league selector
+  if (!selectedLeagueId) redirect('/leagues')
+
+  // Find user's team for the selected league
   const { data: myTeam } = await supabase
-    .from('teams').select('*').eq('user_id', user!.id)
-    .order('created_at', { ascending: false }).limit(1).maybeSingle()
+    .from('teams').select('*').eq('user_id', user!.id).eq('league_id', selectedLeagueId).maybeSingle()
 
   // Check if this user created a league (for spectator-admin case)
   const { data: createdLeague } = !myTeam
-    ? await supabase.from('leagues').select('*').eq('created_by', user!.id).order('created_at', { ascending: false }).limit(1).maybeSingle()
+    ? await supabase.from('leagues').select('*').eq('created_by', user!.id).eq('id', selectedLeagueId).maybeSingle()
     : { data: null }
 
-  // Only show a league the user actually belongs to or created
-  const { data: league } = myTeam?.league_id
-    ? await supabase.from('leagues').select('*').eq('id', myTeam.league_id).maybeSingle()
-    : createdLeague
-      ? { data: createdLeague }
-      : { data: null }
+  // Check whitelist (for showing "create league" option to eligible users)
+  const { data: whitelistRow } = !myTeam && !createdLeague
+    ? await supabase.from('league_creator_whitelist').select('email').eq('email', user!.email ?? '').maybeSingle()
+    : { data: null }
+  const isWhitelisted = !!whitelistRow
+
+  // Load the selected league
+  const { data: league } = await supabase.from('leagues').select('*').eq('id', selectedLeagueId).maybeSingle()
 
   const [{ data: featuredAuction }, { data: teams }] =
     await Promise.all([
@@ -161,13 +170,15 @@ export default async function DashboardPage() {
               <Link href="/admin" className="btn btn-primary w-full mt-3 text-sm">פאנל ניהול</Link>
             </div>
           ) : (
-            <div className="text-center py-6">
-              <p className="text-3xl mb-3">🏀</p>
-              <p className="font-medium mb-4">ברוך הבא!</p>
-              <div className="flex flex-col gap-2">
-                <Link href="/login" className="btn btn-primary">הצטרף לליגה קיימת</Link>
-                <Link href="/create-league" className="btn btn-outline">הקם ליגה חדשה</Link>
-              </div>
+            <div className="py-2">
+              <p className="font-medium mb-4">ברוך הבא! הצטרף לליגה קיימת:</p>
+              <JoinLeagueForm />
+              {isWhitelisted && (
+                <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+                  <p className="text-sm mb-2" style={{ color: 'var(--muted)' }}>או</p>
+                  <Link href="/create-league" className="btn btn-outline w-full">הקם ליגה חדשה</Link>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -1,5 +1,6 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { cookies } from 'next/headers'
 import AdminPanel from './AdminPanel'
 import type { League, Team, Auction } from '@/types'
 
@@ -10,16 +11,23 @@ export default async function AdminPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: adminRow } = await supabase.from('admin_users').select('*').eq('user_id', user.id).maybeSingle()
-  if (!adminRow) redirect('/')
+  const cookieStore = await cookies()
+  const selectedLeagueId = cookieStore.get('selected_league_id')?.value
+  if (!selectedLeagueId) redirect('/leagues')
 
   const adminDb = createAdminClient()
-  const leagueId = adminRow?.league_id
 
-  // Resolve the league first so all subsequent queries use a consistent id
-  const { data: league } = leagueId
-    ? await supabase.from('leagues').select('*').eq('id', leagueId).maybeSingle()
-    : await supabase.from('leagues').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle()
+  // Verify user is admin for the currently selected league
+  const { data: adminRow } = await supabase
+    .from('admin_users').select('*').eq('user_id', user.id).eq('league_id', selectedLeagueId).maybeSingle()
+  const { data: ownedLeague } = !adminRow
+    ? await supabase.from('leagues').select('id').eq('id', selectedLeagueId).eq('created_by', user.id).maybeSingle()
+    : { data: null }
+  if (!adminRow && !ownedLeague) redirect('/')
+
+  const leagueId = selectedLeagueId
+
+  const { data: league } = await supabase.from('leagues').select('*').eq('id', leagueId).maybeSingle()
 
   const lid = league?.id
 
@@ -41,25 +49,13 @@ export default async function AdminPage() {
 
   const [{ data: teams }, { data: activeAuction }, { data: scheduledAuctions }, { data: players }, { data: pastAuctions }, { data: leagueCreators }, { data: leagueAdminUsers }] =
     await Promise.all([
-      lid
-        ? supabase.from('teams').select('*').eq('league_id', lid).order('priority_rank', { ascending: true, nullsFirst: false })
-        : supabase.from('teams').select('*').order('priority_rank', { ascending: true, nullsFirst: false }),
-      lid
-        ? supabase.from('auctions').select('*, player:players(*), bids(id)').eq('league_id', lid).eq('status', 'active').order('scheduled_start', { ascending: false }).limit(1).maybeSingle()
-        : supabase.from('auctions').select('*, player:players(*), bids(id)').eq('status', 'active').order('scheduled_start', { ascending: false }).limit(1).maybeSingle(),
-      lid
-        ? supabase.from('auctions').select('id, scheduled_start, reveal_time, player:players(name)').eq('league_id', lid).eq('status', 'pending').order('scheduled_start', { ascending: true })
-        : supabase.from('auctions').select('id, scheduled_start, reveal_time, player:players(name)').eq('status', 'pending').order('scheduled_start', { ascending: true }),
-      lid
-        ? supabase.from('players').select('id, name, status, ranking, position').eq('league_id', lid).order('ranking', { ascending: true })
-        : supabase.from('players').select('id, name, status, ranking, position').order('ranking', { ascending: true }),
-      lid
-        ? supabase.from('auctions').select('id, scheduled_start, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)').eq('league_id', lid).eq('status', 'completed').order('scheduled_start', { ascending: false }).limit(50)
-        : supabase.from('auctions').select('id, scheduled_start, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)').eq('status', 'completed').order('scheduled_start', { ascending: false }).limit(50),
+      supabase.from('teams').select('*').eq('league_id', lid).order('priority_rank', { ascending: true, nullsFirst: false }),
+      supabase.from('auctions').select('*, player:players(*), bids(id)').eq('league_id', lid).eq('status', 'active').order('scheduled_start', { ascending: false }).limit(1).maybeSingle(),
+      supabase.from('auctions').select('id, scheduled_start, reveal_time, player:players(name)').eq('league_id', lid).eq('status', 'pending').order('scheduled_start', { ascending: true }),
+      supabase.from('players').select('id, name, status, ranking, position').eq('league_id', lid).order('ranking', { ascending: true }),
+      supabase.from('auctions').select('id, scheduled_start, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)').eq('league_id', lid).eq('status', 'completed').order('scheduled_start', { ascending: false }).limit(50),
       supabase.from('league_creator_whitelist').select('email').order('created_at', { ascending: true }),
-      lid
-        ? adminDb.from('admin_users').select('user_id').eq('league_id', lid)
-        : adminDb.from('admin_users').select('user_id'),
+      adminDb.from('admin_users').select('user_id').eq('league_id', lid),
     ])
 
   return (
