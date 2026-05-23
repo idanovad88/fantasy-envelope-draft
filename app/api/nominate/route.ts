@@ -25,13 +25,24 @@ export async function POST(req: NextRequest) {
   const auctionDurationHours = league.auction_duration_hours ?? 1.5
   const revealTime = new Date(now.getTime() + auctionDurationHours * 60 * 60 * 1000)
 
+  const { data: nominatingTeams } = await supabase
+    .from('teams')
+    .select('id')
+    .eq('league_id', league_id)
+    .eq('approved', true)
+    .eq('is_complete', false)
+    .not('priority_rank', 'is', null)
+    .order('priority_rank', { ascending: true })
+    .limit(1)
+  const nominatingTeamId = nominatingTeams?.[0]?.id ?? null
+
   const { count: slotCount } = await supabase.from('auctions').select('id', { count: 'exact', head: true }).eq('league_id', league_id)
   const slotNum = (slotCount ?? 0) + 1
 
   const { data: auction, error: auctionErr } = await supabase.from('auctions').insert({
     league_id,
     player_id,
-    nominating_team_id: null,
+    nominating_team_id: nominatingTeamId,
     slot_number: slotNum,
     scheduled_start: now.toISOString(),
     reveal_time: revealTime.toISOString(),
@@ -42,12 +53,9 @@ export async function POST(req: NextRequest) {
 
   await supabase.from('players').update({ status: 'on_auction' }).eq('id', player_id)
 
-  if (initial_bid && initial_bid >= 1) {
-    const { data: teams } = await supabase.from('teams').select('id').eq('league_id', league_id).eq('approved', true).eq('is_complete', false).not('priority_rank', 'is', null).order('priority_rank', { ascending: true }).limit(1)
-    const nominatingTeamId = teams?.[0]?.id ?? null
-    if (nominatingTeamId) {
-      await supabase.from('bids').insert({ auction_id: auction.id, team_id: nominatingTeamId, amount: initial_bid })
-    }
+  // Auto-bid $1 for the nominating team so they always have a bid in
+  if (nominatingTeamId) {
+    await supabase.from('bids').insert({ auction_id: auction.id, team_id: nominatingTeamId, amount: 1 })
   }
 
   return NextResponse.json({ success: true })
