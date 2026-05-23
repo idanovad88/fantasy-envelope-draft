@@ -44,6 +44,7 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
   const [shownCount, setShownCount] = useState(0)
   const [winner, setWinner] = useState<{ teamName: string; amount: number } | null>(null)
   const [playerName, setPlayerName] = useState('')
+  const [nominatingTeamId, setNominatingTeamId] = useState<string | null>(null)
   const [muted, setMuted] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startedRef = useRef(false)
@@ -65,25 +66,52 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
 
   const REVEAL_INTERVAL = 3000
 
-  async function startReveal(auctionId: string, pName: string, winningTeamId: string | null, winningBid: number | null, startIndex = 0) {
+  async function startReveal(auctionId: string, winningTeamId: string | null, winningBid: number | null, startIndex = 0) {
     if (startedRef.current) return
     startedRef.current = true
 
     const supabase = createClient()
-    const { data } = await supabase
-      .from('bids')
-      .select('id, team_id, amount, team:teams(name)')
-      .eq('auction_id', auctionId)
 
-    if (!data || data.length === 0) return
+    // Fetch bids and auction meta (player name + nominating team) in parallel
+    const [{ data: bidsData }, { data: auctionMeta }] = await Promise.all([
+      supabase
+        .from('bids')
+        .select('id, team_id, amount, team:teams(name)')
+        .eq('auction_id', auctionId),
+      supabase
+        .from('auctions')
+        .select('player:players(name), nominating_team_id, nominating_team:teams!nominating_team_id(name)')
+        .eq('id', auctionId)
+        .single(),
+    ])
 
-    const shuffled = shuffle(data as unknown as BidWithTeam[])
+    const pName = (auctionMeta?.player as unknown as { name: string } | null)?.name ?? 'שחקן'
+    const nomTeamId = auctionMeta?.nominating_team_id ?? null
+    const nomTeamName = (auctionMeta?.nominating_team as unknown as { name: string } | null)?.name ?? null
+
+    let allBids = (bidsData ?? []) as unknown as BidWithTeam[]
+
+    // If nominating team has no bid (auction pre-dates auto-bid fix), synthesize $1 entry
+    const hasNomBid = nomTeamId && allBids.some(b => b.team_id === nomTeamId)
+    if (nomTeamId && nomTeamName && !hasNomBid) {
+      allBids = [...allBids, {
+        id: 'default-' + nomTeamId,
+        team_id: nomTeamId,
+        amount: 1,
+        team: { name: nomTeamName },
+      }]
+    }
+
+    if (allBids.length === 0) return
+
+    const shuffled = shuffle(allBids)
     const winnerBid = shuffled.find(b => b.team_id === winningTeamId) ?? null
     const winnerInfo = winnerBid
       ? { teamName: winnerBid.team?.name ?? '—', amount: winningBid ?? winnerBid.amount }
       : null
 
     setPlayerName(pName)
+    setNominatingTeamId(nomTeamId)
     setWinner(winnerInfo)
     setBids(shuffled)
     setShownCount(startIndex)
@@ -120,7 +148,6 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
     const startIndex = Math.min(Math.floor(elapsed / REVEAL_INTERVAL), 20)
     startReveal(
       recentlyCompleted.id,
-      recentlyCompleted.playerName,
       recentlyCompleted.winningTeamId,
       recentlyCompleted.winningBid,
       startIndex,
@@ -139,16 +166,7 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
         async (payload) => {
           const updated = payload.new as { id: string; status: string; winning_team_id: string | null; winning_bid: number | null }
           if (updated.status !== 'completed') return
-
-          // fetch player name
-          const { data: auctionData } = await supabase
-            .from('auctions')
-            .select('player:players(name)')
-            .eq('id', updated.id)
-            .single()
-          const pName = (auctionData?.player as unknown as { name: string } | null)?.name ?? 'שחקן'
-
-          startReveal(updated.id, pName, updated.winning_team_id, updated.winning_bid)
+          startReveal(updated.id, updated.winning_team_id, updated.winning_bid)
         },
       )
       .subscribe()
@@ -196,60 +214,67 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
       </button>
 
       {phase !== 'idle' && (
-      <div
-        style={{
-          position: 'fixed', inset: 0, zIndex: 50,
-          background: 'rgba(0,0,0,0.85)',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          padding: '24px',
-          animation: 'fadeIn 0.3s ease',
-        }}
-      >
-        {/* Header */}
-        <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-          <p style={{ color: 'var(--muted)', fontSize: '13px', marginBottom: '6px' }}>חשיפת הצעות</p>
-          <h2 style={{ color: '#fff', fontSize: '26px', fontWeight: 800 }} dir="ltr">{playerName}</h2>
-        </div>
-
-        {/* Bids list */}
-        {phase === 'revealing' && (
-          <div style={{ width: '100%', maxWidth: '400px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {visibleBids.map((bid, i) => (
-              <div
-                key={bid.id}
-                style={{
-                  background: 'rgba(255,255,255,0.07)',
-                  border: '1px solid rgba(255,255,255,0.12)',
-                  borderRadius: '12px',
-                  padding: '14px 18px',
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  animation: i === visibleBids.length - 1 ? 'slideInUp 0.4s ease' : 'none',
-                }}
-              >
-                <span style={{ color: '#fff', fontWeight: 600, fontSize: '15px' }}>
-                  {bid.team?.name ?? '—'}
-                </span>
-                <span style={{ color: 'var(--success)', fontWeight: 800, fontSize: '20px' }}>
-                  ${bid.amount}
-                </span>
-              </div>
-            ))}
-
-            {shownCount < bids.length && (
-              <div style={{ textAlign: 'center', color: 'var(--muted)', fontSize: '13px', marginTop: '8px' }}>
-                {bids.length - shownCount} נותרו...
-              </div>
-            )}
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 50,
+            background: 'rgba(0,0,0,0.85)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            padding: '24px',
+            animation: 'fadeIn 0.3s ease',
+          }}
+        >
+          {/* Header */}
+          <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+            <p style={{ color: 'var(--muted)', fontSize: '13px', marginBottom: '6px' }}>חשיפת הצעות</p>
+            <h2 style={{ color: '#fff', fontSize: '26px', fontWeight: 800 }} dir="ltr">{playerName}</h2>
           </div>
-        )}
 
-        {/* Winner reveal */}
-        {phase === 'winner' && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-            {/* All bids (dimmed) */}
-            <div style={{ width: '100%', maxWidth: '400px', display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
-              {bids.filter(b => b.team_id !== winner?.teamName).map(bid => (
-                bid.team?.name !== winner?.teamName && (
+          {/* Bids list */}
+          {phase === 'revealing' && (
+            <div style={{ width: '100%', maxWidth: '400px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {visibleBids.map((bid, i) => {
+                const isDefault = bid.team_id === nominatingTeamId && bid.amount === 1
+                return (
+                  <div
+                    key={bid.id}
+                    style={{
+                      background: 'rgba(255,255,255,0.07)',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      borderRadius: '12px',
+                      padding: '14px 18px',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      animation: i === visibleBids.length - 1 ? 'slideInUp 0.4s ease' : 'none',
+                    }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <span style={{ color: '#fff', fontWeight: 600, fontSize: '15px' }}>
+                        {bid.team?.name ?? '—'}
+                      </span>
+                      {isDefault && (
+                        <span style={{ color: 'var(--muted)', fontSize: '11px' }}>ברירת מחדל</span>
+                      )}
+                    </div>
+                    <span style={{ color: 'var(--success)', fontWeight: 800, fontSize: '20px' }}>
+                      ${bid.amount}
+                    </span>
+                  </div>
+                )
+              })}
+
+              {shownCount < bids.length && (
+                <div style={{ textAlign: 'center', color: 'var(--muted)', fontSize: '13px', marginTop: '8px' }}>
+                  {bids.length - shownCount} נותרו...
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Winner reveal */}
+          {phase === 'winner' && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+              {/* All losing bids (dimmed) */}
+              <div style={{ width: '100%', maxWidth: '400px', display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
+                {bids.filter(b => b.team?.name !== winner?.teamName).map(bid => (
                   <div
                     key={bid.id}
                     style={{
@@ -264,35 +289,34 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
                     <span style={{ color: '#ccc', fontSize: '13px' }}>{bid.team?.name ?? '—'}</span>
                     <span style={{ color: '#aaa', fontSize: '15px', fontWeight: 700 }}>${bid.amount}</span>
                   </div>
-                )
-              ))}
-            </div>
-
-            {/* Winner card */}
-            {winner && (
-              <div
-                style={{
-                  width: '100%', maxWidth: '400px',
-                  background: 'rgba(34,197,94,0.15)',
-                  border: '2px solid var(--success)',
-                  borderRadius: '16px',
-                  padding: '20px 24px',
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px',
-                  animation: 'winnerPop 0.6s ease',
-                }}
-              >
-                <span style={{ fontSize: '36px' }}>🏆</span>
-                <span style={{ color: 'var(--success)', fontWeight: 800, fontSize: '22px' }}>
-                  {winner.teamName}
-                </span>
-                <span style={{ color: '#fff', fontWeight: 700, fontSize: '28px' }}>
-                  ${winner.amount}
-                </span>
+                ))}
               </div>
-            )}
-          </div>
-        )}
-      </div>
+
+              {/* Winner card */}
+              {winner && (
+                <div
+                  style={{
+                    width: '100%', maxWidth: '400px',
+                    background: 'rgba(34,197,94,0.15)',
+                    border: '2px solid var(--success)',
+                    borderRadius: '16px',
+                    padding: '20px 24px',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px',
+                    animation: 'winnerPop 0.6s ease',
+                  }}
+                >
+                  <span style={{ fontSize: '36px' }}>🏆</span>
+                  <span style={{ color: 'var(--success)', fontWeight: 800, fontSize: '22px' }}>
+                    {winner.teamName}
+                  </span>
+                  <span style={{ color: '#fff', fontWeight: 700, fontSize: '28px' }}>
+                    ${winner.amount}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </>
   )
