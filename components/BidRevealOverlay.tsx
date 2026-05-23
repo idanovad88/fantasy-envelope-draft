@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { getMuted, toggleMute, unlockAudio, playDrumroll, playBidReveal, playFanfare } from '@/lib/sounds'
 
 type BidWithTeam = {
   id: string
@@ -43,8 +44,24 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
   const [shownCount, setShownCount] = useState(0)
   const [winner, setWinner] = useState<{ teamName: string; amount: number } | null>(null)
   const [playerName, setPlayerName] = useState('')
+  const [muted, setMuted] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startedRef = useRef(false)
+
+  useEffect(() => { setMuted(getMuted()) }, [])
+
+  // Unlock AudioContext on first user gesture — must happen before the Realtime reveal callback fires
+  useEffect(() => {
+    const unlock = () => unlockAudio()
+    document.addEventListener('click', unlock, { once: true })
+    document.addEventListener('keydown', unlock, { once: true })
+    document.addEventListener('touchstart', unlock, { once: true })
+    return () => {
+      document.removeEventListener('click', unlock)
+      document.removeEventListener('keydown', unlock)
+      document.removeEventListener('touchstart', unlock)
+    }
+  }, [])
 
   const REVEAL_INTERVAL = 3000
 
@@ -71,6 +88,7 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
     setBids(shuffled)
     setShownCount(startIndex)
     setPhase('revealing')
+    playDrumroll(2)
 
     let count = startIndex
     intervalRef.current = setInterval(() => {
@@ -80,6 +98,7 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
         setShownCount(shuffled.length)
         setTimeout(() => {
           setPhase('winner')
+          playFanfare()
           setTimeout(() => {
             setPhase('idle')
             startedRef.current = false
@@ -88,6 +107,7 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
         }, 3000)
       } else {
         setShownCount(count)
+        playBidReveal()
       }
     }, REVEAL_INTERVAL)
   }
@@ -140,8 +160,6 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leagueId])
 
-  if (phase === 'idle') return null
-
   const visibleBids = bids.slice(0, shownCount)
 
   return (
@@ -162,6 +180,22 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
         }
       `}</style>
 
+      {/* Always-visible floating sound toggle — clicking this unlocks AudioContext */}
+      <button
+        onClick={() => { unlockAudio(); setMuted(toggleMute()) }}
+        title={muted ? 'הפעל קול' : 'השתק'}
+        style={{
+          position: 'fixed', bottom: '20px', left: '20px', zIndex: 60,
+          background: 'var(--border)', border: 'none', borderRadius: '50%',
+          width: '40px', height: '40px', fontSize: '18px',
+          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          opacity: 0.7,
+        }}
+      >
+        {muted ? '🔇' : '🔊'}
+      </button>
+
+      {phase !== 'idle' && (
       <div
         style={{
           position: 'fixed', inset: 0, zIndex: 50,
@@ -259,6 +293,7 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
           </div>
         )}
       </div>
+      )}
     </>
   )
 }

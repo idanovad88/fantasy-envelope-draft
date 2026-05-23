@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { getMaxBid } from '@/lib/utils'
+import { unlockAudio } from '@/lib/sounds'
 import type { Team, League } from '@/types'
 
 interface BidFormProps {
@@ -44,6 +45,7 @@ export default function BidForm({ auctionId, team, league, existingBid, revealTi
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    unlockAudio()  // user gesture — unlock AudioContext for reveal sounds
     if (expired) { setMessage('המועד להגשת הצעות עבר'); return }
     setLoading(true)
     setMessage('')
