@@ -5,6 +5,10 @@ export const metadata: Metadata = {
   title: 'פנטזי דראפט מעטפות',
   description: 'NBA Fantasy Basketball Auction Draft',
   manifest: '/manifest.json',
+  icons: {
+    icon: '/icons/icon-192.png',
+    apple: '/icons/icon-192.png',
+  },
   appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'פנטזי דראפט' },
 }
 

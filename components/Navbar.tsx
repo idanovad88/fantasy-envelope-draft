@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Home, Users, ShoppingBag, List, Settings, LogOut, Trophy } from 'lucide-react'
@@ -33,7 +34,7 @@ export default function Navbar({ isAdmin }: NavbarProps) {
       {/* Desktop sidebar */}
       <nav className="hidden md:flex flex-col gap-1 p-4 h-screen sticky top-0 w-56 border-l" style={{ borderColor: 'var(--border)', background: 'var(--card)' }}>
         <div className="flex items-center gap-2 px-3 py-4 mb-4">
-          <span className="text-2xl">🏀</span>
+          <Image src="/logo.png" alt="פנטזי דראפט" width={36} height={36} className="rounded-lg" />
           <span className="font-bold text-lg">פנטזי דראפט</span>
         </div>
 
