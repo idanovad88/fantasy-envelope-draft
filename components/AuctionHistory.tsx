@@ -37,12 +37,18 @@ export default function AuctionHistory({ auctions }: { auctions: AuctionWithBids
         {auctions.map(auction => {
           const isExpanded = expandedId === auction.id
 
-          // If nominating team has no bid, synthesize a $1 default entry for display
-          const nomId = auction.nominating_team_id
-          const hasNomBid = !nomId || auction.bids.some(b => b.team_id === nomId)
+          // If nominating team has no bid, synthesize a $1 default entry for display.
+          // Match by team_id OR by name (nominating_team_id can be absent from PostgREST * expansion).
+          const nomId   = auction.nominating_team_id ?? null
+          const nomName = auction.nominating_team?.name ?? null
+          const hasNomBid =
+            !nomName ||
+            auction.bids.some(b =>
+              (nomId && b.team_id === nomId) || b.team?.name === nomName
+            )
           const allBids: BidWithTeam[] = hasNomBid
             ? auction.bids
-            : [...auction.bids, { id: 'default', team_id: nomId!, amount: 1, team: auction.nominating_team }]
+            : [...auction.bids, { id: 'default', team_id: nomId ?? 'default', amount: 1, team: auction.nominating_team }]
           const sortedBids = [...allBids].sort((a, b) => b.amount - a.amount)
 
           return (
