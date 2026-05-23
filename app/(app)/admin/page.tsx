@@ -6,7 +6,12 @@ import type { League, Team, Auction } from '@/types'
 
 export const dynamic = 'force-dynamic'
 
-export default async function AdminPage() {
+export default async function AdminPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+  const { tab: tabParam } = await searchParams
+  const validTabs = ['overview', 'teams', 'auction', 'players', 'lottery', 'league'] as const
+  type TabId = typeof validTabs[number]
+  const initialTab: TabId = validTabs.includes(tabParam as TabId) ? (tabParam as TabId) : 'overview'
+
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
@@ -61,6 +66,7 @@ export default async function AdminPage() {
   return (
     <>
       <AdminPanel
+        initialTab={initialTab}
         league={league as League | null}
         teams={(teams || []) as Team[]}
         activeAuction={activeAuction as (Auction & { player: { name: string }; bids: { id: string }[] }) | null}
