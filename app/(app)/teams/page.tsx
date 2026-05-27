@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
-import type { Team, Player } from '@/types'
+import type { Team, Player, League } from '@/types'
 import TeamsView from '@/components/TeamsView'
 
 export const dynamic = 'force-dynamic'
@@ -52,8 +52,9 @@ export default async function TeamsPage() {
         teams={typedTeams}
         playersByTeam={playersByTeam}
         myUserId={user?.id ?? null}
-        budgetPerTeam={(league as { budget_per_team?: number })?.budget_per_team ?? 200}
-        playersPerTeam={(league as { players_per_team?: number })?.players_per_team ?? 13}
+        budgetPerTeam={(league as League)?.budget_per_team ?? 200}
+        playersPerTeam={(league as League)?.players_per_team ?? 13}
+        rosterSlots={(league as League)?.roster_slots ?? null}
       />
     </div>
   )

@@ -17,6 +17,7 @@ export interface League {
   auction_duration_hours: number
   join_code: string | null
   draft_start_time: string | null
+  roster_slots: Record<string, number> | null
   created_by: string
   created_at: string
   updated_at: string
@@ -49,6 +50,7 @@ export interface Player {
   status: PlayerStatus
   drafted_by_team_id: string | null
   draft_price: number | null
+  roster_slot: string | null
   created_at: string
 }
 

@@ -44,6 +44,10 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   const [budgetPerTeam, setBudgetPerTeam] = useState(league?.budget_per_team ?? 200)
   const [joinCode, setJoinCode] = useState(league?.join_code ?? '')
   const [auctionDurationHours, setAuctionDurationHours] = useState(league?.auction_duration_hours ?? 1.5)
+  const SLOT_TYPES = ['PG', 'SG', 'G', 'SF', 'PF', 'F', 'C', 'UTIL', 'BENCH'] as const
+  const [rosterSlots, setRosterSlots] = useState<Record<string, number>>(
+    league?.roster_slots ?? {}
+  )
   const [draftStartTime, setDraftStartTime] = useState(() => {
     if (!league?.draft_start_time) return ''
     return new Date(league.draft_start_time).toISOString().slice(0, 16)
@@ -218,6 +222,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
       join_code: joinCode.trim().toUpperCase() || null,
       draft_start_time: draftStartTime ? new Date(draftStartTime).toISOString() : null,
       auction_duration_hours: auctionDurationHours,
+      roster_slots: Object.keys(rosterSlots).length > 0 ? rosterSlots : null,
       updated_at: new Date().toISOString(),
     }
     if (league) {
@@ -974,6 +979,42 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
               />
               <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
                 יוצג שעון ספירה לאחור בדאשבורד עד לזמן זה
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">עמדות הרכב קבוצה</label>
+              <div className="grid grid-cols-3 gap-2 mb-2">
+                {SLOT_TYPES.map(slot => (
+                  <div key={slot} className="flex items-center gap-2">
+                    <span className="text-xs font-bold w-10 text-left" dir="ltr">{slot}</span>
+                    <input
+                      type="number"
+                      className="input text-center"
+                      style={{ padding: '4px 8px' }}
+                      value={rosterSlots[slot] ?? 0}
+                      min={0}
+                      max={30}
+                      dir="ltr"
+                      onChange={e => {
+                        const val = Math.max(0, Number(e.target.value))
+                        setRosterSlots(prev => ({ ...prev, [slot]: val }))
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+              {(() => {
+                const total = SLOT_TYPES.reduce((sum, s) => sum + (rosterSlots[s] ?? 0), 0)
+                const ok = total === playersPerTeam
+                return (
+                  <p className="text-xs" style={{ color: ok ? 'var(--success)' : 'var(--danger)' }}>
+                    סה&quot;כ: {total} / {playersPerTeam} שחקנים{ok ? ' ✓' : ' — לא תואם לשחקנים לקבוצה'}
+                  </p>
+                )
+              })()}
+              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                G קולט PG/SG · F קולט SF/PF · UTIL קולט כל עמדה · BENCH מילוי
               </p>
             </div>
 
