@@ -1,14 +1,13 @@
 -- Migration: Roster position slots per league
--- Adds roster_slots config to leagues and roster_slot assignment to players.
--- Auto-assigns slot when auction resolves based on player position priority.
+-- Adds configurable roster slots to leagues and tracks which slot each drafted player fills.
 
--- 1. Add roster_slots (JSONB) to leagues: e.g. {"PG":1,"SG":1,"G":1,"SF":1,"PF":1,"F":1,"C":2,"UTIL":3,"BENCH":2}
+-- 1. Add roster_slots config to leagues (e.g. {"PG":1,"SG":1,"G":1,"SF":1,"PF":1,"F":1,"C":2,"UTIL":3,"BENCH":2})
 ALTER TABLE leagues ADD COLUMN IF NOT EXISTS roster_slots JSONB;
 
--- 2. Add roster_slot (TEXT) to players: which slot the drafted player occupies
+-- 2. Add roster_slot assignment field to players
 ALTER TABLE players ADD COLUMN IF NOT EXISTS roster_slot TEXT;
 
--- 3. Helper: assign the best available roster slot for a newly drafted player
+-- 3. Helper function: assign best available slot to a newly drafted player
 CREATE OR REPLACE FUNCTION assign_roster_slot(
   p_player_id UUID,
   p_team_id   UUID,
@@ -25,9 +24,10 @@ BEGIN
   SELECT position INTO v_position FROM players WHERE id = p_player_id;
   SELECT roster_slots INTO v_slots FROM leagues WHERE id = p_league_id;
 
+  -- If no roster slots configured for this league, skip assignment
   IF v_slots IS NULL THEN RETURN; END IF;
 
-  -- Priority order: most specific slot first, then combo, then UTIL, then BENCH
+  -- Priority list: specific slot → combo slot → UTIL → BENCH
   v_priority := CASE upper(coalesce(v_position, ''))
     WHEN 'PG' THEN ARRAY['PG','G','UTIL','BENCH']
     WHEN 'SG' THEN ARRAY['SG','G','UTIL','BENCH']
@@ -57,7 +57,7 @@ BEGIN
 END;
 $$;
 
--- 4. Update resolve_auction to call assign_roster_slot after drafting a player
+-- 4. Replace resolve_auction to call assign_roster_slot after drafting
 CREATE OR REPLACE FUNCTION resolve_auction(p_auction_id UUID)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
@@ -116,16 +116,16 @@ BEGIN
     draft_price        = v_max_bid
   WHERE id = v_player_id;
 
-  -- Assign roster slot based on player position and available slots
+  -- Assign roster slot based on league's slot configuration
   PERFORM assign_roster_slot(v_player_id, v_winning_team_id, v_league_id);
 
   -- Mark auction complete
   UPDATE auctions SET
-    status               = 'completed',
-    winning_team_id      = v_winning_team_id,
-    winning_bid          = v_max_bid,
+    status                 = 'completed',
+    winning_team_id        = v_winning_team_id,
+    winning_bid            = v_max_bid,
     tie_broken_by_priority = v_tie_broken,
-    updated_at           = NOW()
+    updated_at             = NOW()
   WHERE id = p_auction_id;
 
   -- Refresh stats (may set winning team is_complete = TRUE)
