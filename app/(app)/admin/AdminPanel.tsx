@@ -346,6 +346,22 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     window.location.reload()
   }
 
+  async function deleteLeague() {
+    if (!league) return
+    if (!confirm(`למחוק לצמיתות את הליגה "${league.name}"?\n\nכל הקבוצות, השחקנים, המכרזים וההגדרות יימחקו ולא ניתן יהיה לשחזר אותם.`)) return
+    const name = prompt(`כדי לאשר, הקלד את שם הליגה: ${league.name}`)
+    if (name?.trim() !== league.name.trim()) { setMsg('שם הליגה שגוי — הפעולה בוטלה'); return }
+    setLoading('delete_league')
+    const res = await fetch('/api/admin/delete-league', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ leagueId: league.id }),
+    })
+    const json = await res.json()
+    if (!res.ok) { setMsg('שגיאה: ' + json.error); setLoading(''); return }
+    window.location.href = '/leagues'
+  }
+
   async function cancelAuction(auctionId: string) {
     if (!confirm('לבטל את המכרז ולהחזיר את השחקן לרשימה?')) return
     setLoading('cancel_' + auctionId)
@@ -1101,6 +1117,22 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
               </button>
             </div>
           </div>
+
+          {league && league.created_by === currentUserId && (
+            <div className="mt-6 pt-6" style={{ borderTop: '2px solid var(--danger)' }}>
+              <h2 className="font-bold mb-1" style={{ color: 'var(--danger)' }}>אזור מסוכן</h2>
+              <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>
+                מחיקת הליגה תמחק לצמיתות את כל הקבוצות, השחקנים, המכרזים וההגדרות. פעולה זו בלתי הפיכה.
+              </p>
+              <button
+                className="btn btn-danger"
+                onClick={deleteLeague}
+                disabled={loading === 'delete_league'}
+              >
+                {loading === 'delete_league' ? 'מוחק...' : '🗑 מחק ליגה'}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
