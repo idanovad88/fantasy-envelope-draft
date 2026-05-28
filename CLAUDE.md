@@ -38,9 +38,9 @@ Mutations go through API routes in `app/api/`. These routes use `createAdminClie
 
 ### Key types (`types/index.ts`)
 
-- **League** — single league with status (`setup | lottery | active | paused | completed`), budget, `players_per_team`, `nomination_interval_hours`, `reveal_before_minutes`, `created_by` (UUID of creator)
+- **League** — single league with status (`setup | lottery | active | paused | completed`), budget, `players_per_team`, `nomination_interval_hours`, `reveal_before_minutes`, `created_by` (UUID of creator), `roster_slots` (JSONB, optional — see Roster slots below)
 - **Team** — user's team, tracks `budget_remaining`, `player_count`, `priority_rank` (nomination queue order), `is_complete`, `approved`
-- **Player** — status: `available | on_auction | drafted`
+- **Player** — status: `available | on_auction | drafted`; `roster_slot` (TEXT, optional — assigned after draft)
 - **Auction** — status: `pending | active | revealed | completed`; has `reveal_time` computed at nomination time
 - **Bid** — sealed bid per team per auction; revealed when `reveal_time` passes
 
@@ -102,6 +102,15 @@ const canNominate = isMyTurn && league.status === 'active' && !activeAuction
 ```
 
 The API route `/api/nominate` re-validates this server-side before creating an auction.
+
+### Roster slots
+
+Leagues can optionally define a roster slot configuration via `roster_slots` JSONB on the `leagues` table (e.g. `{"PG":1,"SG":1,"G":1,"SF":1,"PF":1,"F":1,"C":2,"UTIL":3,"BENCH":2}`).
+
+- Configured in **Admin Panel → League Settings** ("עמדות הרכב קבוצה" section). Displays a total counter that turns red if sum ≠ `players_per_team`.
+- After each auction resolves, `assign_roster_slot(player_id, team_id, league_id)` (Supabase function) assigns the best available slot: specific position (PG/SG/…) → combo (G/F) → UTIL → BENCH.
+- Team pages display players sorted by slot order; each player shows a blue badge with their slot. If the player's actual position differs from the slot, it appears in grey parentheses.
+- Migration: `supabase/migration_roster_slots.sql` — adds `roster_slots` to `leagues`, `roster_slot` to `players`, creates `assign_roster_slot()`, and updates `resolve_auction()` to call it.
 
 ### Admin auction tab
 

@@ -3,15 +3,18 @@
 import { useState } from 'react'
 import type { Team, Player } from '@/types'
 
+const SLOT_ORDER = ['PG', 'SG', 'G', 'SF', 'PF', 'F', 'C', 'UTIL', 'BENCH']
+
 interface Props {
   teams: Team[]
   playersByTeam: Record<string, Player[]>
   myUserId: string | null
   budgetPerTeam: number
   playersPerTeam: number
+  rosterSlots: Record<string, number> | null
 }
 
-export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTeam, playersPerTeam }: Props) {
+export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTeam, playersPerTeam, rosterSlots }: Props) {
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
 
   const visibleTeams = selectedTeamId ? teams.filter(t => t.id === selectedTeamId) : teams
@@ -98,34 +101,84 @@ export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTea
               </div>
 
               {/* Roster */}
-              {roster.length > 0 ? (
-                <div className="flex flex-col gap-1">
-                  {roster.map(p => (
-                    <div key={p.id} className="flex items-center justify-between text-sm py-1.5 px-2 rounded" style={{ background: 'var(--background)' }}>
-                      <div className="flex items-center gap-2">
-                        {p.position && (
-                          <span className="badge badge-blue text-xs w-8 text-center">{p.position}</span>
-                        )}
-                        <span className="font-medium" dir="ltr">{p.name}</span>
-                      </div>
-                      <span className="font-bold" style={{ color: 'var(--warning)' }}>${p.draft_price}</span>
-                    </div>
-                  ))}
-                  {Array.from({ length: playersPerTeam - roster.length }).map((_, i) => (
-                    <div key={i} className="flex items-center justify-between text-sm py-1 px-2 rounded" style={{ background: 'var(--background)', opacity: 0.3 }}>
-                      <span style={{ color: 'var(--muted)' }}>— ריק —</span>
-                    </div>
-                  ))}
-                </div>
+              {rosterSlots ? (
+                <RosterBySlots roster={roster} rosterSlots={rosterSlots} />
               ) : (
-                <p className="text-sm text-center py-4" style={{ color: 'var(--muted)' }}>
-                  אין שחקנים עדיין
-                </p>
+                <SimpleRoster roster={roster} playersPerTeam={playersPerTeam} />
               )}
             </div>
           )
         })}
       </div>
     </>
+  )
+}
+
+function PlayerRow({ player, slotLabel }: { player: Player; slotLabel?: string }) {
+  return (
+    <div className="flex items-center justify-between text-sm py-1.5 px-2 rounded" style={{ background: 'var(--background)' }}>
+      <div className="flex items-center gap-2">
+        <span className="badge badge-blue text-xs" style={{ minWidth: '2.5rem', textAlign: 'center' }} dir="ltr">
+          {slotLabel ?? player.position ?? '—'}
+        </span>
+        <span className="font-medium" dir="ltr">{player.name}</span>
+        {slotLabel && player.position && player.position !== slotLabel && (
+          <span className="text-xs" style={{ color: 'var(--muted)' }} dir="ltr">({player.position})</span>
+        )}
+      </div>
+      <span className="font-bold" style={{ color: 'var(--warning)' }}>${player.draft_price}</span>
+    </div>
+  )
+}
+
+function EmptySlotRow({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-2 text-sm py-1 px-2 rounded" style={{ background: 'var(--background)', opacity: 0.3 }}>
+      <span className="badge badge-blue text-xs" style={{ minWidth: '2.5rem', textAlign: 'center' }} dir="ltr">{label}</span>
+      <span style={{ color: 'var(--muted)' }}>— ריק —</span>
+    </div>
+  )
+}
+
+function RosterBySlots({ roster, rosterSlots }: { roster: Player[]; rosterSlots: Record<string, number> }) {
+  const slots = SLOT_ORDER.filter(s => (rosterSlots[s] ?? 0) > 0)
+
+  return (
+    <div className="flex flex-col gap-1">
+      {slots.map(slot => {
+        const count = rosterSlots[slot] ?? 0
+        const inSlot = roster.filter(p => p.roster_slot === slot)
+        const empty = count - inSlot.length
+
+        return (
+          <div key={slot}>
+            {inSlot.map(p => <PlayerRow key={p.id} player={p} slotLabel={slot} />)}
+            {Array.from({ length: Math.max(0, empty) }).map((_, i) => (
+              <EmptySlotRow key={`${slot}-empty-${i}`} label={slot} />
+            ))}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function SimpleRoster({ roster, playersPerTeam }: { roster: Player[]; playersPerTeam: number }) {
+  if (roster.length === 0) {
+    return (
+      <p className="text-sm text-center py-4" style={{ color: 'var(--muted)' }}>
+        אין שחקנים עדיין
+      </p>
+    )
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      {roster.map(p => <PlayerRow key={p.id} player={p} />)}
+      {Array.from({ length: playersPerTeam - roster.length }).map((_, i) => (
+        <div key={i} className="flex items-center justify-between text-sm py-1 px-2 rounded" style={{ background: 'var(--background)', opacity: 0.3 }}>
+          <span style={{ color: 'var(--muted)' }}>— ריק —</span>
+        </div>
+      ))}
+    </div>
   )
 }
