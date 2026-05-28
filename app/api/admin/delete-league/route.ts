@@ -18,8 +18,8 @@ export async function POST(req: Request) {
   if (league.created_by !== user.id) return NextResponse.json({ error: 'רק יוצר הליגה יכול למחוק אותה' }, { status: 403 })
 
   // Delete in dependency order to avoid FK violations
-  await admin.from('bids').delete().eq('league_id', leagueId)
-  await admin.from('auctions').delete().eq('league_id', leagueId)
+  await admin.from('priority_log').delete().eq('league_id', leagueId)
+  await admin.from('auctions').delete().eq('league_id', leagueId)  // cascades to bids
   await admin.from('players').delete().eq('league_id', leagueId)
   await admin.from('teams').delete().eq('league_id', leagueId)
   await admin.from('admin_users').delete().eq('league_id', leagueId)
