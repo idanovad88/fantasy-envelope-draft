@@ -41,46 +41,72 @@ function getCtx(): AudioContext | null {
   }
 }
 
-// Drumroll: triangle-wave thumps at increasing tempo (5→28 beats/sec)
+// Drumroll: kick-drum sine sweep per hit (180→45 Hz) + sub-bass rumble building over duration
 export function playDrumroll(duration = 2.5): void {
   const ctx = getCtx()
   if (!ctx) return
   try {
     const comp = ctx.createDynamicsCompressor()
+    comp.threshold.value = -18
+    comp.knee.value = 6
+    comp.ratio.value = 8
+    comp.attack.value = 0.002
+    comp.release.value = 0.1
     comp.connect(ctx.destination)
 
+    // Sub-bass rumble: runs full duration, gain builds from ~0 to 0.4 for physical tension
+    const subOsc = ctx.createOscillator()
+    const subGain = ctx.createGain()
+    subOsc.type = 'sine'
+    subOsc.frequency.setValueAtTime(40, ctx.currentTime)
+    subOsc.frequency.linearRampToValueAtTime(60, ctx.currentTime + duration)
+    subGain.gain.setValueAtTime(0.001, ctx.currentTime)
+    subGain.gain.linearRampToValueAtTime(0.4, ctx.currentTime + duration)
+    subOsc.connect(subGain)
+    subGain.connect(comp)
+    subOsc.start(ctx.currentTime)
+    subOsc.stop(ctx.currentTime + duration + 0.05)
+
+    // Kick hits: sine sweep 180→45 Hz, steeper acceleration curve
     let t = 0
     while (t < duration) {
       const progress = t / duration
-      const bps = 5 + 23 * progress          // beats per second
+      const bps = 5 + 23 * Math.pow(progress, 1.4)
       const interval = 1 / bps
+      const hitDur = Math.min(interval * 0.75, 0.07)
 
       const osc = ctx.createOscillator()
       const gain = ctx.createGain()
-      osc.type = 'triangle'
-      osc.frequency.value = 120 + 60 * progress   // 120→180 Hz — low drum thump
+      osc.type = 'sine'
 
-      gain.gain.setValueAtTime(0.9, ctx.currentTime + t)
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + Math.min(interval * 0.7, 0.06))
+      const tAbs = ctx.currentTime + t
+      osc.frequency.setValueAtTime(180, tAbs)
+      osc.frequency.exponentialRampToValueAtTime(45, tAbs + hitDur)
+
+      gain.gain.setValueAtTime(0.001, tAbs)
+      gain.gain.linearRampToValueAtTime(0.9, tAbs + 0.003)
+      gain.gain.exponentialRampToValueAtTime(0.001, tAbs + hitDur)
 
       osc.connect(gain)
       gain.connect(comp)
-      osc.start(ctx.currentTime + t)
-      osc.stop(ctx.currentTime + t + Math.min(interval * 0.8, 0.07))
+      osc.start(tAbs)
+      osc.stop(tAbs + hitDur + 0.005)
 
       t += interval
     }
   } catch {}
 }
 
-// Bid reveal: card-flip sound — noise whoosh (paper) + descending click (card landing)
+// Bid reveal: rising noise whoosh + sharp crack + bright reward ping
 export function playBidReveal(): void {
   const ctx = getCtx()
   if (!ctx) return
   try {
-    // 1. Noise burst — the "whoosh" of paper flipping
-    const dur = 0.09
-    const buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate)
+    const now = ctx.currentTime
+
+    // 1. Rising bandpass noise whoosh: filter sweeps 800 Hz → 4500 Hz over 120 ms
+    const whooshDur = 0.12
+    const buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * whooshDur), ctx.sampleRate)
     const data = buf.getChannelData(0)
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1
 
@@ -89,64 +115,128 @@ export function playBidReveal(): void {
 
     const filter = ctx.createBiquadFilter()
     filter.type = 'bandpass'
-    filter.frequency.value = 3000
-    filter.Q.value = 0.4
+    filter.Q.value = 1.2
+    filter.frequency.setValueAtTime(800, now)
+    filter.frequency.exponentialRampToValueAtTime(4500, now + whooshDur)
 
     const noiseGain = ctx.createGain()
-    noiseGain.gain.setValueAtTime(1.0, ctx.currentTime)
-    noiseGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur)
+    noiseGain.gain.setValueAtTime(1.0, now)
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + whooshDur)
 
     src.connect(filter)
     filter.connect(noiseGain)
     noiseGain.connect(ctx.destination)
-    src.start()
+    src.start(now)
 
-    // 2. Descending click — the "thud" of the card hitting the table
-    const click = ctx.createOscillator()
-    const clickGain = ctx.createGain()
-    click.type = 'sine'
-    click.frequency.setValueAtTime(900, ctx.currentTime)
-    click.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.05)
-    clickGain.gain.setValueAtTime(0.55, ctx.currentTime)
-    clickGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05)
-    click.connect(clickGain)
-    clickGain.connect(ctx.destination)
-    click.start()
-    click.stop(ctx.currentTime + 0.05)
+    // 2. Sharp crack: starts at t+0.08, sine sweep 1200→80 Hz over 50 ms
+    const crackStart = now + 0.08
+    const crack = ctx.createOscillator()
+    const crackGain = ctx.createGain()
+    crack.type = 'sine'
+    crack.frequency.setValueAtTime(1200, crackStart)
+    crack.frequency.exponentialRampToValueAtTime(80, crackStart + 0.05)
+    crackGain.gain.setValueAtTime(0.65, crackStart)
+    crackGain.gain.exponentialRampToValueAtTime(0.001, crackStart + 0.05)
+    crack.connect(crackGain)
+    crackGain.connect(ctx.destination)
+    crack.start(crackStart)
+    crack.stop(crackStart + 0.06)
+
+    // 3. Bright reward ping: sine at 1800 Hz, enters at t+0.10, fades out by t+0.45
+    const pingStart = now + 0.10
+    const ping = ctx.createOscillator()
+    const pingGain = ctx.createGain()
+    ping.type = 'sine'
+    ping.frequency.value = 1800
+    pingGain.gain.setValueAtTime(0.0, pingStart)
+    pingGain.gain.linearRampToValueAtTime(0.28, pingStart + 0.005)
+    pingGain.gain.exponentialRampToValueAtTime(0.001, now + 0.45)
+    ping.connect(pingGain)
+    pingGain.connect(ctx.destination)
+    ping.start(pingStart)
+    ping.stop(now + 0.46)
   } catch {}
 }
 
-// Fanfare: warm sine arpeggio C5→E5→G5→C6, notes cascade in and sustain together
+// Fanfare: 3-phase triumphant sports fanfare
+// Phase 0 (t=0):    Timpani bass hit — sine sweep 80→40 Hz, 0.4 s
+// Phase 1 (t=0):    4-note ascending fanfare G4→C5→E5→G5, triangle, 150 ms apart
+// Phase 2 (t=0.75): Big sustained chord C5+E5+G5+C6 (sine) + bass C3 (sine), 1.5 s
 export function playFanfare(): void {
   const ctx = getCtx()
   if (!ctx) return
   try {
     const comp = ctx.createDynamicsCompressor()
+    comp.threshold.value = -14
+    comp.knee.value = 8
+    comp.ratio.value = 6
+    comp.attack.value = 0.003
+    comp.release.value = 0.15
     comp.connect(ctx.destination)
 
-    // Higher octave (C5–C6) + sine = bell-like, pleasant, not tense
-    const notes =       [523.25, 659.25, 783.99, 1046.50]
-    const startDelays = [0,      0.22,   0.44,   0.66]
-    const totalLen = 1.9
+    const now = ctx.currentTime
 
-    notes.forEach((freq, i) => {
+    // Phase 0: Timpani hit
+    const timp = ctx.createOscillator()
+    const timpGain = ctx.createGain()
+    timp.type = 'sine'
+    timp.frequency.setValueAtTime(80, now)
+    timp.frequency.exponentialRampToValueAtTime(40, now + 0.4)
+    timpGain.gain.setValueAtTime(0.6, now)
+    timpGain.gain.exponentialRampToValueAtTime(0.001, now + 0.4)
+    timp.connect(timpGain)
+    timpGain.connect(comp)
+    timp.start(now)
+    timp.stop(now + 0.42)
+
+    // Phase 1: Ascending fanfare G4→C5→E5→G5, triangle, 150 ms each
+    const fanfareFreqs = [392.00, 523.25, 659.25, 783.99]
+    fanfareFreqs.forEach((freq, i) => {
+      const t = now + i * 0.15
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'triangle'
+      osc.frequency.value = freq
+      gain.gain.setValueAtTime(0.0, t)
+      gain.gain.linearRampToValueAtTime(0.30, t + 0.015)
+      gain.gain.setValueAtTime(0.30, t + 0.065)
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.14)
+      osc.connect(gain)
+      gain.connect(comp)
+      osc.start(t)
+      osc.stop(t + 0.15)
+    })
+
+    // Phase 2: Sustained chord C5+E5+G5+C6 + bass C3
+    const chordStart = now + 0.75
+    const chordDur = 1.5
+    const chordFreqs = [523.25, 659.25, 783.99, 1046.50]
+    chordFreqs.forEach((freq) => {
       const osc = ctx.createOscillator()
       const gain = ctx.createGain()
       osc.type = 'sine'
       osc.frequency.value = freq
-
-      const t = ctx.currentTime + startDelays[i]
-      const dur = totalLen - startDelays[i]
-
-      gain.gain.setValueAtTime(0, t)
-      gain.gain.linearRampToValueAtTime(0.22, t + 0.07)   // gentle attack
-      gain.gain.setValueAtTime(0.22, t + dur - 0.3)
-      gain.gain.exponentialRampToValueAtTime(0.001, t + dur)
-
+      gain.gain.setValueAtTime(0.0, chordStart)
+      gain.gain.linearRampToValueAtTime(0.20, chordStart + 0.06)
+      gain.gain.setValueAtTime(0.20, chordStart + chordDur - 0.25)
+      gain.gain.exponentialRampToValueAtTime(0.001, chordStart + chordDur)
       osc.connect(gain)
       gain.connect(comp)
-      osc.start(t)
-      osc.stop(t + dur)
+      osc.start(chordStart)
+      osc.stop(chordStart + chordDur + 0.05)
     })
+
+    const bass = ctx.createOscillator()
+    const bassGain = ctx.createGain()
+    bass.type = 'sine'
+    bass.frequency.value = 130.81  // C3
+    bassGain.gain.setValueAtTime(0.0, chordStart)
+    bassGain.gain.linearRampToValueAtTime(0.35, chordStart + 0.06)
+    bassGain.gain.setValueAtTime(0.35, chordStart + chordDur - 0.35)
+    bassGain.gain.exponentialRampToValueAtTime(0.001, chordStart + chordDur)
+    bass.connect(bassGain)
+    bassGain.connect(comp)
+    bass.start(chordStart)
+    bass.stop(chordStart + chordDur + 0.05)
   } catch {}
 }
