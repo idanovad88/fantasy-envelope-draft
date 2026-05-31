@@ -6,21 +6,25 @@ export async function POST(req: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'לא מחובר' }, { status: 401 })
 
-  const { data: adminRow } = await supabase
-    .from('admin_users').select('league_id').eq('user_id', user.id).maybeSingle()
-  if (!adminRow) return NextResponse.json({ error: 'אין הרשאה' }, { status: 403 })
+  // Accept both admin_users rows AND league creators
+  const [{ data: adminRow }, { data: createdLeague }] = await Promise.all([
+    supabase.from('admin_users').select('league_id').eq('user_id', user.id).maybeSingle(),
+    supabase.from('leagues').select('id').eq('created_by', user.id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+  ])
+
+  const allowedLeagueId = adminRow?.league_id ?? createdLeague?.id ?? null
+  if (!allowedLeagueId) return NextResponse.json({ error: 'אין הרשאה' }, { status: 403 })
 
   const formData = await req.formData()
   const file = formData.get('file') as File | null
   const leagueId = formData.get('leagueId') as string | null
 
   if (!file || !leagueId) return NextResponse.json({ error: 'חסרים פרמטרים' }, { status: 400 })
-  if (leagueId !== adminRow.league_id) return NextResponse.json({ error: 'אין הרשאה' }, { status: 403 })
+  if (leagueId !== allowedLeagueId) return NextResponse.json({ error: 'אין הרשאה' }, { status: 403 })
 
   const bytes = await file.arrayBuffer()
   const buffer = Buffer.from(bytes)
 
-  // Preserve extension so the client can detect video vs image
   const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : 'gif'
   const path = `var-gifs/${leagueId}.${ext}`
 
