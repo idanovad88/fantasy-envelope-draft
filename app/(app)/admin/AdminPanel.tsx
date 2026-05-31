@@ -341,24 +341,28 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     const slotNum = (existingCount.count ?? 0) + 1
     const auctionStatus = scheduledStart > new Date() ? 'pending' : 'active'
 
-    const { error: auctionErr } = await supabase.from('auctions').insert({
-      league_id: league.id,
-      player_id: selectedPlayer,
-      nominating_team_id: selectedNominator || null,
-      slot_number: slotNum,
-      scheduled_start: scheduledStart.toISOString(),
-      reveal_time: revealTime.toISOString(),
-      status: auctionStatus,
+    const res = await fetch('/api/admin/nominate-player', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        league_id: league.id,
+        player_id: selectedPlayer,
+        nominating_team_id: selectedNominator || null,
+        slot_number: slotNum,
+        scheduled_start: scheduledStart.toISOString(),
+        reveal_time: revealTime.toISOString(),
+        status: auctionStatus,
+      }),
     })
 
-    if (!auctionErr) {
-      await supabase.from('players').update({ status: 'on_auction' }).eq('id', selectedPlayer)
+    if (res.ok) {
       setMsg(hasExisting
         ? `מכרז תוזמן לפתיחה ב-${formatDateTime(scheduledStart.toISOString())}`
         : 'שחקן הועלה למכרז!')
       setSelectedPlayer('')
     } else {
-      setMsg('שגיאה: ' + auctionErr.message)
+      const json = await res.json().catch(() => ({}))
+      setMsg('שגיאה: ' + (json.error ?? 'שגיאה לא ידועה'))
     }
     setLoading('')
     window.location.reload()
@@ -379,7 +383,12 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
 
   async function revealAuction(auctionId: string) {
     setLoading('reveal_' + auctionId)
-    await supabase.rpc('resolve_auction', { p_auction_id: auctionId })
+    const { error: rpcErr } = await supabase.rpc('resolve_auction', { p_auction_id: auctionId })
+    if (rpcErr) {
+      setMsg('שגיאה בחשיפת המכרז: ' + rpcErr.message)
+      setLoading('')
+      return
+    }
     // Activate next scheduled auction if its start time has arrived
     await fetch('/api/admin/activate-pending-auction', { method: 'POST' })
     setMsg('תוצאות נחשפו והשחקן הועבר לקבוצה הזוכה')
