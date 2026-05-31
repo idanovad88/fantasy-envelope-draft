@@ -138,10 +138,6 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
 
     let allBids = (bidsData ?? []) as unknown as BidWithTeam[]
 
-    // Detect ties directly from bid data — covers cases where DB flag wasn't set
-    const maxBidAmount = allBids.length > 0 ? Math.max(...allBids.map(b => b.amount)) : 0
-    const isTieBroken = dbTieBroken || (maxBidAmount > 0 && allBids.filter(b => b.amount === maxBidAmount).length >= 2)
-
     const hasNomBid = nomTeamId && allBids.some(b => b.team_id === nomTeamId)
     if (nomTeamId && nomTeamName && !hasNomBid) {
       allBids = [...allBids, {
@@ -153,6 +149,11 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
     }
 
     if (allBids.length === 0) return
+
+    // Detect ties directly from the final bid list (incl. default $1 bid) —
+    // covers cases where the DB flag wasn't set.
+    const maxBidAmount = Math.max(...allBids.map(b => b.amount))
+    const isTieBroken = dbTieBroken || allBids.filter(b => b.amount === maxBidAmount).length >= 2
 
     const shuffled = shuffle(allBids)
     const winnerBid = shuffled.find(b => b.team_id === winningTeamId) ?? null
