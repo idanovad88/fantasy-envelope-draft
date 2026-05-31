@@ -1103,7 +1103,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
               <label style={{ cursor: loading === 'var_gif' ? 'not-allowed' : 'pointer', display: 'inline-flex' }}>
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/*,video/mp4"
                   style={{ display: 'none' }}
                   disabled={loading === 'var_gif' || !league}
                   onChange={e => {
@@ -1113,7 +1113,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                   }}
                 />
                 <span className="btn btn-outline text-sm" style={{ opacity: loading === 'var_gif' ? 0.5 : 1, pointerEvents: 'none' }}>
-                  {loading === 'var_gif' ? 'מעלה...' : localVarGifUrl ? '🔄 החלף גיף VAR' : '⬆️ העלה גיף VAR'}
+                  {loading === 'var_gif' ? 'מעלה...' : localVarGifUrl ? '🔄 החלף קובץ VAR' : '⬆️ העלה קובץ VAR (GIF / MP4)'}
                 </span>
               </label>
               <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>

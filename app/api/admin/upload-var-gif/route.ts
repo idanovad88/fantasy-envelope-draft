@@ -20,15 +20,19 @@ export async function POST(req: Request) {
   const bytes = await file.arrayBuffer()
   const buffer = Buffer.from(bytes)
 
+  // Preserve extension so the client can detect video vs image
+  const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : 'gif'
+  const path = `var-gifs/${leagueId}.${ext}`
+
   const admin = createAdminClient()
 
   const { error: uploadError } = await admin.storage
     .from('draft-media')
-    .upload(`var-gifs/${leagueId}`, buffer, { contentType: file.type, upsert: true })
+    .upload(path, buffer, { contentType: file.type, upsert: true })
 
   if (uploadError) return NextResponse.json({ error: uploadError.message }, { status: 500 })
 
-  const { data: urlData } = admin.storage.from('draft-media').getPublicUrl(`var-gifs/${leagueId}`)
+  const { data: urlData } = admin.storage.from('draft-media').getPublicUrl(path)
   const gifUrl = urlData.publicUrl
 
   await admin.from('leagues').update({ var_gif_url: gifUrl }).eq('id', leagueId)

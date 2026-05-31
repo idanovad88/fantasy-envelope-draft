@@ -353,11 +353,22 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
                 🔍 בדיקת VAR...
               </p>
               {varGifUrl ? (
-                <img
-                  src={varGifUrl}
-                  alt="VAR review"
-                  style={{ width: '300px', maxWidth: '85vw', borderRadius: '12px', margin: '0 auto', display: 'block' }}
-                />
+                varGifUrl.toLowerCase().includes('.mp4') ? (
+                  <video
+                    src={varGifUrl}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    style={{ width: '300px', maxWidth: '85vw', borderRadius: '12px', margin: '0 auto', display: 'block' }}
+                  />
+                ) : (
+                  <img
+                    src={varGifUrl}
+                    alt="VAR review"
+                    style={{ width: '300px', maxWidth: '85vw', borderRadius: '12px', margin: '0 auto', display: 'block' }}
+                  />
+                )
               ) : (
                 <div style={{ fontSize: '72px', margin: '20px 0' }}>🔍</div>
               )}
