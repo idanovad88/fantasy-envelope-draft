@@ -134,9 +134,13 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
     const pName = (auctionMeta?.player as unknown as { name: string } | null)?.name ?? 'שחקן'
     const nomTeamId = auctionMeta?.nominating_team_id ?? null
     const nomTeamName = (auctionMeta?.nominating_team as unknown as { name: string } | null)?.name ?? null
-    const isTieBroken = (auctionMeta as { tie_broken_by_priority?: boolean } | null)?.tie_broken_by_priority ?? false
+    const dbTieBroken = (auctionMeta as { tie_broken_by_priority?: boolean } | null)?.tie_broken_by_priority ?? false
 
     let allBids = (bidsData ?? []) as unknown as BidWithTeam[]
+
+    // Detect ties directly from bid data — covers cases where DB flag wasn't set
+    const maxBidAmount = allBids.length > 0 ? Math.max(...allBids.map(b => b.amount)) : 0
+    const isTieBroken = dbTieBroken || (maxBidAmount > 0 && allBids.filter(b => b.amount === maxBidAmount).length >= 2)
 
     const hasNomBid = nomTeamId && allBids.some(b => b.team_id === nomTeamId)
     if (nomTeamId && nomTeamName && !hasNomBid) {
