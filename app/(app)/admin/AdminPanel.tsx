@@ -1124,7 +1124,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
               <label style={{ cursor: loading === 'var_gif' ? 'not-allowed' : 'pointer', display: 'inline-flex' }}>
                 <input
                   type="file"
-                  accept="image/*,video/mp4"
+                  accept=".gif,.mp4,.jpg,.jpeg,.png,.webp"
                   style={{ display: 'none' }}
                   disabled={loading === 'var_gif' || !league}
                   onChange={e => {
