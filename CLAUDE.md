@@ -103,6 +103,8 @@ const canNominate = isMyTurn && league.status === 'active' && !activeAuction
 
 The API route `/api/nominate` re-validates this server-side before creating an auction. It also auto-inserts a default `$1` bid for the nominating team so they always have a bid in the auction.
 
+**Admin-initiated nominations** (Admin Panel → Auction tab) go through `POST /api/admin/nominate-player`, **not** a client-side insert. This route inserts the auction, marks the player `on_auction`, and auto-bids `$1` for the nominating team via the service-role client. The auto-bid must run server-side: the `bids_team_insert` RLS policy only lets a team insert its *own* bid, so an admin cannot create the nominating team's bid from the browser client. Without this auto-bid, a player nobody bids on is returned to the pool by `resolve_auction` instead of going to the nominator.
+
 ### Draft reveal experience (`components/BidRevealOverlay.tsx`)
 
 A full-screen `'use client'` overlay that animates the sealed-bid reveal when an auction completes. It is mounted on `app/(app)/auction/page.tsx` and triggered two ways:
@@ -139,6 +141,7 @@ Leagues can optionally define a roster slot configuration via `roster_slots` JSO
 - After each auction resolves, `assign_roster_slot(player_id, team_id, league_id)` (Supabase function) assigns the best available slot: specific position (PG/SG/…) → combo (G/F) → UTIL → BENCH.
 - Team pages display players sorted by slot order; each player shows a blue badge with their slot. If the player's actual position differs from the slot, it appears in grey parentheses.
 - Migration: `supabase/migration_roster_slots.sql` — adds `roster_slots` to `leagues`, `roster_slot` to `players`, creates `assign_roster_slot()`, and updates `resolve_auction()` to call it.
+- **⚠️ `resolve_auction()` MUST call `assign_roster_slot()`.** If a migration replaces `resolve_auction` without that call, drafted players get a `NULL` `roster_slot` and **vanish from the slot-based team view** — `player_count`/budget still update correctly, so the bug is silent and easy to misdiagnose as a data-loss issue. The canonical `resolve_auction` lives in `migration_roster_slots.sql`. To restore it and backfill any already-drafted players missing a slot, run `supabase/fix_restore_resolve_and_backfill_slots.sql`. (Leagues with `roster_slots = NULL` use the simple flat roster view and don't need slots.)
 
 ### Admin auction tab
 
@@ -198,6 +201,7 @@ Admin API routes under `app/api/admin/`:
 - `add-admin` — add admin by email
 - `delete-team` — delete a team and reset its players
 - `set-team-admin` — grant/revoke admin for a team's user (cannot self-revoke)
+- `nominate-player` — admin-initiated nomination/scheduling; inserts the auction, marks the player `on_auction`, and auto-bids `$1` for the nominating team (service role, mirrors `/api/nominate`). See Nomination turn logic above for why the bid must be server-side.
 - `upload-team-avatar` — upload a manager photo to `draft-media`, save to `teams.avatar_url`
 - `upload-var-gif` — upload a VAR animation to `draft-media`, save to `leagues.var_gif_url`
 
