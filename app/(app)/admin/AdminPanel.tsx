@@ -34,8 +34,49 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   const [togglingAdminTeamId, setTogglingAdminTeamId] = useState<string | null>(null)
   const [adminTeamName, setAdminTeamName] = useState('')
   const [joiningDraft, setJoiningDraft] = useState(false)
+  const [uploadingAvatarTeamId, setUploadingAvatarTeamId] = useState<string | null>(null)
+  const [localVarGifUrl, setLocalVarGifUrl] = useState<string | null>(league?.var_gif_url ?? null)
+  const [varPreviewUrl, setVarPreviewUrl] = useState<string | null>(null)
+  const [varIsVideo, setVarIsVideo] = useState(false)
 
   const adminHasTeam = localTeams.some(t => t.user_id === currentUserId)
+
+  async function uploadTeamAvatar(teamId: string, file: File) {
+    setUploadingAvatarTeamId(teamId)
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('teamId', teamId)
+    const res = await fetch('/api/admin/upload-team-avatar', { method: 'POST', body: formData })
+    const json = await res.json()
+    if (json.error) { setMsg('שגיאה: ' + json.error); setUploadingAvatarTeamId(null); return }
+    setLocalTeams(prev => prev.map(t => t.id === teamId ? { ...t, avatar_url: json.url } : t))
+    setMsg('תמונה עודכנה!')
+    setUploadingAvatarTeamId(null)
+  }
+
+  async function uploadVarGif(file: File) {
+    if (!league) return
+    // Show local preview immediately
+    const isVideo = file.type.startsWith('video/')
+    setVarIsVideo(isVideo)
+    const preview = URL.createObjectURL(file)
+    setVarPreviewUrl(preview)
+    setLoading('var_gif')
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('leagueId', league.id)
+    const res = await fetch('/api/admin/upload-var-gif', { method: 'POST', body: formData })
+    const json = await res.json()
+    if (json.error) {
+      setMsg('שגיאה בהעלאה: ' + json.error)
+      URL.revokeObjectURL(preview)
+      setVarPreviewUrl(null)
+    } else {
+      setLocalVarGifUrl(json.url)
+      setMsg('קובץ ה-VAR עודכן!')
+    }
+    setLoading('')
+  }
 
   // League settings state
   const [leagueName, setLeagueName] = useState(league?.name ?? 'פנטזי דראפט 25-26')
@@ -817,17 +858,47 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
           <div className="flex flex-col gap-2">
             {localTeams.map(team => (
               <div key={team.id} className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--background)' }}>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{team.name}</span>
-                    {team.is_complete && <span className="badge badge-green text-xs">✅</span>}
-                    {team.user_id && localAdminIds.includes(team.user_id) && <span className="badge badge-blue text-xs">מנהל</span>}
+                <div className="flex items-center gap-3">
+                  {/* Team avatar */}
+                  {team.avatar_url ? (
+                    <img src={team.avatar_url} alt={team.name} style={{ width: 40, height: 40, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+                  ) : (
+                    <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', fontWeight: 700, color: 'var(--muted)', flexShrink: 0 }}>
+                      {team.name[0]}
+                    </div>
+                  )}
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{team.name}</span>
+                      {team.is_complete && <span className="badge badge-green text-xs">✅</span>}
+                      {team.user_id && localAdminIds.includes(team.user_id) && <span className="badge badge-blue text-xs">מנהל</span>}
+                    </div>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
+                      {team.player_count} שחקנים · ${team.budget_remaining}
+                    </p>
                   </div>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
-                    {team.player_count} שחקנים · ${team.budget_remaining}
-                  </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
+                  {/* Upload avatar button */}
+                  <label style={{ cursor: uploadingAvatarTeamId === team.id ? 'not-allowed' : 'pointer' }}>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      disabled={!!uploadingAvatarTeamId}
+                      onChange={e => {
+                        const file = e.target.files?.[0]
+                        if (file) uploadTeamAvatar(team.id, file)
+                        e.target.value = ''
+                      }}
+                    />
+                    <span
+                      className="btn btn-outline text-xs"
+                      style={{ opacity: uploadingAvatarTeamId === team.id ? 0.5 : 1, pointerEvents: 'none' }}
+                    >
+                      {uploadingAvatarTeamId === team.id ? '...' : '📷'}
+                    </span>
+                  </label>
                   <button
                     className="btn text-xs"
                     style={{ background: 'var(--danger)', color: 'white', opacity: deletingTeamId === team.id ? 0.5 : 1 }}
@@ -1031,6 +1102,43 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
               })()}
               <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
                 G קולט PG/SG · F קולט SF/PF · UTIL קולט כל עמדה · BENCH מילוי
+              </p>
+            </div>
+
+            {/* VAR GIF upload */}
+            <div>
+              <label className="block text-sm font-medium mb-2">גיף VAR (מוצג כשמכרז נחשף בפריוריטי)</label>
+              {(varPreviewUrl ?? localVarGifUrl) && (() => {
+                const src = varPreviewUrl ?? localVarGifUrl!
+                const isVid = varIsVideo || (localVarGifUrl?.toLowerCase().includes('.mp4') ?? false)
+                return (
+                  <div className="mb-2">
+                    {isVid ? (
+                      <video src={src} autoPlay loop muted playsInline style={{ height: 80, borderRadius: 8, border: '1px solid var(--border)' }} />
+                    ) : (
+                      <img src={src} alt="VAR" style={{ height: 80, borderRadius: 8, border: '1px solid var(--border)' }} />
+                    )}
+                  </div>
+                )
+              })()}
+              <label style={{ cursor: loading === 'var_gif' ? 'not-allowed' : 'pointer', display: 'inline-flex' }}>
+                <input
+                  type="file"
+                  accept=".gif,.mp4,.jpg,.jpeg,.png,.webp"
+                  style={{ display: 'none' }}
+                  disabled={loading === 'var_gif' || !league}
+                  onChange={e => {
+                    const file = e.target.files?.[0]
+                    if (file) uploadVarGif(file)
+                    e.target.value = ''
+                  }}
+                />
+                <span className="btn btn-outline text-sm" style={{ opacity: loading === 'var_gif' ? 0.5 : 1, pointerEvents: 'none' }}>
+                  {loading === 'var_gif' ? 'מעלה...' : localVarGifUrl ? '🔄 החלף קובץ VAR' : '⬆️ העלה קובץ VAR (GIF / MP4)'}
+                </span>
+              </label>
+              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                מוצג לפני הכרזת הזוכה כשיש הצעות שוות
               </p>
             </div>
 

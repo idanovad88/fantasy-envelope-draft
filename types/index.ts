@@ -18,6 +18,7 @@ export interface League {
   join_code: string | null
   draft_start_time: string | null
   roster_slots: Record<string, number> | null
+  var_gif_url: string | null
   created_by: string
   created_at: string
   updated_at: string
@@ -34,6 +35,7 @@ export interface Team {
   priority_rank: number | null
   tiebreak_rank: number | null
   approved: boolean
+  avatar_url: string | null
   created_at: string
   updated_at: string
 }
