@@ -6,10 +6,6 @@ export async function POST(req: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'לא מחובר' }, { status: 401 })
 
-  const { data: callerAdmin } = await supabase
-    .from('admin_users').select('league_id').eq('user_id', user.id).maybeSingle()
-  if (!callerAdmin) return NextResponse.json({ error: 'אין הרשאה' }, { status: 403 })
-
   const { teamId, grant } = await req.json()
   if (!teamId || grant === undefined) return NextResponse.json({ error: 'חסרים פרטים' }, { status: 400 })
 
@@ -19,7 +15,14 @@ export async function POST(req: Request) {
   const { data: team } = await admin
     .from('teams').select('user_id, league_id').eq('id', teamId).maybeSingle()
   if (!team) return NextResponse.json({ error: 'קבוצה לא נמצאה' }, { status: 404 })
-  if (team.league_id !== callerAdmin.league_id) {
+
+  // Allow access if caller has an admin_users row for this league OR is the league creator
+  const { data: callerAdmin } = await supabase
+    .from('admin_users').select('league_id').eq('user_id', user.id).eq('league_id', team.league_id).maybeSingle()
+  const { data: ownedLeague } = !callerAdmin
+    ? await supabase.from('leagues').select('id').eq('id', team.league_id).eq('created_by', user.id).maybeSingle()
+    : { data: null }
+  if (!callerAdmin && !ownedLeague) {
     return NextResponse.json({ error: 'אין הרשאה לליגה זו' }, { status: 403 })
   }
 
