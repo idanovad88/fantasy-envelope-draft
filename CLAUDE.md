@@ -38,8 +38,8 @@ Mutations go through API routes in `app/api/`. These routes use `createAdminClie
 
 ### Key types (`types/index.ts`)
 
-- **League** — single league with status (`setup | lottery | active | paused | completed`), budget, `players_per_team`, `nomination_interval_hours`, `reveal_before_minutes`, `created_by` (UUID of creator), `roster_slots` (JSONB, optional — see Roster slots below)
-- **Team** — user's team, tracks `budget_remaining`, `player_count`, `priority_rank` (nomination queue order), `is_complete`, `approved`
+- **League** — single league with status (`setup | lottery | active | paused | completed`), budget, `players_per_team`, `nomination_interval_hours`, `reveal_before_minutes`, `created_by` (UUID of creator), `roster_slots` (JSONB, optional — see Roster slots below), `var_gif_url` (TEXT, optional — VAR animation shown on tiebreak, see Draft reveal experience below)
+- **Team** — user's team, tracks `budget_remaining`, `player_count`, `priority_rank` (nomination queue order), `is_complete`, `approved`, `avatar_url` (TEXT, optional — manager photo shown in bid reveal)
 - **Player** — status: `available | on_auction | drafted`; `roster_slot` (TEXT, optional — assigned after draft)
 - **Auction** — status: `pending | active | revealed | completed`; has `reveal_time` computed at nomination time
 - **Bid** — sealed bid per team per auction; revealed when `reveal_time` passes
@@ -101,7 +101,35 @@ const isMyTurn = typedMyTeam?.id === currentNominatorId && !typedMyTeam.is_compl
 const canNominate = isMyTurn && league.status === 'active' && !activeAuction
 ```
 
-The API route `/api/nominate` re-validates this server-side before creating an auction.
+The API route `/api/nominate` re-validates this server-side before creating an auction. It also auto-inserts a default `$1` bid for the nominating team so they always have a bid in the auction.
+
+### Draft reveal experience (`components/BidRevealOverlay.tsx`)
+
+A full-screen `'use client'` overlay that animates the sealed-bid reveal when an auction completes. It is mounted on `app/(app)/auction/page.tsx` and triggered two ways:
+1. **Realtime** — Supabase `postgres_changes` UPDATE on `auctions` where `status === 'completed'`.
+2. **On load** — the `recentlyCompleted` prop (auctions completed within the last 60s), so users who arrive mid-reveal still see it.
+
+**Phases:** `idle → revealing → var (only on a tie) → winner`.
+
+- **revealing** — bids are shuffled and revealed one-by-one (3s interval) with each team's avatar (`Avatar` component, falls back to an initials circle). Drumroll + per-bid sound.
+- **var** — only shown on a tie. Displays `league.var_gif_url` for 4.5s with a "🔍 בדיקת VAR" label. Detects `.mp4` from the URL to render `<video autoPlay loop muted playsInline>`, otherwise `<img>`. Falls back to a 🔍 emoji if `var_gif_url` is null.
+- **winner** — losing bids dimmed, winner card with a large 96px avatar, trophy, team name, and amount. Fanfare sound. If the winning team is the current user's team (`myTeamId === winningTeamId`), CSS confetti fires via `spawnConfetti()`.
+
+**Tie detection:** `isTieBroken` is `true` if the DB flag `auctions.tie_broken_by_priority` is set **OR** (client-side fallback) 2+ bids share the max amount. The fallback is computed on the *final* bid list — **after** the synthetic default `$1` bid is appended — so a tie created by the default bid still triggers the VAR phase. Do not move this computation before the default-bid append.
+
+Props passed from `auction/page.tsx`: `leagueId`, `activeAuctionId`, `recentlyCompleted`, `myTeamId`, `varGifUrl`.
+
+### Media uploads (manager photos & VAR animation)
+
+Stored in a public Supabase Storage bucket `draft-media` (created manually in the dashboard):
+- `team-photos/{teamId}` — manager photo → saved to `teams.avatar_url`
+- `var-gifs/{leagueId}.{ext}` — VAR animation (gif/mp4/image) → saved to `leagues.var_gif_url`
+
+Both uploaded from **Admin Panel**: photos in the **Teams** tab (📷 button per team), VAR media in the **League Settings** tab. The settings UI shows an instant local preview via `URL.createObjectURL()` and uses `accept=".gif,.mp4,.jpg,.jpeg,.png,.webp"` (file extensions, not `image/*`, for reliable Windows file-dialog filtering).
+
+API routes `app/api/admin/upload-team-avatar` and `upload-var-gif` use `createAdminClient()` (service role, bypasses RLS) for **both** the permission check and the upload. The permission check reads `admin_users` and `leagues.created_by` via the admin client — using the regular cookie client here returns a false 403 because RLS blocks reading `leagues.created_by`.
+
+Migration: `supabase/migration_avatar.sql` — adds `teams.avatar_url` and `leagues.var_gif_url`.
 
 ### Roster slots
 
@@ -156,6 +184,8 @@ node -e "const sharp = require('sharp'); const src = './public/logo.png'; Promis
 
 Tailwind CSS v4 with CSS variables for theming (`var(--primary)`, `var(--muted)`, `var(--success)`, `var(--danger)`, `var(--warning)`, `var(--border)`, `var(--text)`). Custom utility classes: `card`, `badge`, `badge-green`, `badge-yellow`, `badge-gray`, `input`, `btn`, `btn-primary`, `pulse-glow`.
 
+`app/globals.css` also defines: `pulse-glow-danger` + `confetti-fall` keyframes and the `.confetti-piece` class (used by `BidRevealOverlay`'s `spawnConfetti()`). `components/Countdown.tsx` applies the red `pulse-glow-danger` style when under 2 minutes remain (`total < 120_000`).
+
 **RTL note:** The app is Hebrew/RTL. For icon positioning inside inputs (e.g. eye button), use inline `style={{ position: 'absolute', left: '10px' }}` — do NOT use Tailwind `left-*` utilities as they may be reinterpreted in RTL context.
 
 ### Admin
@@ -168,6 +198,8 @@ Admin API routes under `app/api/admin/`:
 - `add-admin` — add admin by email
 - `delete-team` — delete a team and reset its players
 - `set-team-admin` — grant/revoke admin for a team's user (cannot self-revoke)
+- `upload-team-avatar` — upload a manager photo to `draft-media`, save to `teams.avatar_url`
+- `upload-var-gif` — upload a VAR animation to `draft-media`, save to `leagues.var_gif_url`
 
 The admin UI is at `app/(app)/admin/` (page + AdminPanel client component).
 
