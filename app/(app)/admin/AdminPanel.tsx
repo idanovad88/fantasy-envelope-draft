@@ -36,6 +36,8 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   const [joiningDraft, setJoiningDraft] = useState(false)
   const [uploadingAvatarTeamId, setUploadingAvatarTeamId] = useState<string | null>(null)
   const [localVarGifUrl, setLocalVarGifUrl] = useState<string | null>(league?.var_gif_url ?? null)
+  const [varPreviewUrl, setVarPreviewUrl] = useState<string | null>(null)
+  const [varIsVideo, setVarIsVideo] = useState(false)
 
   const adminHasTeam = localTeams.some(t => t.user_id === currentUserId)
 
@@ -54,14 +56,25 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
 
   async function uploadVarGif(file: File) {
     if (!league) return
+    // Show local preview immediately
+    const isVideo = file.type.startsWith('video/')
+    setVarIsVideo(isVideo)
+    const preview = URL.createObjectURL(file)
+    setVarPreviewUrl(preview)
     setLoading('var_gif')
     const formData = new FormData()
     formData.append('file', file)
     formData.append('leagueId', league.id)
     const res = await fetch('/api/admin/upload-var-gif', { method: 'POST', body: formData })
     const json = await res.json()
-    if (json.error) { setMsg('שגיאה: ' + json.error) }
-    else { setLocalVarGifUrl(json.url); setMsg('גיף ה-VAR עודכן!') }
+    if (json.error) {
+      setMsg('שגיאה בהעלאה: ' + json.error)
+      URL.revokeObjectURL(preview)
+      setVarPreviewUrl(null)
+    } else {
+      setLocalVarGifUrl(json.url)
+      setMsg('קובץ ה-VAR עודכן!')
+    }
     setLoading('')
   }
 
@@ -1095,11 +1108,19 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
             {/* VAR GIF upload */}
             <div>
               <label className="block text-sm font-medium mb-2">גיף VAR (מוצג כשמכרז נחשף בפריוריטי)</label>
-              {localVarGifUrl && (
-                <div className="mb-2">
-                  <img src={localVarGifUrl} alt="VAR GIF" style={{ height: 80, borderRadius: 8, border: '1px solid var(--border)' }} />
-                </div>
-              )}
+              {(varPreviewUrl ?? localVarGifUrl) && (() => {
+                const src = varPreviewUrl ?? localVarGifUrl!
+                const isVid = varIsVideo || (localVarGifUrl?.toLowerCase().includes('.mp4') ?? false)
+                return (
+                  <div className="mb-2">
+                    {isVid ? (
+                      <video src={src} autoPlay loop muted playsInline style={{ height: 80, borderRadius: 8, border: '1px solid var(--border)' }} />
+                    ) : (
+                      <img src={src} alt="VAR" style={{ height: 80, borderRadius: 8, border: '1px solid var(--border)' }} />
+                    )}
+                  </div>
+                )
+              })()}
               <label style={{ cursor: loading === 'var_gif' ? 'not-allowed' : 'pointer', display: 'inline-flex' }}>
                 <input
                   type="file"
