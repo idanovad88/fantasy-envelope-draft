@@ -39,7 +39,7 @@ Mutations go through API routes in `app/api/`. These routes use `createAdminClie
 ### Key types (`types/index.ts`)
 
 - **League** — single league with status (`setup | lottery | active | paused | completed`), budget, `players_per_team`, `nomination_interval_hours`, `reveal_before_minutes`, `created_by` (UUID of creator), `roster_slots` (JSONB, optional — see Roster slots below)
-- **Team** — user's team, tracks `budget_remaining`, `player_count`, `priority_rank` (nomination queue order), `is_complete`, `approved`
+- **Team** — user's team, tracks `budget_remaining`, `player_count`, `priority_rank` (nomination turn order), `tiebreak_rank` (tiebreak priority order), `is_complete`, `approved`
 - **Player** — status: `available | on_auction | drafted`; `roster_slot` (TEXT, optional — assigned after draft)
 - **Auction** — status: `pending | active | revealed | completed`; has `reveal_time` computed at nomination time
 - **Bid** — sealed bid per team per auction; revealed when `reveal_time` passes
@@ -102,6 +102,24 @@ const canNominate = isMyTurn && league.status === 'active' && !activeAuction
 ```
 
 The API route `/api/nominate` re-validates this server-side before creating an auction.
+
+### Bid priority & tiebreak logic
+
+**Two independent rank columns on `teams`:**
+- `priority_rank` — nomination turn order. After each auction, the nominating team is demoted to the bottom (regardless of outcome). Managed by `demote_nomination_rank()` Supabase function.
+- `tiebreak_rank` — priority order for breaking equal bids. When multiple teams submit the same highest bid, the team with the lowest `tiebreak_rank` wins. That team is then demoted to the bottom of `tiebreak_rank`. Managed by `demote_tiebreak_rank()` Supabase function. Set via the lottery in the admin panel.
+
+**These two orders are completely independent** — winning an auction never affects `priority_rank`, and nominating never affects `tiebreak_rank`.
+
+**Auto-bid:** When any auction is created, a DB trigger (`trg_auto_bid_nominating_team`) automatically inserts a $1 bid for the nominating team. This means:
+- If no other team bids, the nominating team wins at $1.
+- If other teams also bid $1, the tiebreak order decides the winner.
+
+**DB functions** (all `SECURITY DEFINER`, run in Supabase):
+- `demote_nomination_rank(team_id, league_id)` — moves team to bottom of `priority_rank`
+- `demote_tiebreak_rank(team_id, league_id)` — moves team to bottom of `tiebreak_rank`
+- `resolve_auction(auction_id)` — determines winner, assigns player, runs both demotions as needed
+- `auto_bid_nominating_team()` — trigger function that inserts the $1 auto-bid on auction insert
 
 ### Roster slots
 
