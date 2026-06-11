@@ -9,7 +9,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   const [{ data: adminRow }, { data: createdLeague }] = await Promise.all([
     supabase.from('admin_users').select('role').eq('user_id', user.id).maybeSingle(),
-    supabase.from('leagues').select('id').eq('created_by', user.id).maybeSingle(),
+    supabase.from('leagues').select('id').eq('created_by', user.id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
   ])
 
   return (
