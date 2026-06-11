@@ -76,7 +76,7 @@ export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTea
                     {!team.approved && <span className="badge badge-yellow text-xs">ממתין לאישור</span>}
                   </div>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
-                    פריוריטי: {team.priority_rank ?? (team.is_complete ? 'הסתיים' : '—')}
+                    פריוריטי: {team.tiebreak_rank ?? (team.is_complete ? 'הסתיים' : '—')}
                   </p>
                 </div>
                 <div className="text-left">
