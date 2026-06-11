@@ -129,6 +129,7 @@ Leagues can optionally define a roster slot configuration via `roster_slots` JSO
 - After each auction resolves, `assign_roster_slot(player_id, team_id, league_id)` (Supabase function) assigns the best available slot: specific position (PG/SG/…) → combo (G/F) → UTIL → BENCH.
 - Team pages display players sorted by slot order; each player shows a blue badge with their slot. If the player's actual position differs from the slot, it appears in grey parentheses.
 - Migration: `supabase/migration_roster_slots.sql` — adds `roster_slots` to `leagues`, `roster_slot` to `players`, creates `assign_roster_slot()`, and updates `resolve_auction()` to call it.
+- **Backfill:** Players drafted before `migration_roster_slots.sql` was applied will have `roster_slot = NULL` and won't appear in the team roster view. Run `supabase/migration_backfill_roster_slots.sql` once in the Supabase SQL editor to fix them. `TeamsView` also renders unassigned players at the bottom of the roster as a safety net.
 
 ### Admin auction tab
 
@@ -200,3 +201,14 @@ The admin UI is at `app/(app)/admin/` (page + AdminPanel client component).
 Creator can choose to join as a player (provides team name) or remain a spectator-admin.
 
 After creation the creator is upserted into `admin_users` with the new `league_id`.
+
+**Known issue:** If the `admin_users` row is ever missing for a creator (e.g. due to a failed upsert), the admin tab will disappear. Fix by running in Supabase SQL editor:
+```sql
+INSERT INTO admin_users (user_id, league_id, role)
+SELECT u.id, l.id, 'admin'
+FROM auth.users u
+JOIN leagues l ON l.created_by = u.id
+WHERE u.email = '<creator-email>'
+ORDER BY l.created_at DESC
+LIMIT 1;
+```
