@@ -142,6 +142,8 @@ function EmptySlotRow({ label }: { label: string }) {
 
 function RosterBySlots({ roster, rosterSlots }: { roster: Player[]; rosterSlots: Record<string, number> }) {
   const slots = SLOT_ORDER.filter(s => (rosterSlots[s] ?? 0) > 0)
+  const assignedIds = new Set(roster.filter(p => p.roster_slot != null).map(p => p.id))
+  const unassigned = roster.filter(p => !assignedIds.has(p.id))
 
   return (
     <div className="flex flex-col gap-1">
@@ -159,6 +161,7 @@ function RosterBySlots({ roster, rosterSlots }: { roster: Player[]; rosterSlots:
           </div>
         )
       })}
+      {unassigned.map(p => <PlayerRow key={p.id} player={p} />)}
     </div>
   )
 }
