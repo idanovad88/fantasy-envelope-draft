@@ -35,7 +35,7 @@ export async function POST(req: Request) {
   if (uploadError) return NextResponse.json({ error: uploadError.message }, { status: 500 })
 
   const { data: urlData } = admin.storage.from('draft-media').getPublicUrl(`team-photos/${teamId}`)
-  const avatarUrl = urlData.publicUrl
+  const avatarUrl = `${urlData.publicUrl}?t=${Date.now()}`
 
   await admin.from('teams').update({ avatar_url: avatarUrl }).eq('id', teamId)
 
