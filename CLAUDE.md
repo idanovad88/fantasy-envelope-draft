@@ -130,6 +130,12 @@ Leagues can optionally define a roster slot configuration via `roster_slots` JSO
 - Team pages display players sorted by slot order; each player shows a blue badge with their slot. If the player's actual position differs from the slot, it appears in grey parentheses.
 - Migration: `supabase/migration_roster_slots.sql` — adds `roster_slots` to `leagues`, `roster_slot` to `players`, creates `assign_roster_slot()`, and updates `resolve_auction()` to call it.
 - **Backfill:** Players drafted before `migration_roster_slots.sql` was applied will have `roster_slot = NULL` and won't appear in the team roster view. Run `supabase/migration_backfill_roster_slots.sql` once in the Supabase SQL editor to fix them. `TeamsView` also renders unassigned players at the bottom of the roster as a safety net.
+- **Important — migration files are NOT auto-applied.** Every SQL migration must be manually run in the Supabase SQL editor. To verify that `resolve_auction` is the updated version (calls `assign_roster_slot`), run:
+  ```sql
+  SELECT CASE WHEN prosrc LIKE '%assign_roster_slot%' THEN 'updated' ELSE 'OLD - needs migration' END
+  FROM pg_proc WHERE proname = 'resolve_auction';
+  ```
+  If it shows `OLD`, run the full contents of `supabase/migration_roster_slots.sql` in the SQL editor, then run `supabase/migration_backfill_roster_slots.sql` to fix already-drafted players.
 
 ### Admin auction tab
 
