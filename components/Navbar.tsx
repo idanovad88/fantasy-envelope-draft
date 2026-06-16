@@ -16,9 +16,10 @@ const NAV = [
 
 interface NavbarProps {
   isAdmin?: boolean
+  isSnake?: boolean
 }
 
-export default function Navbar({ isAdmin }: NavbarProps) {
+export default function Navbar({ isAdmin, isSnake }: NavbarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
@@ -38,7 +39,7 @@ export default function Navbar({ isAdmin }: NavbarProps) {
           <span className="font-bold text-lg">פנטזי דראפט</span>
         </div>
 
-        {NAV.map(({ href, label, icon: Icon }) => (
+        {NAV.filter(n => !(isSnake && n.href === '/auction')).map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}
@@ -82,7 +83,7 @@ export default function Navbar({ isAdmin }: NavbarProps) {
 
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 flex border-t" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
-        {NAV.map(({ href, label, icon: Icon }) => (
+        {NAV.filter(n => !(isSnake && n.href === '/auction')).map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}
