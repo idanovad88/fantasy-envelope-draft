@@ -278,6 +278,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
 
   async function saveLeague() {
     setLoading('league')
+    const timeout = parseInt(pickTimeoutMinutes)
     const payload = {
       name: leagueName,
       num_teams: numTeams,
@@ -287,6 +288,10 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
       draft_start_time: draftStartTime ? new Date(draftStartTime).toISOString() : null,
       auction_duration_hours: auctionDurationHours,
       roster_slots: Object.keys(rosterSlots).length > 0 ? rosterSlots : null,
+      ...(isSnake ? {
+        pick_timeout_minutes: isNaN(timeout) || pickTimeoutMinutes === '' ? null : timeout,
+        snake_round_config: snakeRoundConfig,
+      } : {}),
       updated_at: new Date().toISOString(),
     }
     if (league) {
@@ -468,20 +473,6 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     const data = await res.json()
     if (!res.ok) { setMsg('שגיאה: ' + data.error); setLoading(''); return }
     setMsg(`בחירה בוצעה: ${data.player} ← ${data.team}`)
-    setLoading('')
-    window.location.reload()
-  }
-
-  async function saveSnakeLeagueSettings() {
-    if (!league) return
-    setLoading('league')
-    const timeout = parseInt(pickTimeoutMinutes)
-    await supabase.from('leagues').update({
-      pick_timeout_minutes: isNaN(timeout) || pickTimeoutMinutes === '' ? null : timeout,
-      snake_round_config: snakeRoundConfig,
-      updated_at: new Date().toISOString(),
-    }).eq('id', league.id)
-    setMsg('הגדרות נשמרו')
     setLoading('')
     window.location.reload()
   }
@@ -1403,15 +1394,9 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
             </div>
             )}
 
-            {isSnake ? (
-              <button className="btn btn-primary" onClick={saveSnakeLeagueSettings} disabled={loading === 'league'}>
-                {loading === 'league' ? 'שומר...' : 'שמור הגדרות'}
-              </button>
-            ) : (
-              <button className="btn btn-primary" onClick={saveLeague} disabled={loading === 'league'}>
-                {loading === 'league' ? 'שומר...' : 'שמור הגדרות'}
-              </button>
-            )}
+            <button className="btn btn-primary" onClick={saveLeague} disabled={loading === 'league'}>
+              {loading === 'league' ? 'שומר...' : 'שמור הגדרות'}
+            </button>
           </div>
 
           <div className="mt-6 pt-6" style={{ borderTop: '1px solid var(--border)' }}>
