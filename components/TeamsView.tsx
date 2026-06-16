@@ -136,7 +136,7 @@ function PlayerRow({ player, slotLabel, pickNumber, isSnake }: { player: Player;
       </div>
       {isSnake ? (
         <span className="text-xs font-medium whitespace-nowrap" style={{ color: 'var(--muted)' }}>
-          {pickNumber != null ? `בחירה ${pickNumber}` : '—'}
+          {pickNumber != null ? pickNumber : '—'}
         </span>
       ) : (
         <span className="font-bold" style={{ color: 'var(--warning)' }}>${player.draft_price}</span>
