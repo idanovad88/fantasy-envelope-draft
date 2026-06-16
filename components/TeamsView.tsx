@@ -83,25 +83,29 @@ export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTea
                   )}
                 </div>
                 <div className="text-left">
-                  <p className="font-bold text-xl" style={{ color: team.budget_remaining < 20 ? 'var(--danger)' : 'var(--success)' }}>
-                    ${team.budget_remaining}
-                  </p>
+                  {!isSnake && (
+                    <p className="font-bold text-xl" style={{ color: team.budget_remaining < 20 ? 'var(--danger)' : 'var(--success)' }}>
+                      ${team.budget_remaining}
+                    </p>
+                  )}
                   <p className="text-xs" style={{ color: 'var(--muted)' }}>
                     {team.player_count}/{playersPerTeam} שחקנים
                   </p>
                 </div>
               </div>
 
-              {/* Budget bar */}
-              <div className="w-full h-1.5 rounded-full mb-3" style={{ background: 'var(--border)' }}>
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{
-                    width: `${(team.budget_remaining / budgetPerTeam) * 100}%`,
-                    background: team.budget_remaining < 20 ? 'var(--danger)' : 'var(--success)',
-                  }}
-                />
-              </div>
+              {/* Budget bar — auction budget is irrelevant in snake drafts */}
+              {!isSnake && (
+                <div className="w-full h-1.5 rounded-full mb-3" style={{ background: 'var(--border)' }}>
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${(team.budget_remaining / budgetPerTeam) * 100}%`,
+                      background: team.budget_remaining < 20 ? 'var(--danger)' : 'var(--success)',
+                    }}
+                  />
+                </div>
+              )}
 
               {/* Roster */}
               {rosterSlots ? (
