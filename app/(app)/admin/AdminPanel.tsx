@@ -27,7 +27,9 @@ interface Props {
 export default function AdminPanel({ initialTab = 'overview', league, teams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators, adminUserIds, currentUserId, snakePicks = [] }: Props) {
   const supabase = createClient()
   const isSnake = league?.draft_type === 'snake'
-  const [tab, setTab] = useState<'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league' | 'draft'>(initialTab)
+  const [tab, setTab] = useState<'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league' | 'draft'>(
+    isSnake && initialTab === 'auction' ? 'overview' : initialTab
+  )
   const [loading, setLoading] = useState('')
   const [msg, setMsg] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
