@@ -2,8 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { formatTime, formatDateTime } from '@/lib/utils'
-import type { League, Team, Auction } from '@/types'
+import { formatTime, formatDateTime, formatTimeSince, getCurrentSnakePicker } from '@/lib/utils'
+import type { League, Team, Auction, SnakePick } from '@/types'
 import DraftCountdown from '@/components/DraftCountdown'
 import BidForm from '@/components/BidForm'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
@@ -15,30 +15,182 @@ export default async function DashboardPage() {
   const cookieStore = await cookies()
   const selectedLeagueId = cookieStore.get('selected_league_id')?.value
 
-  // If no league selected yet → go to league selector
   if (!selectedLeagueId) redirect('/leagues')
 
-  // Find user's team for the selected league
   const { data: myTeam } = await supabase
     .from('teams').select('*').eq('user_id', user!.id).eq('league_id', selectedLeagueId).maybeSingle()
 
-  // Check if this user created a league (for spectator-admin case)
   const { data: createdLeague } = !myTeam
     ? await supabase.from('leagues').select('*').eq('created_by', user!.id).eq('id', selectedLeagueId).maybeSingle()
     : { data: null }
 
-  // Check whitelist (for showing "create league" option to eligible users)
   const { data: whitelistRow } = !myTeam && !createdLeague
     ? await supabase.from('league_creator_whitelist').select('email').eq('email', user!.email ?? '').maybeSingle()
     : { data: null }
   const isWhitelisted = !!whitelistRow
 
-  // Load the selected league
   const { data: league } = await supabase.from('leagues').select('*').eq('id', selectedLeagueId).maybeSingle()
+  const typedLeague = league as League | null
+  const typedMyTeam = myTeam as Team | null
+
+  // ── SNAKE DRAFT DASHBOARD ─────────────────────────────────────────────────────
+  if (typedLeague?.draft_type === 'snake') {
+    const [{ data: teams }, { data: snakePicks }] = await Promise.all([
+      supabase.from('teams').select('*').eq('league_id', selectedLeagueId).eq('approved', true).not('priority_rank', 'is', null).order('priority_rank', { ascending: true }),
+      supabase.from('snake_picks').select('*, player:players(name, position), team:teams(name)').eq('league_id', selectedLeagueId).order('overall_pick_number', { ascending: true }),
+    ])
+
+    const typedTeams = (teams || []) as Team[]
+    const typedPicks = (snakePicks || []) as (SnakePick & { player: { name: string; position: string | null } | null; team: { name: string } | null })[]
+
+    const completedCount = typedPicks.length
+    const totalPicks = typedLeague.num_teams * typedLeague.players_per_team
+    const isDraftComplete = typedLeague.status === 'completed' || completedCount >= totalPicks
+    const currentPickNumber = completedCount + 1
+
+    const currentTeam = isDraftComplete
+      ? null
+      : getCurrentSnakePicker(completedCount, typedLeague.num_teams, typedTeams, typedLeague.snake_round_config as boolean[] | null)
+    const isMyTurn = !!currentTeam && !!typedMyTeam && currentTeam.id === typedMyTeam.id
+    const lastPick = typedPicks[typedPicks.length - 1]
+    const timeSinceLast = lastPick ? formatTimeSince(lastPick.picked_at) : null
+
+    return (
+      <div className="max-w-4xl mx-auto">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold mb-1">{typedLeague.name}</h1>
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>
+            <span>דראפט סנייק · {typedTeams.length}/{typedLeague.num_teams} קבוצות</span>
+            {typedTeams.filter(t => t.is_complete).length > 0 && (
+              <span> · {typedTeams.filter(t => t.is_complete).length} השלימו</span>
+            )}
+          </p>
+        </div>
+
+        <RealtimeRefresher leagueId={typedLeague.id} />
+
+        {/* Countdown before draft starts */}
+        {typedLeague.draft_start_time && ['setup', 'lottery'].includes(typedLeague.status) && (
+          <DraftCountdown targetDate={typedLeague.draft_start_time} />
+        )}
+
+        {/* Status */}
+        {typedLeague.status !== 'active' && !isDraftComplete && (
+          <div className="card mb-4" style={{ borderColor: 'var(--border)' }}>
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>הדראפט טרם החל.</p>
+          </div>
+        )}
+
+        {isDraftComplete && (
+          <div className="card mb-4" style={{ borderColor: 'var(--success)', borderWidth: 2 }}>
+            <p className="font-bold" style={{ color: 'var(--success)' }}>הדראפט הסתיים!</p>
+          </div>
+        )}
+
+        {/* On the clock */}
+        {typedLeague.status === 'active' && !isDraftComplete && currentTeam && (
+          <div
+            className="card mb-4"
+            style={{
+              borderColor: isMyTurn ? 'var(--primary)' : 'var(--warning)',
+              borderWidth: 2,
+              background: isMyTurn ? 'rgba(99,102,241,0.06)' : 'rgba(234,179,8,0.06)',
+            }}
+          >
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <p className="text-xs font-medium mb-1" style={{ color: 'var(--muted)' }}>
+                  בחירה #{currentPickNumber} מתוך {totalPicks}
+                </p>
+                <p className="font-bold text-lg">
+                  {isMyTurn ? 'התור שלך!' : `תור: ${currentTeam.name}`}
+                </p>
+                {timeSinceLast && (
+                  <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                    הבחירה הקודמת לפני {timeSinceLast}
+                  </p>
+                )}
+              </div>
+              <div className="text-left">
+                <p className="text-xs" style={{ color: 'var(--muted)' }}>
+                  סיבוב {Math.ceil(currentPickNumber / typedLeague.num_teams)} / {typedLeague.players_per_team}
+                </p>
+                {isMyTurn && (
+                  <Link href="/players" className="btn btn-primary mt-2 text-sm">בחר שחקן</Link>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* My team card */}
+          <div className="card">
+            <h2 className="font-bold mb-3">הקבוצה שלי</h2>
+            {typedMyTeam ? (
+              <div>
+                <p className="font-bold text-xl mb-1">{typedMyTeam.name}</p>
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
+                    <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>שחקנים</p>
+                    <p className="font-bold text-lg">
+                      {typedMyTeam.player_count}/{typedLeague.players_per_team}
+                    </p>
+                  </div>
+                  <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
+                    <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>מיקום בחירה</p>
+                    <p className="font-bold text-lg">
+                      {typedMyTeam.priority_rank ?? '—'}
+                    </p>
+                  </div>
+                </div>
+                <Link href="/teams" className="btn btn-outline w-full mt-3 text-sm">צפה בקבוצה</Link>
+              </div>
+            ) : createdLeague ? (
+              <div>
+                <p className="font-bold text-xl mb-1">מנהל הליגה</p>
+                <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>{createdLeague.name}</p>
+                <Link href="/admin" className="btn btn-primary w-full mt-3 text-sm">פאנל ניהול</Link>
+              </div>
+            ) : (
+              <div className="py-2">
+                <p className="font-medium mb-4">ברוך הבא! הצטרף לליגה קיימת:</p>
+                <JoinLeagueForm />
+              </div>
+            )}
+          </div>
+
+          {/* Recent picks */}
+          <div className="card">
+            <h2 className="font-bold mb-3">בחירות אחרונות</h2>
+            {typedPicks.length === 0 ? (
+              <p className="text-sm" style={{ color: 'var(--muted)' }}>עדיין לא בוצעו בחירות</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {[...typedPicks].reverse().slice(0, 6).map(pick => (
+                  <div key={pick.id} className="flex items-center gap-2 text-sm">
+                    <span className="badge badge-gray text-xs w-6 text-center flex-shrink-0">#{pick.overall_pick_number}</span>
+                    <span className="font-medium flex-1" dir="ltr">{pick.player?.name ?? '—'}</span>
+                    <span style={{ color: 'var(--muted)' }}>{pick.team?.name ?? '—'}</span>
+                  </div>
+                ))}
+                {typedPicks.length > 6 && (
+                  <Link href="/players" className="text-xs mt-1" style={{ color: 'var(--primary)' }}>
+                    ראה לוח דראפט מלא ←
+                  </Link>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── ENVELOPE DRAFT DASHBOARD (unchanged) ─────────────────────────────────────
 
   const [{ data: featuredAuction }, { data: teams }] =
     await Promise.all([
-      // Active auction first (earliest scheduled_start = active), otherwise soonest pending
       league
         ? supabase.from('auctions')
             .select('*, player:players(*), nominating_team:teams!nominating_team_id(name)')
@@ -53,7 +205,7 @@ export default async function DashboardPage() {
         : Promise.resolve({ data: [] }),
     ])
 
-  const myTeamId = (myTeam as Team | null)?.id
+  const myTeamId = typedMyTeam?.id
   const typedFeatured = featuredAuction as (Auction & { player: { name: string }; nominating_team: { name: string } | null }) | null
   const isActive = typedFeatured?.status === 'active'
 
@@ -61,8 +213,6 @@ export default async function DashboardPage() {
     ? await supabase.from('bids').select('amount').eq('auction_id', typedFeatured.id).eq('team_id', myTeamId).maybeSingle()
     : { data: null }
 
-  const typedLeague = league as League | null
-  const typedMyTeam = myTeam as Team | null
   const typedTeams = (teams || []) as Team[]
 
   const { data: completedAuctions } = league
@@ -102,7 +252,6 @@ export default async function DashboardPage() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      {/* Header */}
       <div className="mb-6">
         <h1 className="text-2xl font-bold mb-1">
           {typedLeague ? typedLeague.name : 'פנטזי דראפט מעטפות 🏀'}
@@ -118,7 +267,6 @@ export default async function DashboardPage() {
       </div>
 
       <div className={`grid gap-4 ${typedFeatured && isActive ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2'}`}>
-        {/* Current / upcoming auction card */}
         <div className="card">
           <h2 className="font-bold mb-3">מכרז נוכחי</h2>
           {typedFeatured ? (
@@ -164,7 +312,6 @@ export default async function DashboardPage() {
           )}
         </div>
 
-        {/* My team card */}
         <div className="card">
           <h2 className="font-bold mb-3">הקבוצה שלי</h2>
           {typedMyTeam ? (
@@ -219,7 +366,6 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* Draft countdown — shown when draft hasn't started yet */}
       {typedLeague?.draft_start_time && ['setup', 'lottery'].includes(typedLeague.status) && (
         <DraftCountdown targetDate={typedLeague.draft_start_time} />
       )}
@@ -227,7 +373,6 @@ export default async function DashboardPage() {
       {typedLeague && <RealtimeRefresher leagueId={typedLeague.id} />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-        {/* Nomination order */}
         <div className="card">
           <h2 className="font-bold mb-1">סדר העלאות</h2>
           <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>מי מעלה שחקן למכרז עכשיו</p>
@@ -258,7 +403,6 @@ export default async function DashboardPage() {
           )}
         </div>
 
-        {/* Tiebreak priority order */}
         <div className="card">
           <h2 className="font-bold mb-1">סדר פריוריטי</h2>
           <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>מי זוכה בהצעות שוות</p>

@@ -1,6 +1,7 @@
 export type LeagueStatus = 'setup' | 'lottery' | 'active' | 'paused' | 'completed'
 export type PlayerStatus = 'available' | 'on_auction' | 'drafted'
 export type AuctionStatus = 'pending' | 'active' | 'revealed' | 'completed'
+export type DraftType = 'envelope' | 'snake'
 
 export interface League {
   id: string
@@ -10,6 +11,7 @@ export interface League {
   budget_per_team: number
   min_bid: number
   status: LeagueStatus
+  draft_type: DraftType
   draft_start_hour: number
   draft_end_hour: number
   nomination_interval_hours: number
@@ -19,9 +21,24 @@ export interface League {
   draft_start_time: string | null
   roster_slots: Record<string, number> | null
   var_gif_url: string | null
+  pick_timeout_minutes: number | null
+  snake_round_config: boolean[] | null
   created_by: string
   created_at: string
   updated_at: string
+}
+
+export interface SnakePick {
+  id: string
+  league_id: string
+  team_id: string
+  player_id: string
+  overall_pick_number: number
+  round: number
+  pick_in_round: number
+  picked_at: string
+  team?: Team
+  player?: Player
 }
 
 export interface Team {

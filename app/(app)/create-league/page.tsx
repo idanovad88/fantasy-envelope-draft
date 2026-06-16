@@ -3,11 +3,13 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import type { DraftType } from '@/types'
 
 export default function CreateLeaguePage() {
   const [authorized, setAuthorized] = useState<boolean | null>(null)
   const [leagueName, setLeagueName] = useState('')
   const [joinCode, setJoinCode] = useState('')
+  const [draftType, setDraftType] = useState<DraftType>('envelope')
   const [numTeams, setNumTeams] = useState(10)
   const [playersPerTeam, setPlayersPerTeam] = useState(13)
   const [budgetPerTeam, setBudgetPerTeam] = useState(200)
@@ -42,10 +44,11 @@ export default function CreateLeaguePage() {
       body: JSON.stringify({
         leagueName,
         joinCode,
+        draftType,
         numTeams,
         playersPerTeam,
-        budgetPerTeam,
-        minBid,
+        budgetPerTeam: draftType === 'snake' ? 0 : budgetPerTeam,
+        minBid: draftType === 'snake' ? 1 : minBid,
         teamName: joinDraft ? teamName.trim() : null,
       }),
     })
@@ -112,6 +115,39 @@ export default function CreateLeaguePage() {
         </div>
 
         <div className="border-t pt-4" style={{ borderColor: 'var(--border)' }}>
+          <p className="text-sm font-medium mb-3">סוג דראפט</p>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              className="flex-1 py-2 rounded-lg text-sm font-medium border transition-colors"
+              style={{
+                background: draftType === 'envelope' ? 'var(--primary)' : 'transparent',
+                color: draftType === 'envelope' ? 'white' : 'var(--muted)',
+                borderColor: draftType === 'envelope' ? 'var(--primary)' : 'var(--border)',
+              }}
+              onClick={() => setDraftType('envelope')}
+            >
+              מעטפות
+            </button>
+            <button
+              type="button"
+              className="flex-1 py-2 rounded-lg text-sm font-medium border transition-colors"
+              style={{
+                background: draftType === 'snake' ? 'var(--primary)' : 'transparent',
+                color: draftType === 'snake' ? 'white' : 'var(--muted)',
+                borderColor: draftType === 'snake' ? 'var(--primary)' : 'var(--border)',
+              }}
+              onClick={() => setDraftType('snake')}
+            >
+              סנייק
+            </button>
+          </div>
+          {draftType === 'snake' && (
+            <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>כל קבוצה בוחרת שחקן בתורה, הסדר מתהפך בין סיבובים</p>
+          )}
+        </div>
+
+        <div className="border-t pt-4" style={{ borderColor: 'var(--border)' }}>
           <p className="text-sm font-medium mb-3">הגדרות ליגה</p>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -140,30 +176,34 @@ export default function CreateLeaguePage() {
                 dir="ltr"
               />
             </div>
-            <div>
-              <label className="block text-sm mb-1.5" style={{ color: 'var(--muted)' }}>תקציב לקבוצה ($)</label>
-              <input
-                className="input"
-                type="number"
-                min={1}
-                value={budgetPerTeam}
-                onChange={e => setBudgetPerTeam(Number(e.target.value))}
-                required
-                dir="ltr"
-              />
-            </div>
-            <div>
-              <label className="block text-sm mb-1.5" style={{ color: 'var(--muted)' }}>הצעת מינימום ($)</label>
-              <input
-                className="input"
-                type="number"
-                min={1}
-                value={minBid}
-                onChange={e => setMinBid(Number(e.target.value))}
-                required
-                dir="ltr"
-              />
-            </div>
+            {draftType === 'envelope' && (
+              <>
+                <div>
+                  <label className="block text-sm mb-1.5" style={{ color: 'var(--muted)' }}>תקציב לקבוצה ($)</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    value={budgetPerTeam}
+                    onChange={e => setBudgetPerTeam(Number(e.target.value))}
+                    required
+                    dir="ltr"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm mb-1.5" style={{ color: 'var(--muted)' }}>הצעת מינימום ($)</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    value={minBid}
+                    onChange={e => setMinBid(Number(e.target.value))}
+                    required
+                    dir="ltr"
+                  />
+                </div>
+              </>
+            )}
           </div>
         </div>
 

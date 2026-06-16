@@ -26,7 +26,9 @@ Dev only (`.env.local` only, never in production):
 
 ## Architecture
 
-Fantasy NBA auction-draft app. Users join a league, take turns nominating players for blind auction, and submit sealed bids revealed on a timer.
+Fantasy NBA draft app supporting two draft types:
+- **מעטפות (Envelope)** — players nominate players for blind auction; teams submit sealed bids revealed on a timer.
+- **סנייק (Snake)** — teams pick players in turn order with snake reversal between rounds; no budget or bidding.
 
 ### Data flow
 
@@ -38,11 +40,12 @@ Mutations go through API routes in `app/api/`. These routes use `createAdminClie
 
 ### Key types (`types/index.ts`)
 
-- **League** — single league with status (`setup | lottery | active | paused | completed`), budget, `players_per_team`, `nomination_interval_hours`, `reveal_before_minutes`, `created_by` (UUID of creator), `roster_slots` (JSONB, optional — see Roster slots below)
-- **Team** — user's team, tracks `budget_remaining`, `player_count`, `priority_rank` (nomination turn order), `tiebreak_rank` (tiebreak priority order), `is_complete`, `approved`
+- **League** — single league with status (`setup | lottery | active | paused | completed`), budget, `players_per_team`, `nomination_interval_hours`, `reveal_before_minutes`, `created_by` (UUID of creator), `roster_slots` (JSONB, optional — see Roster slots below), `draft_type` (`'envelope' | 'snake'`), `pick_timeout_minutes` (nullable), `snake_round_config` (boolean[] | null — per-round reversal; null = standard snake)
+- **Team** — user's team, tracks `budget_remaining`, `player_count`, `priority_rank` (nomination/pick order), `tiebreak_rank` (tiebreak priority order for envelope only), `is_complete`, `approved`
 - **Player** — status: `available | on_auction | drafted`; `roster_slot` (TEXT, optional — assigned after draft)
-- **Auction** — status: `pending | active | revealed | completed`; has `reveal_time` computed at nomination time
-- **Bid** — sealed bid per team per auction; revealed when `reveal_time` passes
+- **Auction** — status: `pending | active | revealed | completed`; has `reveal_time` computed at nomination time (envelope only)
+- **Bid** — sealed bid per team per auction; revealed when `reveal_time` passes (envelope only)
+- **SnakePick** — one pick in a snake draft: `overall_pick_number`, `round`, `pick_in_round`, `picked_at`, `team_id`, `player_id`, `league_id`
 
 ### Auth model
 
@@ -50,7 +53,7 @@ Mutations go through API routes in `app/api/`. These routes use `createAdminClie
 - OAuth callback is handled at `app/auth/callback/route.ts` — exchanges code for session, then redirects to `/leagues`.
 - League creators/admins must have their Google email in the `league_creator_whitelist` table.
 - Admin status is determined by: row in `admin_users` table OR `leagues.created_by = user.id`.
-- The layout (`app/(app)/layout.tsx`) checks both and passes `isAdmin` to `<Navbar>`.
+- The layout (`app/(app)/layout.tsx`) checks both and passes `isAdmin` and `isSnake` to `<Navbar>`. The Navbar hides the "מכרז" link for snake leagues.
 
 **Dev mode:** when `NEXT_PUBLIC_DEV_MODE=true`, the login page also shows email/password buttons for test users (team1–6@test.local, password: `test1234`). Run `scripts/seed-test-league.mjs` once to create them.
 
@@ -91,7 +94,7 @@ All join logic is in `app/api/join-league/route.ts` (uses admin client to bypass
 5. Check capacity: `teams.count < league.num_teams`
 6. Create new team with `approved: true`
 
-### Nomination turn logic
+### Nomination turn logic (envelope only)
 
 `priority_rank` on teams determines nomination order. The team with the lowest `priority_rank` among approved, non-complete teams is the current nominator. This is computed in `app/(app)/players/page.tsx`:
 
@@ -103,11 +106,32 @@ const canNominate = isMyTurn && league.status === 'active' && !activeAuction
 
 The API route `/api/nominate` re-validates this server-side before creating an auction.
 
-### Bid priority & tiebreak logic
+### Snake draft pick logic
 
-**Two independent rank columns on `teams`:**
-- `priority_rank` — nomination turn order. After each auction, the nominating team is demoted to the bottom (regardless of outcome). Managed by `demote_nomination_rank()` Supabase function.
-- `tiebreak_rank` — priority order for breaking equal bids. When multiple teams submit the same highest bid, the team with the lowest `tiebreak_rank` wins. That team is then demoted to the bottom of `tiebreak_rank`. Managed by `demote_tiebreak_rank()` Supabase function. Set via the lottery in the admin panel.
+`priority_rank` on teams determines the initial pick order (set via Admin → Lottery). The pick sequence is computed in `lib/utils.ts`:
+
+```ts
+// Which team picks at overall pick N?
+getSnakeTeamForPick(overallPickNumber, numTeams, teams, snakeRoundConfig)
+// Who is currently on the clock?
+getCurrentSnakePicker(completedPicksCount, numTeams, teams, snakeRoundConfig)
+// Is this round reversed?
+isSnakeRoundReversed(round, config)  // null config = even rounds reversed
+```
+
+The API route `POST /api/snake-pick` validates it is the team's turn, inserts into `snake_picks`, updates `players.status = 'drafted'`, increments `teams.player_count`, calls `assign_roster_slot()`, and auto-completes the league when all teams are full.
+
+`snake_round_config` is a `boolean[]` stored as JSONB on `leagues`. Index `i` = whether round `i+1` is reversed. `null` = standard snake (even rounds automatically reversed).
+
+**Admin can pick on behalf of any team** by passing `team_id` in the request body — validated server-side that the team is actually on the clock.
+
+**DB migration:** `supabase/migration_snake_draft.sql` — adds `draft_type`, `pick_timeout_minutes`, `snake_round_config` to `leagues`; creates `snake_picks` table with RLS.
+
+### Bid priority & tiebreak logic (envelope only)
+
+**Two independent rank columns on `teams`** (envelope only):
+- `priority_rank` — nomination turn order. After each auction, the nominating team is demoted to the bottom (regardless of outcome). Managed by `demote_nomination_rank()` Supabase function. In snake drafts, `priority_rank` is reused as pick order but is never mutated during the draft.
+- `tiebreak_rank` — priority order for breaking equal bids. When multiple teams submit the same highest bid, the team with the lowest `tiebreak_rank` wins. That team is then demoted to the bottom of `tiebreak_rank`. Managed by `demote_tiebreak_rank()` Supabase function. Set via the lottery in the admin panel. Not used in snake drafts.
 
 **These two orders are completely independent** — winning an auction never affects `priority_rank`, and nominating never affects `tiebreak_rank`.
 
@@ -125,12 +149,12 @@ The API route `/api/nominate` re-validates this server-side before creating an a
 
 Leagues can optionally define a roster slot configuration via `roster_slots` JSONB on the `leagues` table (e.g. `{"PG":1,"SG":1,"G":1,"SF":1,"PF":1,"F":1,"C":2,"UTIL":3,"BENCH":2}`).
 
-- Configured in **Admin Panel → League Settings** ("עמדות הרכב קבוצה" section). Displays a total counter that turns red if sum ≠ `players_per_team`.
-- After each auction resolves, `assign_roster_slot(player_id, team_id, league_id)` (Supabase function) assigns the best available slot: specific position (PG/SG/…) → combo (G/F) → UTIL → BENCH.
+- Configured in **Admin Panel → League Settings** ("עמדות הרכב קבוצה" section). Displays a total counter that turns red if sum ≠ `players_per_team`. Works for both envelope and snake leagues.
+- After each pick (auction resolve or snake pick), `assign_roster_slot(player_id, team_id, league_id)` (Supabase function) assigns the best available slot: specific position (PG/SG/…) → combo (G/F) → UTIL → BENCH.
 - Team pages display players sorted by slot order; each player shows a blue badge with their slot. If the player's actual position differs from the slot, it appears in grey parentheses.
 - Migration: `supabase/migration_roster_slots.sql` — adds `roster_slots` to `leagues`, `roster_slot` to `players`, creates `assign_roster_slot()`, and updates `resolve_auction()` to call it.
 
-### Admin auction tab
+### Admin auction tab (envelope only)
 
 Sections appear in this order: **active auction → auction queue → add to queue → history**.
 
@@ -172,11 +196,18 @@ node -e "const sharp = require('sharp'); const src = './public/logo.png'; Promis
 
 ### Dashboard metrics
 
-The dashboard (`app/(app)/page.tsx`) renders three sections below the main cards:
+The dashboard (`app/(app)/page.tsx`) branches on `draft_type`:
 
+**Envelope** — renders three sections below the main cards:
 1. **סדר העלאות** — nomination order, sorted by `priority_rank` ASC, excludes completed teams.
 2. **סדר פריוריטי** — tiebreak order, sorted by `tiebreak_rank` ASC, includes all teams.
 3. **פראייר הדראפט** — overpayment metric. For every completed auction, computes `winning_bid − second_highest_bid` (where second highest = max bid from non-winning teams; 0 if no other team bid). Sums these per team and displays all teams sorted descending. Computed in the server component from `auctions` (status=completed) + `bids` tables — no DB function needed. RLS allows all bids to be read once an auction is completed.
+
+**Snake** — shows:
+- Countdown to `draft_start_time` before the draft begins
+- "על הדק" card showing current team, overall pick number, and time since last pick once active
+- My team's drafted players
+- Last 5 picks
 
 ### Styling
 
@@ -197,7 +228,11 @@ Admin API routes under `app/api/admin/`:
 
 The admin UI is at `app/(app)/admin/` (page + AdminPanel client component).
 
-**Admin panel tabs:** overview, teams, auction, players, lottery, league settings.
+**Admin panel tabs:**
+- Envelope: overview, auction, players, teams, lottery, league settings
+- Snake: overview, draft, players, teams, lottery, league settings
+
+The "draft" tab (snake only) shows current pick status, admin pick-on-behalf form (team + player dropdowns), pick order editing, and picks history. The lottery tab for snake shows only draft order (no tiebreak). League settings for snake include `pick_timeout_minutes` and per-round direction toggles (`snake_round_config`).
 
 **League creator** can optionally join as a player (choose at creation time or from admin overview "הצטרפות לדראפט" card). Creator's row in `admin_users` is protected — cannot be revoked via UI or API.
 
@@ -205,6 +240,11 @@ The admin UI is at `app/(app)/admin/` (page + AdminPanel client component).
 
 `app/(app)/create-league/page.tsx` — protected by `league_creator_whitelist`. Creates league via `POST /api/create-league`. Duplicate league names (case-insensitive) are rejected.
 
-Creator can choose to join as a player (provides team name) or remain a spectator-admin.
+Creator selects draft type (**מעטפות** or **סנייק**). Budget and min_bid fields are hidden when snake is selected (not relevant). Creator can also choose to join as a player (provides team name) or remain a spectator-admin.
 
 After creation the creator is upserted into `admin_users` with the new `league_id`.
+
+### New components (snake draft)
+
+- `components/SnakeDraftBoard.tsx` — rounds × teams grid showing pick assignments, current pick highlighted, round direction arrows (→/←)
+- `components/SnakePlayerPicker.tsx` — searchable player table with "בחר" button per row; calls `POST /api/snake-pick`
