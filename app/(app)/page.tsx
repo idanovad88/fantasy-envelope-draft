@@ -65,6 +65,41 @@ export default async function DashboardPage() {
   const typedMyTeam = myTeam as Team | null
   const typedTeams = (teams || []) as Team[]
 
+  const { data: completedAuctions } = league
+    ? await supabase
+        .from('auctions')
+        .select('id, winning_team_id, winning_bid')
+        .eq('league_id', league.id)
+        .eq('status', 'completed')
+        .not('winning_team_id', 'is', null)
+    : { data: [] }
+
+  const completedAuctionIds = (completedAuctions ?? []).map((a: { id: string }) => a.id)
+  const { data: completedBids } = completedAuctionIds.length > 0
+    ? await supabase
+        .from('bids')
+        .select('auction_id, team_id, amount')
+        .in('auction_id', completedAuctionIds)
+    : { data: [] }
+
+  const prairScore: Record<string, number> = {}
+  for (const auction of completedAuctions ?? []) {
+    const a = auction as { id: string; winning_team_id: string | null; winning_bid: number | null }
+    if (!a.winning_team_id || !a.winning_bid) continue
+    const auctionBids = (completedBids ?? []) as { auction_id: string; team_id: string; amount: number }[]
+    const forThisAuction = auctionBids.filter(b => b.auction_id === a.id)
+    const otherBids = forThisAuction.filter(b => b.team_id !== a.winning_team_id)
+    const secondHighest = otherBids.length > 0 ? Math.max(...otherBids.map(b => b.amount)) : 0
+    const diff = a.winning_bid - secondHighest
+    if (diff > 0) {
+      prairScore[a.winning_team_id] = (prairScore[a.winning_team_id] ?? 0) + diff
+    }
+  }
+
+  const prairRanking = typedTeams
+    .map(t => ({ team: t, score: prairScore[t.id] ?? 0 }))
+    .sort((a, b) => b.score - a.score)
+
   return (
     <div className="max-w-4xl mx-auto">
       {/* Header */}
@@ -254,6 +289,42 @@ export default async function DashboardPage() {
           )}
         </div>
       </div>
+
+      {typedLeague && (
+        <div className="card mt-4">
+          <h2 className="font-bold mb-1">פראייר הדראפט 🤦</h2>
+          <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
+            סה״כ עודף תשלום מעל ההצעה השנייה בכל מכרז
+          </p>
+          {prairRanking.length === 0 ? (
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>אין נתונים עדיין</p>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {prairRanking.map(({ team, score }, i) => {
+                const isMe = team.user_id === user?.id
+                const isFirst = i === 0
+                return (
+                  <div key={team.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm"
+                    style={{
+                      background: isMe ? 'rgba(99,102,241,0.1)' : isFirst ? 'rgba(239,68,68,0.07)' : 'var(--background)',
+                      border: isMe ? '1px solid rgba(99,102,241,0.3)' : isFirst ? '1px solid rgba(239,68,68,0.2)' : '1px solid transparent',
+                    }}>
+                    <span className="font-bold w-5 text-center" style={{ color: isFirst ? 'var(--danger)' : 'var(--muted)' }}>
+                      {i + 1}
+                    </span>
+                    <span className="font-medium flex-1">{team.name}</span>
+                    <span className="font-bold" style={{ color: isFirst ? 'var(--danger)' : undefined }}>
+                      ${score}
+                    </span>
+                    {isFirst && <span className="badge badge-red text-xs">פראייר 🤦</span>}
+                    {isMe && <span className="badge badge-blue text-xs">אתה</span>}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
