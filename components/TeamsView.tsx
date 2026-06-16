@@ -12,9 +12,10 @@ interface Props {
   budgetPerTeam: number
   playersPerTeam: number
   rosterSlots: Record<string, number> | null
+  isSnake?: boolean
 }
 
-export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTeam, playersPerTeam, rosterSlots }: Props) {
+export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTeam, playersPerTeam, rosterSlots, isSnake }: Props) {
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
 
   const visibleTeams = selectedTeamId ? teams.filter(t => t.id === selectedTeamId) : teams
@@ -75,9 +76,11 @@ export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTea
                     {team.is_complete && <span className="badge badge-green text-xs">✅ שלם</span>}
                     {!team.approved && <span className="badge badge-yellow text-xs">ממתין לאישור</span>}
                   </div>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
-                    פריוריטי: {team.tiebreak_rank ?? (team.is_complete ? 'הסתיים' : '—')}
-                  </p>
+                  {!isSnake && (
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
+                      פריוריטי: {team.tiebreak_rank ?? (team.is_complete ? 'הסתיים' : '—')}
+                    </p>
+                  )}
                 </div>
                 <div className="text-left">
                   <p className="font-bold text-xl" style={{ color: team.budget_remaining < 20 ? 'var(--danger)' : 'var(--success)' }}>

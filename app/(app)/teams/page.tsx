@@ -55,6 +55,7 @@ export default async function TeamsPage() {
         budgetPerTeam={(league as League)?.budget_per_team ?? 200}
         playersPerTeam={(league as League)?.players_per_team ?? 13}
         rosterSlots={(league as League)?.roster_slots ?? null}
+        isSnake={(league as League)?.draft_type === 'snake'}
       />
     </div>
   )
