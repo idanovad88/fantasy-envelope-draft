@@ -100,10 +100,13 @@ export default async function LeaguesPage() {
                   <span className={`badge text-xs ${league.status === 'active' ? 'badge-green' : 'badge-gray'}`}>
                     {statusLabel[league.status] ?? league.status}
                   </span>
+                  <span className="badge badge-blue text-xs">
+                    {league.draft_type === 'snake' ? 'סנייק' : 'מעטפות'}
+                  </span>
                 </div>
                 {myTeam && (
                   <p className="text-sm mt-0.5" style={{ color: 'var(--muted)' }}>
-                    קבוצה: {myTeam.name} · תקציב: ${myTeam.budget_remaining}
+                    קבוצה: {myTeam.name}
                   </p>
                 )}
               </div>
