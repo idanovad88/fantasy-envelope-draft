@@ -42,7 +42,7 @@ export default async function PlayersPage() {
 
   // ── SNAKE DRAFT ──────────────────────────────────────────────────────────────
   if (typedLeague?.draft_type === 'snake') {
-    return <SnakeDraftPage league={typedLeague} userId={user!.id} myTeam={myTeam as Team | null} />
+    return <SnakeDraftPage league={typedLeague} myTeam={myTeam as Team | null} />
   }
 
   // ── ENVELOPE DRAFT (unchanged) ───────────────────────────────────────────────
@@ -161,17 +161,15 @@ export default async function PlayersPage() {
 
 async function SnakeDraftPage({
   league,
-  userId,
   myTeam,
 }: {
   league: League
-  userId: string
   myTeam: Team | null
 }) {
   const supabase = await createClient()
   const adminClient = (await import('@/lib/supabase/server')).createAdminClient()
 
-  const [{ data: players }, { data: teams }, { data: snakePicks }, { data: adminRow }] = await Promise.all([
+  const [{ data: players }, { data: teams }, { data: snakePicks }] = await Promise.all([
     supabase.from('players')
       .select('*, drafting_team:teams!drafted_by_team_id(id, name)')
       .eq('league_id', league.id)
@@ -186,10 +184,8 @@ async function SnakeDraftPage({
       .select('*, player:players(name, position), team:teams(name)')
       .eq('league_id', league.id)
       .order('overall_pick_number', { ascending: true }),
-    supabase.from('admin_users').select('user_id').eq('user_id', userId).eq('league_id', league.id).maybeSingle(),
   ])
 
-  const isAdmin = !!adminRow || league.created_by === userId
   const typedTeams = (teams || []) as Team[]
   const typedPicks = (snakePicks || []) as (SnakePick & { player: { name: string; position: string | null } | null })[]
   const typedPlayers = (players || []) as PlayerWithTeam[]
@@ -206,8 +202,10 @@ async function SnakeDraftPage({
     ? null
     : getCurrentSnakePicker(completedCount, league.num_teams, typedTeams, league.snake_round_config as boolean[] | null)
 
+  // A user may only pick for their own team, and only on their own turn.
+  // Admins pick on behalf of a team from the dedicated admin-panel tool.
   const isMyTurn = !!currentTeam && !!myTeam && currentTeam.id === myTeam.id
-  const canPick = league.status === 'active' && !isDraftComplete && (isMyTurn || isAdmin)
+  const canPick = league.status === 'active' && !isDraftComplete && isMyTurn
 
   const lastPick = typedPicks[typedPicks.length - 1]
   const timeSinceLast = lastPick ? formatTimeSince(lastPick.picked_at) : null
@@ -279,7 +277,6 @@ async function SnakeDraftPage({
             players={available.map(p => ({ id: p.id, name: p.name, position: p.position, nba_team: p.nba_team, ranking: p.ranking }))}
             leagueId={league.id}
             canPick={canPick}
-            pickingTeamId={isAdmin && currentTeam ? currentTeam.id : undefined}
           />
         </div>
       )}
