@@ -1,4 +1,5 @@
 import { type ClassValue, clsx } from 'clsx'
+import type { Team } from '@/types'
 
 export function cn(...inputs: ClassValue[]) {
   return inputs.filter(Boolean).join(' ')
@@ -47,6 +48,45 @@ export function getNextNominationTimes(startHour: number, endHour: number, inter
   }
 
   return slots
+}
+
+// Snake draft helpers
+
+export function isSnakeRoundReversed(round: number, config: boolean[] | null): boolean {
+  if (config === null || config[round - 1] === undefined) return round % 2 === 0
+  return config[round - 1]
+}
+
+export function getSnakeTeamForPick(
+  overallPickNumber: number,
+  numTeams: number,
+  teams: Team[],
+  snakeRoundConfig: boolean[] | null
+): Team | null {
+  if (teams.length === 0) return null
+  const round = Math.ceil(overallPickNumber / numTeams)
+  const posInRound = (overallPickNumber - 1) % numTeams
+  const reversed = isSnakeRoundReversed(round, snakeRoundConfig)
+  const rankIndex = reversed ? (numTeams - 1 - posInRound) : posInRound
+  return teams[rankIndex] ?? null
+}
+
+export function getCurrentSnakePicker(
+  completedPicksCount: number,
+  numTeams: number,
+  teams: Team[],
+  snakeRoundConfig: boolean[] | null
+): Team | null {
+  return getSnakeTeamForPick(completedPicksCount + 1, numTeams, teams, snakeRoundConfig)
+}
+
+export function formatTimeSince(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const minutes = Math.floor(diff / 60000)
+  const hours = Math.floor(minutes / 60)
+  if (hours > 0) return `${hours} שעות ו-${minutes % 60} דקות`
+  if (minutes > 0) return `${minutes} דקות`
+  return 'כרגע'
 }
 
 export function getCountdown(targetDate: string) {

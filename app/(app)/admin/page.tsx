@@ -2,13 +2,13 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import AdminPanel from './AdminPanel'
-import type { League, Team, Auction } from '@/types'
+import type { League, Team, Auction, SnakePick } from '@/types'
 
 export const dynamic = 'force-dynamic'
 
 export default async function AdminPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const { tab: tabParam } = await searchParams
-  const validTabs = ['overview', 'teams', 'auction', 'players', 'lottery', 'league'] as const
+  const validTabs = ['overview', 'teams', 'auction', 'players', 'lottery', 'league', 'draft'] as const
   type TabId = typeof validTabs[number]
   const initialTab: TabId = validTabs.includes(tabParam as TabId) ? (tabParam as TabId) : 'overview'
 
@@ -22,7 +22,6 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
 
   const adminDb = createAdminClient()
 
-  // Verify user is admin for the currently selected league
   const { data: adminRow } = await supabase
     .from('admin_users').select('*').eq('user_id', user.id).eq('league_id', selectedLeagueId).maybeSingle()
   const { data: ownedLeague } = !adminRow
@@ -31,13 +30,12 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   if (!adminRow && !ownedLeague) redirect('/')
 
   const leagueId = selectedLeagueId
-
   const { data: league } = await supabase.from('leagues').select('*').eq('id', leagueId).maybeSingle()
-
   const lid = league?.id
+  const isSnake = league?.draft_type === 'snake'
 
-  // Auto-activate any pending auction whose scheduled_start has passed
-  if (lid) {
+  // Auto-activate any pending auction whose scheduled_start has passed (envelope only)
+  if (lid && !isSnake) {
     const nowIso = new Date().toISOString()
     const [{ data: alreadyActive }, { data: overdue }] = await Promise.all([
       adminDb.from('auctions').select('id').eq('league_id', lid).eq('status', 'active').maybeSingle(),
@@ -52,15 +50,16 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
     }
   }
 
-  const [{ data: teams }, { data: activeAuction }, { data: scheduledAuctions }, { data: players }, { data: pastAuctions }, { data: leagueCreators }, { data: leagueAdminUsers }] =
+  const [{ data: teams }, { data: activeAuction }, { data: scheduledAuctions }, { data: players }, { data: pastAuctions }, { data: leagueCreators }, { data: leagueAdminUsers }, { data: snakePicks }] =
     await Promise.all([
       supabase.from('teams').select('*').eq('league_id', lid).order('priority_rank', { ascending: true, nullsFirst: false }),
-      supabase.from('auctions').select('*, player:players(*), bids(id)').eq('league_id', lid).eq('status', 'active').order('scheduled_start', { ascending: false }).limit(1).maybeSingle(),
-      supabase.from('auctions').select('id, scheduled_start, reveal_time, player:players(name)').eq('league_id', lid).eq('status', 'pending').order('scheduled_start', { ascending: true }),
+      !isSnake ? supabase.from('auctions').select('*, player:players(*), bids(id)').eq('league_id', lid).eq('status', 'active').order('scheduled_start', { ascending: false }).limit(1).maybeSingle() : Promise.resolve({ data: null }),
+      !isSnake ? supabase.from('auctions').select('id, scheduled_start, reveal_time, player:players(name)').eq('league_id', lid).eq('status', 'pending').order('scheduled_start', { ascending: true }) : Promise.resolve({ data: [] }),
       supabase.from('players').select('id, name, status, ranking, position').eq('league_id', lid).order('ranking', { ascending: true }),
-      supabase.from('auctions').select('id, scheduled_start, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)').eq('league_id', lid).eq('status', 'completed').order('scheduled_start', { ascending: false }).limit(50),
+      !isSnake ? supabase.from('auctions').select('id, scheduled_start, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)').eq('league_id', lid).eq('status', 'completed').order('scheduled_start', { ascending: false }).limit(50) : Promise.resolve({ data: [] }),
       supabase.from('league_creator_whitelist').select('email').order('created_at', { ascending: true }),
       adminDb.from('admin_users').select('user_id').eq('league_id', lid),
+      isSnake ? supabase.from('snake_picks').select('*, player:players(name, position), team:teams(name)').eq('league_id', lid).order('overall_pick_number', { ascending: true }) : Promise.resolve({ data: [] }),
     ])
 
   return (
@@ -76,6 +75,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         leagueCreators={(leagueCreators || []).map(r => r.email)}
         adminUserIds={(leagueAdminUsers || []).map(r => r.user_id)}
         currentUserId={user.id}
+        snakePicks={(snakePicks || []) as unknown as (SnakePick & { player: { name: string; position: string | null } | null; team: { name: string } | null })[]}
       />
     </>
   )

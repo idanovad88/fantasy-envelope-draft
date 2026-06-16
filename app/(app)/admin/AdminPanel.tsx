@@ -2,15 +2,16 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { formatDateTime, formatTime } from '@/lib/utils'
-import type { League, Team, Auction } from '@/types'
+import { formatDateTime, formatTime, getSnakeTeamForPick, isSnakeRoundReversed } from '@/lib/utils'
+import type { League, Team, Auction, SnakePick } from '@/types'
 import ImportPlayers from './ImportPlayers'
 
 type PastAuction = { id: string; scheduled_start: string; winning_bid: number | null; player: { name: string } | null; winning_team: { name: string } | null }
 type ScheduledAuction = { id: string; scheduled_start: string; reveal_time: string; player: { name: string } | null }
+type SnakePickFull = SnakePick & { player: { name: string; position: string | null } | null; team: { name: string } | null }
 
 interface Props {
-  initialTab?: 'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league'
+  initialTab?: 'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league' | 'draft'
   league: League | null
   teams: Team[]
   activeAuction: (Auction & { player: { name: string }; bids: { id: string }[] }) | null
@@ -20,11 +21,13 @@ interface Props {
   leagueCreators: string[]
   adminUserIds: string[]
   currentUserId: string
+  snakePicks?: SnakePickFull[]
 }
 
-export default function AdminPanel({ initialTab = 'overview', league, teams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators, adminUserIds, currentUserId }: Props) {
+export default function AdminPanel({ initialTab = 'overview', league, teams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators, adminUserIds, currentUserId, snakePicks = [] }: Props) {
   const supabase = createClient()
-  const [tab, setTab] = useState<'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league'>(initialTab)
+  const isSnake = league?.draft_type === 'snake'
+  const [tab, setTab] = useState<'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league' | 'draft'>(initialTab)
   const [loading, setLoading] = useState('')
   const [msg, setMsg] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -93,6 +96,24 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     if (!league?.draft_start_time) return ''
     return new Date(league.draft_start_time).toISOString().slice(0, 16)
   })
+
+  // Snake draft state
+  const [pickTimeoutMinutes, setPickTimeoutMinutes] = useState<string>(String(league?.pick_timeout_minutes ?? ''))
+  const [snakeRoundConfig, setSnakeRoundConfig] = useState<boolean[]>(() => {
+    if (league?.snake_round_config && Array.isArray(league.snake_round_config)) {
+      return league.snake_round_config as boolean[]
+    }
+    // Default: standard snake — even rounds reversed
+    const n = league?.players_per_team ?? 0
+    return Array.from({ length: n }, (_, i) => (i + 1) % 2 === 0)
+  })
+  const [pickOrderEdits, setPickOrderEdits] = useState<Record<string, string>>(() => {
+    const m: Record<string, string> = {}
+    teams.forEach(t => { m[t.id] = String(t.priority_rank ?? '') })
+    return m
+  })
+  const [snakeAdminPickTeam, setSnakeAdminPickTeam] = useState('')
+  const [snakeAdminPickPlayer, setSnakeAdminPickPlayer] = useState('')
 
   // Player management state
   const [newPlayerName, setNewPlayerName] = useState('')
@@ -420,14 +441,66 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     window.location.reload()
   }
 
-  const TABS = [
-    { id: 'overview', label: 'סקירה' },
-    { id: 'auction', label: 'מכרז' },
-    { id: 'players', label: 'שחקנים' },
-    { id: 'teams', label: 'קבוצות' },
-    { id: 'lottery', label: 'הגרלה' },
-    { id: 'league', label: 'הגדרות' },
-  ] as const
+  async function savePickOrder() {
+    if (!league) return
+    setLoading('pick_order')
+    const updates = teams.map(t => {
+      const rank = parseInt(pickOrderEdits[t.id] ?? '')
+      if (isNaN(rank)) return null
+      return supabase.from('teams').update({ priority_rank: rank, updated_at: new Date().toISOString() }).eq('id', t.id)
+    }).filter(Boolean)
+    await Promise.all(updates)
+    setMsg('סדר הבחירות עודכן')
+    setLoading('')
+    window.location.reload()
+  }
+
+  async function adminPickForTeam() {
+    if (!league || !snakeAdminPickPlayer || !snakeAdminPickTeam) return
+    setLoading('admin_snake_pick')
+    const res = await fetch('/api/snake-pick', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ league_id: league.id, player_id: snakeAdminPickPlayer, team_id: snakeAdminPickTeam }),
+    })
+    const data = await res.json()
+    if (!res.ok) { setMsg('שגיאה: ' + data.error); setLoading(''); return }
+    setMsg(`בחירה בוצעה: ${data.player} ← ${data.team}`)
+    setLoading('')
+    window.location.reload()
+  }
+
+  async function saveSnakeLeagueSettings() {
+    if (!league) return
+    setLoading('league')
+    const timeout = parseInt(pickTimeoutMinutes)
+    await supabase.from('leagues').update({
+      pick_timeout_minutes: isNaN(timeout) || pickTimeoutMinutes === '' ? null : timeout,
+      snake_round_config: snakeRoundConfig,
+      updated_at: new Date().toISOString(),
+    }).eq('id', league.id)
+    setMsg('הגדרות נשמרו')
+    setLoading('')
+    window.location.reload()
+  }
+
+  const TABS = isSnake
+    ? [
+        { id: 'overview', label: 'סקירה' },
+        { id: 'draft', label: 'דראפט' },
+        { id: 'players', label: 'שחקנים' },
+        { id: 'teams', label: 'קבוצות' },
+        { id: 'lottery', label: 'הגרלה' },
+        { id: 'league', label: 'הגדרות' },
+      ]
+    : [
+        { id: 'overview', label: 'סקירה' },
+        { id: 'auction', label: 'מכרז' },
+        { id: 'players', label: 'שחקנים' },
+        { id: 'teams', label: 'קבוצות' },
+        { id: 'lottery', label: 'הגרלה' },
+        { id: 'league', label: 'הגדרות' },
+      ]
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -444,7 +517,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
         {TABS.map(t => (
           <button
             key={t.id}
-            onClick={() => { setTab(t.id); window.history.replaceState(null, '', `?tab=${t.id}`) }}
+            onClick={() => { setTab(t.id as typeof tab); window.history.replaceState(null, '', `?tab=${t.id}`) }}
             className="flex-1 py-2 px-2 rounded-md text-sm font-medium transition-all"
             style={tab === t.id ? { background: 'var(--primary)', color: 'white' } : { color: 'var(--muted)' }}
           >
@@ -747,6 +820,121 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
         </div>
       )}
 
+      {/* SNAKE DRAFT */}
+      {tab === 'draft' && isSnake && (() => {
+        const sortedTeams = [...teams].filter(t => t.priority_rank !== null).sort((a, b) => (a.priority_rank ?? 99) - (b.priority_rank ?? 99))
+        const completedCount = snakePicks.length
+        const totalPicks = (league?.num_teams ?? 0) * (league?.players_per_team ?? 0)
+        const currentPickNum = completedCount + 1
+        const currentTeam = totalPicks > 0 && completedCount < totalPicks
+          ? getSnakeTeamForPick(currentPickNum, league!.num_teams, sortedTeams, league!.snake_round_config as boolean[] | null)
+          : null
+        const availablePlayers = players.filter(p => p.status === 'available')
+
+        return (
+          <div className="flex flex-col gap-4">
+            {/* Current pick status */}
+            <div className="card" style={{ borderColor: 'var(--primary)' }}>
+              <h2 className="font-bold mb-3">מצב דראפט</h2>
+              {completedCount >= totalPicks ? (
+                <p className="font-bold" style={{ color: 'var(--success)' }}>הדראפט הסתיים ({totalPicks} בחירות)</p>
+              ) : (
+                <>
+                  <p className="text-sm mb-1" style={{ color: 'var(--muted)' }}>
+                    בחירה #{currentPickNum} מתוך {totalPicks} · סיבוב {Math.ceil(currentPickNum / (league?.num_teams ?? 1))}
+                  </p>
+                  <p className="font-bold text-lg">
+                    {currentTeam ? `תור: ${currentTeam.name}` : 'ממתין לפעילות...'}
+                  </p>
+                </>
+              )}
+            </div>
+
+            {/* Admin: pick on behalf */}
+            {league?.status === 'active' && completedCount < totalPicks && (
+              <div className="card">
+                <h2 className="font-bold mb-3">בחירה במקום קבוצה</h2>
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5">קבוצה (בתור)</label>
+                    <select className="input" value={snakeAdminPickTeam} onChange={e => setSnakeAdminPickTeam(e.target.value)}>
+                      <option value="">בחר קבוצה...</option>
+                      {sortedTeams.map(t => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} {currentTeam?.id === t.id ? '← בתור' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5">שחקן</label>
+                    <select className="input" value={snakeAdminPickPlayer} onChange={e => setSnakeAdminPickPlayer(e.target.value)}>
+                      <option value="">בחר שחקן...</option>
+                      {availablePlayers.map(p => (
+                        <option key={p.id} value={p.id}>{p.ranking ? `#${p.ranking} ` : ''}{p.name} {p.position ? `(${p.position})` : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    className="btn btn-primary"
+                    onClick={adminPickForTeam}
+                    disabled={!!loading || !snakeAdminPickTeam || !snakeAdminPickPlayer}
+                  >
+                    {loading === 'admin_snake_pick' ? 'בוחר...' : 'בצע בחירה'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Edit pick order */}
+            <div className="card">
+              <h2 className="font-bold mb-3">עריכת סדר בחירות</h2>
+              <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>שנה את מספר הסדר (#) לכל קבוצה. הסנייק מחשב מי בתור לפי הסדר הזה.</p>
+              <div className="flex flex-col gap-2 mb-4">
+                {teams.filter(t => t.approved).map(team => (
+                  <div key={team.id} className="flex items-center gap-3">
+                    <input
+                      type="number"
+                      className="input text-center w-16"
+                      min={1}
+                      max={teams.length}
+                      dir="ltr"
+                      value={pickOrderEdits[team.id] ?? ''}
+                      onChange={e => setPickOrderEdits(prev => ({ ...prev, [team.id]: e.target.value }))}
+                    />
+                    <span className="font-medium">{team.name}</span>
+                  </div>
+                ))}
+              </div>
+              <button
+                className="btn btn-primary w-full"
+                onClick={savePickOrder}
+                disabled={loading === 'pick_order'}
+              >
+                {loading === 'pick_order' ? 'שומר...' : 'שמור סדר'}
+              </button>
+            </div>
+
+            {/* Recent picks */}
+            {snakePicks.length > 0 && (
+              <div className="card">
+                <h2 className="font-bold mb-3">בחירות ({snakePicks.length})</h2>
+                <div className="flex flex-col gap-1 max-h-80 overflow-y-auto">
+                  {[...snakePicks].reverse().map(pick => (
+                    <div key={pick.id} className="flex items-center gap-2 text-sm py-1 border-b" style={{ borderColor: 'var(--border)' }}>
+                      <span className="badge badge-gray text-xs w-6 text-center flex-shrink-0">#{pick.overall_pick_number}</span>
+                      <span className="font-medium flex-1" dir="ltr">{pick.player?.name ?? '—'}</span>
+                      {pick.player?.position && <span className="badge badge-blue text-xs">{pick.player.position}</span>}
+                      <span style={{ color: 'var(--muted)' }}>{pick.team?.name ?? '—'}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
       {/* PLAYERS */}
       {tab === 'players' && (
         <div className="flex flex-col gap-4">
@@ -917,11 +1105,13 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
       {/* LOTTERY */}
       {tab === 'lottery' && (
         <div className="flex flex-col gap-4">
-          {/* Nomination order lottery */}
+          {/* Nomination / draft order lottery */}
           <div className="card">
-            <h2 className="font-bold mb-1">🎲 הגרלת סדר העלאות</h2>
+            <h2 className="font-bold mb-1">🎲 {isSnake ? 'הגרלת סדר דראפט' : 'הגרלת סדר העלאות'}</h2>
             <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
-              קובע איזו קבוצה מעלה שחקן למכרז בכל תור. הסדר סימטרי וקבוע — כל קבוצה מקבלת תורה לפי הסדר.
+              {isSnake
+                ? 'קובע את סדר הבחירה בדראפט הסנייק. ניתן לשנות ידנית בטאב "דראפט".'
+                : 'קובע איזו קבוצה מעלה שחקן למכרז בכל תור. הסדר סימטרי וקבוע — כל קבוצה מקבלת תורה לפי הסדר.'}
             </p>
             <div className="mb-4 flex flex-col gap-1">
               {teams.filter(t => t.approved).sort((a, b) => (a.priority_rank ?? 999) - (b.priority_rank ?? 999)).map(t => (
@@ -938,51 +1128,60 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
               onClick={runNominationLottery}
               disabled={!!loading || !league || teams.filter(t => t.approved).length < 2}
             >
-              {loading === 'lottery_nomination' ? 'מגריל...' : '🎲 הגרל סדר העלאות'}
+              {loading === 'lottery_nomination' ? 'מגריל...' : `🎲 ${isSnake ? 'הגרל סדר דראפט' : 'הגרל סדר העלאות'}`}
             </button>
           </div>
 
-          {/* Tiebreak priority lottery */}
-          <div className="card">
-            <h2 className="font-bold mb-1">🏆 הגרלת סדר פריוריטי</h2>
-            <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
-              שובר שוויון בהצעות זהות. הקבוצה הגבוהה בסדר זוכה — ולאחר מכן יורדת לתחתית. הגרלה עצמאית מסדר העלאות.
-            </p>
-            <div className="mb-4 flex flex-col gap-1">
-              {teams.filter(t => t.approved).sort((a, b) => (a.tiebreak_rank ?? 999) - (b.tiebreak_rank ?? 999)).map(t => (
-                <div key={t.id} className="flex items-center justify-between text-sm px-3 py-2 rounded" style={{ background: 'var(--background)' }}>
-                  <span>{t.name}</span>
-                  <span className="badge badge-gray">
-                    {t.tiebreak_rank ? `#${t.tiebreak_rank}` : 'ממתין'}
-                  </span>
-                </div>
-              ))}
+          {/* Tiebreak priority lottery — envelope only */}
+          {!isSnake && (
+            <div className="card">
+              <h2 className="font-bold mb-1">🏆 הגרלת סדר פריוריטי</h2>
+              <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
+                שובר שוויון בהצעות זהות. הקבוצה הגבוהה בסדר זוכה — ולאחר מכן יורדת לתחתית. הגרלה עצמאית מסדר העלאות.
+              </p>
+              <div className="mb-4 flex flex-col gap-1">
+                {teams.filter(t => t.approved).sort((a, b) => (a.tiebreak_rank ?? 999) - (b.tiebreak_rank ?? 999)).map(t => (
+                  <div key={t.id} className="flex items-center justify-between text-sm px-3 py-2 rounded" style={{ background: 'var(--background)' }}>
+                    <span>{t.name}</span>
+                    <span className="badge badge-gray">
+                      {t.tiebreak_rank ? `#${t.tiebreak_rank}` : 'ממתין'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <button
+                className="btn btn-primary w-full"
+                onClick={runTiebreakLottery}
+                disabled={!!loading || !league || teams.filter(t => t.approved).length < 2}
+              >
+                {loading === 'lottery_tiebreak' ? 'מגריל...' : '🏆 הגרל סדר פריוריטי'}
+              </button>
             </div>
-            <button
-              className="btn btn-primary w-full"
-              onClick={runTiebreakLottery}
-              disabled={!!loading || !league || teams.filter(t => t.approved).length < 2}
-            >
-              {loading === 'lottery_tiebreak' ? 'מגריל...' : '🏆 הגרל סדר פריוריטי'}
-            </button>
-          </div>
+          )}
 
-          {/* Activate league after both lotteries */}
+          {/* Activate league */}
           {league?.status === 'lottery' && (
             <div className="card" style={{ border: '1px solid var(--success)' }}>
               <h2 className="font-bold mb-1">הפעל ליגה</h2>
               <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
-                לאחר ביצוע שתי ההגרלות ניתן להפעיל את הדראפט.
+                {isSnake
+                  ? 'לאחר ביצוע הגרלת הסדר ניתן להפעיל את הדראפט.'
+                  : 'לאחר ביצוע שתי ההגרלות ניתן להפעיל את הדראפט.'}
               </p>
-              {(!teams.some(t => t.priority_rank) || !teams.some(t => t.tiebreak_rank)) && (
+              {!isSnake && (!teams.some(t => t.priority_rank) || !teams.some(t => t.tiebreak_rank)) && (
                 <p className="text-sm mb-3" style={{ color: 'var(--warning)' }}>
                   ⚠️ יש להגריל את שני הסדרים לפני ההפעלה
+                </p>
+              )}
+              {isSnake && !teams.some(t => t.priority_rank) && (
+                <p className="text-sm mb-3" style={{ color: 'var(--warning)' }}>
+                  ⚠️ יש להגריל את סדר הדראפט לפני ההפעלה
                 </p>
               )}
               <button
                 className="btn btn-success w-full"
                 onClick={() => setLeagueStatus('active')}
-                disabled={!!loading || !teams.some(t => t.priority_rank) || !teams.some(t => t.tiebreak_rank)}
+                disabled={!!loading || (isSnake ? !teams.some(t => t.priority_rank) : (!teams.some(t => t.priority_rank) || !teams.some(t => t.tiebreak_rank)))}
               >
                 {loading === 'status_active' ? 'מפעיל...' : '▶ הפעל דראפט'}
               </button>
@@ -1037,22 +1236,42 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
               )}
             </div>
 
-            <div>
-              <label className="block text-sm font-medium mb-1.5">משך מכרז (שעות)</label>
-              <input
-                type="number"
-                className="input text-center"
-                value={auctionDurationHours}
-                onChange={e => setAuctionDurationHours(Number(e.target.value))}
-                min={0.25}
-                max={24}
-                step={0.25}
-                dir="ltr"
-              />
-              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
-                זמן הסגירה של כל מכרז — ברירת מחדל: 1.5 שעות (90 דקות)
-              </p>
-            </div>
+            {!isSnake && (
+              <div>
+                <label className="block text-sm font-medium mb-1.5">משך מכרז (שעות)</label>
+                <input
+                  type="number"
+                  className="input text-center"
+                  value={auctionDurationHours}
+                  onChange={e => setAuctionDurationHours(Number(e.target.value))}
+                  min={0.25}
+                  max={24}
+                  step={0.25}
+                  dir="ltr"
+                />
+                <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                  זמן הסגירה של כל מכרז — ברירת מחדל: 1.5 שעות (90 דקות)
+                </p>
+              </div>
+            )}
+
+            {isSnake && (
+              <div>
+                <label className="block text-sm font-medium mb-1.5">גבול זמן לבחירה (דקות, אופציונלי)</label>
+                <input
+                  type="number"
+                  className="input text-center"
+                  value={pickTimeoutMinutes}
+                  onChange={e => setPickTimeoutMinutes(e.target.value)}
+                  min={1}
+                  placeholder="ללא הגבלה"
+                  dir="ltr"
+                />
+                <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                  מוצג כמידע — לא אכיפה אוטומטית
+                </p>
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium mb-1.5">תאריך ושעת תחילת הדראפט</label>
@@ -1105,7 +1324,46 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
               </p>
             </div>
 
-            {/* VAR GIF upload */}
+            {/* Snake round direction config */}
+            {isSnake && (
+              <div>
+                <label className="block text-sm font-medium mb-2">כיוון סיבובים</label>
+                <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
+                  בסנייק סטנדרטי סיבובים זוגיים מהופכים. ניתן לשנות כל סיבוב ידנית.
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {Array.from({ length: league?.players_per_team ?? 0 }, (_, i) => {
+                    const round = i + 1
+                    const isReversed = snakeRoundConfig[i] ?? (round % 2 === 0)
+                    return (
+                      <div key={round} className="flex items-center justify-between px-3 py-2 rounded" style={{ background: 'var(--background)' }}>
+                        <span className="text-sm">סיבוב {round}</span>
+                        <button
+                          type="button"
+                          className="btn text-xs"
+                          style={{
+                            background: isReversed ? 'rgba(99,102,241,0.2)' : 'var(--border)',
+                            color: isReversed ? 'var(--primary)' : 'var(--muted)',
+                            minWidth: 80,
+                          }}
+                          onClick={() => {
+                            const updated = [...snakeRoundConfig]
+                            while (updated.length <= i) updated.push((updated.length + 1) % 2 === 0)
+                            updated[i] = !isReversed
+                            setSnakeRoundConfig(updated)
+                          }}
+                        >
+                          {isReversed ? 'N→1 ←' : '→ 1→N'}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* VAR GIF upload — envelope only */}
+            {!isSnake && (
             <div>
               <label className="block text-sm font-medium mb-2">גיף VAR (מוצג כשמכרז נחשף בפריוריטי)</label>
               {(varPreviewUrl ?? localVarGifUrl) && (() => {
@@ -1141,10 +1399,17 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 מוצג לפני הכרזת הזוכה כשיש הצעות שוות
               </p>
             </div>
+            )}
 
-            <button className="btn btn-primary" onClick={saveLeague} disabled={loading === 'league'}>
-              {loading === 'league' ? 'שומר...' : 'שמור הגדרות'}
-            </button>
+            {isSnake ? (
+              <button className="btn btn-primary" onClick={saveSnakeLeagueSettings} disabled={loading === 'league'}>
+                {loading === 'league' ? 'שומר...' : 'שמור הגדרות'}
+              </button>
+            ) : (
+              <button className="btn btn-primary" onClick={saveLeague} disabled={loading === 'league'}>
+                {loading === 'league' ? 'שומר...' : 'שמור הגדרות'}
+              </button>
+            )}
           </div>
 
           <div className="mt-6 pt-6" style={{ borderTop: '1px solid var(--border)' }}>
