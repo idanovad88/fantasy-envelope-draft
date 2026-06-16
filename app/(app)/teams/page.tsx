@@ -26,17 +26,25 @@ export default async function TeamsPage() {
     ? await supabase.from('leagues').select('*').eq('id', leagueId).maybeSingle()
     : { data: null }
 
-  const [{ data: teams }, { data: players }] = await Promise.all([
+  const isSnake = (league as League)?.draft_type === 'snake'
+
+  const [{ data: teams }, { data: players }, { data: snakePicks }] = await Promise.all([
     league
       ? supabase.from('teams').select('*').eq('league_id', league.id).order('priority_rank', { ascending: true, nullsFirst: false })
       : Promise.resolve({ data: [] }),
     league
       ? supabase.from('players').select('*').eq('league_id', league.id).eq('status', 'drafted')
       : Promise.resolve({ data: [] }),
+    isSnake && league
+      ? supabase.from('snake_picks').select('player_id, overall_pick_number').eq('league_id', league.id)
+      : Promise.resolve({ data: [] }),
   ])
 
   const typedTeams = (teams || []) as Team[]
   const typedPlayers = (players || []) as Player[]
+
+  const pickNumbers = ((snakePicks || []) as { player_id: string; overall_pick_number: number }[])
+    .reduce((acc, sp) => { acc[sp.player_id] = sp.overall_pick_number; return acc }, {} as Record<string, number>)
 
   const playersByTeam = typedPlayers.reduce((acc, p) => {
     if (p.drafted_by_team_id) {
@@ -55,7 +63,8 @@ export default async function TeamsPage() {
         budgetPerTeam={(league as League)?.budget_per_team ?? 200}
         playersPerTeam={(league as League)?.players_per_team ?? 13}
         rosterSlots={(league as League)?.roster_slots ?? null}
-        isSnake={(league as League)?.draft_type === 'snake'}
+        isSnake={isSnake}
+        pickNumbers={pickNumbers}
       />
     </div>
   )

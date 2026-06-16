@@ -13,9 +13,10 @@ interface Props {
   playersPerTeam: number
   rosterSlots: Record<string, number> | null
   isSnake?: boolean
+  pickNumbers?: Record<string, number>
 }
 
-export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTeam, playersPerTeam, rosterSlots, isSnake }: Props) {
+export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTeam, playersPerTeam, rosterSlots, isSnake, pickNumbers = {} }: Props) {
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
 
   const visibleTeams = selectedTeamId ? teams.filter(t => t.id === selectedTeamId) : teams
@@ -109,9 +110,9 @@ export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTea
 
               {/* Roster */}
               {rosterSlots ? (
-                <RosterBySlots roster={roster} rosterSlots={rosterSlots} />
+                <RosterBySlots roster={roster} rosterSlots={rosterSlots} pickNumbers={pickNumbers} isSnake={isSnake} />
               ) : (
-                <SimpleRoster roster={roster} playersPerTeam={playersPerTeam} />
+                <SimpleRoster roster={roster} playersPerTeam={playersPerTeam} pickNumbers={pickNumbers} isSnake={isSnake} />
               )}
             </div>
           )
@@ -121,7 +122,7 @@ export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTea
   )
 }
 
-function PlayerRow({ player, slotLabel }: { player: Player; slotLabel?: string }) {
+function PlayerRow({ player, slotLabel, pickNumber, isSnake }: { player: Player; slotLabel?: string; pickNumber?: number; isSnake?: boolean }) {
   return (
     <div className="flex items-center justify-between text-sm py-1.5 px-2 rounded" style={{ background: 'var(--background)' }}>
       <div className="flex items-center gap-2">
@@ -133,7 +134,13 @@ function PlayerRow({ player, slotLabel }: { player: Player; slotLabel?: string }
           <span className="text-xs" style={{ color: 'var(--muted)' }} dir="ltr">({player.position})</span>
         )}
       </div>
-      <span className="font-bold" style={{ color: 'var(--warning)' }}>${player.draft_price}</span>
+      {isSnake ? (
+        <span className="text-xs font-medium whitespace-nowrap" style={{ color: 'var(--muted)' }}>
+          {pickNumber != null ? `בחירה ${pickNumber}` : '—'}
+        </span>
+      ) : (
+        <span className="font-bold" style={{ color: 'var(--warning)' }}>${player.draft_price}</span>
+      )}
     </div>
   )
 }
@@ -147,7 +154,7 @@ function EmptySlotRow({ label }: { label: string }) {
   )
 }
 
-function RosterBySlots({ roster, rosterSlots }: { roster: Player[]; rosterSlots: Record<string, number> }) {
+function RosterBySlots({ roster, rosterSlots, pickNumbers, isSnake }: { roster: Player[]; rosterSlots: Record<string, number>; pickNumbers: Record<string, number>; isSnake?: boolean }) {
   const slots = SLOT_ORDER.filter(s => (rosterSlots[s] ?? 0) > 0)
   const assignedIds = new Set(roster.filter(p => p.roster_slot != null).map(p => p.id))
   const unassigned = roster.filter(p => !assignedIds.has(p.id))
@@ -161,19 +168,19 @@ function RosterBySlots({ roster, rosterSlots }: { roster: Player[]; rosterSlots:
 
         return (
           <div key={slot}>
-            {inSlot.map(p => <PlayerRow key={p.id} player={p} slotLabel={slot} />)}
+            {inSlot.map(p => <PlayerRow key={p.id} player={p} slotLabel={slot} pickNumber={pickNumbers[p.id]} isSnake={isSnake} />)}
             {Array.from({ length: Math.max(0, empty) }).map((_, i) => (
               <EmptySlotRow key={`${slot}-empty-${i}`} label={slot} />
             ))}
           </div>
         )
       })}
-      {unassigned.map(p => <PlayerRow key={p.id} player={p} />)}
+      {unassigned.map(p => <PlayerRow key={p.id} player={p} pickNumber={pickNumbers[p.id]} isSnake={isSnake} />)}
     </div>
   )
 }
 
-function SimpleRoster({ roster, playersPerTeam }: { roster: Player[]; playersPerTeam: number }) {
+function SimpleRoster({ roster, playersPerTeam, pickNumbers, isSnake }: { roster: Player[]; playersPerTeam: number; pickNumbers: Record<string, number>; isSnake?: boolean }) {
   if (roster.length === 0) {
     return (
       <p className="text-sm text-center py-4" style={{ color: 'var(--muted)' }}>
@@ -183,7 +190,7 @@ function SimpleRoster({ roster, playersPerTeam }: { roster: Player[]; playersPer
   }
   return (
     <div className="flex flex-col gap-1">
-      {roster.map(p => <PlayerRow key={p.id} player={p} />)}
+      {roster.map(p => <PlayerRow key={p.id} player={p} pickNumber={pickNumbers[p.id]} isSnake={isSnake} />)}
       {Array.from({ length: playersPerTeam - roster.length }).map((_, i) => (
         <div key={i} className="flex items-center justify-between text-sm py-1 px-2 rounded" style={{ background: 'var(--background)', opacity: 0.3 }}>
           <span style={{ color: 'var(--muted)' }}>— ריק —</span>
