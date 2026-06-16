@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 
 function getFullCountdown(targetDate: string) {
   const diff = new Date(targetDate).getTime() - Date.now()
@@ -13,12 +14,22 @@ function getFullCountdown(targetDate: string) {
 }
 
 export default function DraftCountdown({ targetDate }: { targetDate: string }) {
+  const router = useRouter()
   const [cd, setCd] = useState(getFullCountdown(targetDate))
 
   useEffect(() => {
-    const timer = setInterval(() => setCd(getFullCountdown(targetDate)), 1000)
+    const timer = setInterval(() => {
+      const next = getFullCountdown(targetDate)
+      setCd(next)
+      // When the countdown hits zero, refresh so the server component
+      // auto-starts the draft and re-renders in its active state.
+      if (next === null) {
+        clearInterval(timer)
+        router.refresh()
+      }
+    }, 1000)
     return () => clearInterval(timer)
-  }, [targetDate])
+  }, [targetDate, router])
 
   if (!cd) return null
 

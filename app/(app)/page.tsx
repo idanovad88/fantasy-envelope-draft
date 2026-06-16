@@ -8,6 +8,7 @@ import DraftCountdown from '@/components/DraftCountdown'
 import BidForm from '@/components/BidForm'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
 import JoinLeagueForm from '@/components/JoinLeagueForm'
+import { activateOverdueSnakeDraft } from '@/lib/activateDraft'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -28,6 +29,9 @@ export default async function DashboardPage() {
     ? await supabase.from('league_creator_whitelist').select('email').eq('email', user!.email ?? '').maybeSingle()
     : { data: null }
   const isWhitelisted = !!whitelistRow
+
+  // Auto-start the snake draft if its scheduled start time has passed.
+  await activateOverdueSnakeDraft(selectedLeagueId)
 
   const { data: league } = await supabase.from('leagues').select('*').eq('id', selectedLeagueId).maybeSingle()
   const typedLeague = league as League | null

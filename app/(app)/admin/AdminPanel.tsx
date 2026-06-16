@@ -1153,7 +1153,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
           )}
 
           {/* Activate league */}
-          {league?.status === 'lottery' && (
+          {['setup', 'lottery'].includes(league?.status ?? '') && (
             <div className="card" style={{ border: '1px solid var(--success)' }}>
               <h2 className="font-bold mb-1">הפעל ליגה</h2>
               <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>

@@ -6,6 +6,7 @@ import SnakeDraftBoard from '@/components/SnakeDraftBoard'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
 import type { Player, League, Team, SnakePick } from '@/types'
 import { formatTime, formatTimeSince, getCurrentSnakePicker } from '@/lib/utils'
+import { activateOverdueSnakeDraft } from '@/lib/activateDraft'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -29,6 +30,9 @@ export default async function PlayersPage() {
   ])
 
   const leagueId = selectedLeagueId ?? (myTeam as Team | null)?.league_id ?? adminRow?.league_id ?? createdLeague?.id ?? null
+
+  // Auto-start the snake draft if its scheduled start time has passed.
+  if (leagueId) await activateOverdueSnakeDraft(leagueId)
 
   const { data: league } = leagueId
     ? await supabase.from('leagues').select('*').eq('id', leagueId).maybeSingle()
