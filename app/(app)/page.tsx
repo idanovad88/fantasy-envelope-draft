@@ -168,12 +168,7 @@ export default async function DashboardPage() {
           <div className="card">
             <h2 className="font-bold mb-3">בחירות אחרונות</h2>
             {typedPicks.length === 0 ? (
-              <div className="flex flex-col gap-2">
-                <p className="text-sm" style={{ color: 'var(--muted)' }}>עדיין לא בוצעו בחירות</p>
-                <Link href="/draft-board" className="text-xs mt-1" style={{ color: 'var(--primary)' }}>
-                  ראה לוח דראפט מלא ←
-                </Link>
-              </div>
+              <p className="text-sm" style={{ color: 'var(--muted)' }}>עדיין לא בוצעו בחירות</p>
             ) : (
               <div className="flex flex-col gap-2">
                 {[...typedPicks].reverse().slice(0, 6).map(pick => (
@@ -183,13 +178,28 @@ export default async function DashboardPage() {
                     <span style={{ color: 'var(--muted)' }}>{pick.team?.name ?? '—'}</span>
                   </div>
                 ))}
-                <Link href="/draft-board" className="text-xs mt-1" style={{ color: 'var(--primary)' }}>
-                  ראה לוח דראפט מלא ←
-                </Link>
               </div>
             )}
           </div>
         </div>
+
+        {/* Full draft board — prominent entry point */}
+        <Link
+          href="/draft-board"
+          className="card mt-4 flex items-center justify-between gap-3 transition-colors"
+          style={{ borderColor: 'var(--primary)', borderWidth: 2, background: 'rgba(99,102,241,0.06)' }}
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-2xl" aria-hidden>🗂️</span>
+            <div>
+              <p className="font-bold">לוח הדראפט המלא</p>
+              <p className="text-xs" style={{ color: 'var(--muted)' }}>
+                כל הבחירות — שבוצעו והעתידיות
+              </p>
+            </div>
+          </div>
+          <span className="text-xl" style={{ color: 'var(--primary)' }} aria-hidden>←</span>
+        </Link>
       </div>
     )
   }
