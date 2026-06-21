@@ -544,7 +544,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 p-1 rounded-lg overflow-x-auto" style={{ background: 'var(--card)', scrollbarWidth: 'none' } as React.CSSProperties}>
+      <div className="flex gap-1 mb-6 p-1 rounded-lg overflow-x-auto no-scrollbar" style={{ background: 'var(--card)' }}>
         {TABS.map(t => (
           <button
             key={t.id}

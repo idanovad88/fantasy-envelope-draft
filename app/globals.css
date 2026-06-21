@@ -104,3 +104,6 @@ body {
   z-index: 9999;
   animation: confetti-fall linear forwards;
 }
+
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
