@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatDateTime, formatTime, getSnakeTeamForPick, isSnakeRoundReversed } from '@/lib/utils'
 import type { League, Team, Auction, SnakePick, TradeStatus } from '@/types'
@@ -544,12 +544,12 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 p-1 rounded-lg" style={{ background: 'var(--card)' }}>
+      <div className="flex gap-1 mb-6 p-1 rounded-lg overflow-x-auto" style={{ background: 'var(--card)', scrollbarWidth: 'none' } as React.CSSProperties}>
         {TABS.map(t => (
           <button
             key={t.id}
             onClick={() => { setTab(t.id as typeof tab); window.history.replaceState(null, '', `?tab=${t.id}`) }}
-            className="flex-1 py-2 px-2 rounded-md text-sm font-medium transition-all"
+            className="flex-shrink-0 py-2 px-3 rounded-md text-sm font-medium transition-all whitespace-nowrap"
             style={tab === t.id ? { background: 'var(--primary)', color: 'white' } : { color: 'var(--muted)' }}
           >
             {t.label}
