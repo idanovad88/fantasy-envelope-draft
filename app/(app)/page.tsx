@@ -168,7 +168,12 @@ export default async function DashboardPage() {
           <div className="card">
             <h2 className="font-bold mb-3">בחירות אחרונות</h2>
             {typedPicks.length === 0 ? (
-              <p className="text-sm" style={{ color: 'var(--muted)' }}>עדיין לא בוצעו בחירות</p>
+              <div className="flex flex-col gap-2">
+                <p className="text-sm" style={{ color: 'var(--muted)' }}>עדיין לא בוצעו בחירות</p>
+                <Link href="/draft-board" className="text-xs mt-1" style={{ color: 'var(--primary)' }}>
+                  ראה לוח דראפט מלא ←
+                </Link>
+              </div>
             ) : (
               <div className="flex flex-col gap-2">
                 {[...typedPicks].reverse().slice(0, 6).map(pick => (
@@ -178,11 +183,9 @@ export default async function DashboardPage() {
                     <span style={{ color: 'var(--muted)' }}>{pick.team?.name ?? '—'}</span>
                   </div>
                 ))}
-                {typedPicks.length > 6 && (
-                  <Link href="/players" className="text-xs mt-1" style={{ color: 'var(--primary)' }}>
-                    ראה לוח דראפט מלא ←
-                  </Link>
-                )}
+                <Link href="/draft-board" className="text-xs mt-1" style={{ color: 'var(--primary)' }}>
+                  ראה לוח דראפט מלא ←
+                </Link>
               </div>
             )}
           </div>
