@@ -2,6 +2,7 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
 import type { League, Team } from '@/types'
 import LeagueSelectButton from '@/components/LeagueSelectButton'
 import JoinLeagueForm from '@/components/JoinLeagueForm'
+import LogoutButton from '@/components/LogoutButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -130,6 +131,11 @@ export default async function LeaguesPage() {
           <a href="/create-league" className="btn btn-outline w-full text-center block">הקם ליגה חדשה</a>
         </div>
       )}
+
+      {/* Account actions */}
+      <div className="mt-6 pt-6" style={{ borderTop: '1px solid var(--border)' }}>
+        <LogoutButton />
+      </div>
     </div>
   )
 }
