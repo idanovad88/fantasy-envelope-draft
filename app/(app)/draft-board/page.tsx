@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
 import type { League, Team, SnakePick } from '@/types'
-import { getSnakeTeamForPick } from '@/lib/utils'
+import { resolvePickOwner, buildPickOverridesMap } from '@/lib/utils'
 import { activateOverdueSnakeDraft } from '@/lib/activateDraft'
 
 export const dynamic = 'force-dynamic'
@@ -32,7 +32,7 @@ export default async function DraftBoardPage() {
   const { data: myTeam } = await supabase
     .from('teams').select('*').eq('user_id', user!.id).eq('league_id', selectedLeagueId).maybeSingle()
 
-  const [{ data: teams }, { data: snakePicks }] = await Promise.all([
+  const [{ data: teams }, { data: snakePicks }, { data: overrideRows }] = await Promise.all([
     supabase.from('teams')
       .select('*')
       .eq('league_id', selectedLeagueId)
@@ -43,9 +43,13 @@ export default async function DraftBoardPage() {
       .select('*, player:players(name, position), team:teams(name)')
       .eq('league_id', selectedLeagueId)
       .order('overall_pick_number', { ascending: true }),
+    supabase.from('pick_overrides')
+      .select('overall_pick_number, owner_team_id')
+      .eq('league_id', selectedLeagueId),
   ])
 
   const typedTeams = (teams || []) as Team[]
+  const overridesMap = buildPickOverridesMap(overrideRows as { overall_pick_number: number; owner_team_id: string }[] | null)
   const typedPicks = (snakePicks || []) as (SnakePick & {
     player: { name: string; position: string | null } | null
     team: { name: string } | null
@@ -68,7 +72,7 @@ export default async function DraftBoardPage() {
   const rows = Array.from({ length: totalPicks }, (_, i) => {
     const pickNumber = i + 1
     const pick = pickByNumber.get(pickNumber)
-    const team = getSnakeTeamForPick(pickNumber, numTeams, typedTeams, config)
+    const team = resolvePickOwner(pickNumber, numTeams, typedTeams, config, overridesMap)
     const teamName = pick?.team?.name ?? team?.name ?? '—'
     const teamId = pick?.team_id ?? team?.id ?? null
     return {
@@ -78,6 +82,8 @@ export default async function DraftBoardPage() {
       teamId,
       playerName: pick?.player?.name ?? null,
       isCurrent: !isDraftComplete && pickNumber === currentPickNumber,
+      // Future pick whose owner was changed by a trade.
+      isTraded: overridesMap.has(pickNumber) && !pick,
     }
   })
 
@@ -125,6 +131,9 @@ export default async function DraftBoardPage() {
                       </span>
                       {row.isCurrent && (
                         <span className="badge badge-yellow text-xs mr-2">על הדק</span>
+                      )}
+                      {row.isTraded && (
+                        <span className="badge badge-gray text-xs mr-2">נסחר</span>
                       )}
                     </td>
                     <td className="py-2">
