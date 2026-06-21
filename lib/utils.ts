@@ -71,13 +71,71 @@ export function getSnakeTeamForPick(
   return teams[rankIndex] ?? null
 }
 
+// Trade overrides: a map of overall_pick_number → owning team id. When a pick is
+// traded its computed owner is overridden. Base order (priority_rank /
+// snake_round_config) is never mutated.
+
+export function buildPickOverridesMap(
+  rows: { overall_pick_number: number; owner_team_id: string }[] | null | undefined
+): Map<number, string> {
+  const map = new Map<number, string>()
+  for (const r of rows ?? []) map.set(r.overall_pick_number, r.owner_team_id)
+  return map
+}
+
+export function resolvePickOwner(
+  overallPickNumber: number,
+  numTeams: number,
+  teams: Team[],
+  snakeRoundConfig: boolean[] | null,
+  overrides?: Map<number, string> | null
+): Team | null {
+  const overrideTeamId = overrides?.get(overallPickNumber)
+  if (overrideTeamId) {
+    const t = teams.find(team => team.id === overrideTeamId)
+    if (t) return t
+  }
+  return getSnakeTeamForPick(overallPickNumber, numTeams, teams, snakeRoundConfig)
+}
+
 export function getCurrentSnakePicker(
   completedPicksCount: number,
   numTeams: number,
   teams: Team[],
-  snakeRoundConfig: boolean[] | null
+  snakeRoundConfig: boolean[] | null,
+  overrides?: Map<number, string> | null
 ): Team | null {
-  return getSnakeTeamForPick(completedPicksCount + 1, numTeams, teams, snakeRoundConfig)
+  return resolvePickOwner(completedPicksCount + 1, numTeams, teams, snakeRoundConfig, overrides)
+}
+
+// Future picks currently owned by a team — used to show what a team can offer in
+// a trade. Picks that are already made (or on the clock, while the draft is
+// active) are not tradeable.
+export function getFuturePickNumbersForTeam(
+  teamId: string,
+  completedCount: number,
+  totalPicks: number,
+  numTeams: number,
+  teams: Team[],
+  snakeRoundConfig: boolean[] | null,
+  overrides?: Map<number, string> | null,
+  isActive = true
+): number[] {
+  const firstTradeable = isActive ? completedCount + 2 : completedCount + 1
+  const result: number[] = []
+  for (let n = firstTradeable; n <= totalPicks; n++) {
+    const owner = resolvePickOwner(n, numTeams, teams, snakeRoundConfig, overrides)
+    if (owner?.id === teamId) result.push(n)
+  }
+  return result
+}
+
+// Round/pick-in-round breakdown for a given overall pick number (display helper).
+export function describePick(overallPickNumber: number, numTeams: number): { round: number; pickInRound: number } {
+  return {
+    round: Math.ceil(overallPickNumber / numTeams),
+    pickInRound: ((overallPickNumber - 1) % numTeams) + 1,
+  }
 }
 
 export function formatTimeSince(dateStr: string): string {

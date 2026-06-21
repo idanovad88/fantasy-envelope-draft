@@ -5,7 +5,7 @@ import SnakePlayerPicker from '@/components/SnakePlayerPicker'
 import SnakeDraftBoard from '@/components/SnakeDraftBoard'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
 import type { Player, League, Team, SnakePick } from '@/types'
-import { formatTime, formatTimeSince, getCurrentSnakePicker } from '@/lib/utils'
+import { formatTime, formatTimeSince, getCurrentSnakePicker, buildPickOverridesMap } from '@/lib/utils'
 import { activateOverdueSnakeDraft } from '@/lib/activateDraft'
 
 export const dynamic = 'force-dynamic'
@@ -169,7 +169,7 @@ async function SnakeDraftPage({
   const supabase = await createClient()
   const adminClient = (await import('@/lib/supabase/server')).createAdminClient()
 
-  const [{ data: players }, { data: teams }, { data: snakePicks }] = await Promise.all([
+  const [{ data: players }, { data: teams }, { data: snakePicks }, { data: overrideRows }] = await Promise.all([
     supabase.from('players')
       .select('*, drafting_team:teams!drafted_by_team_id(id, name)')
       .eq('league_id', league.id)
@@ -184,9 +184,14 @@ async function SnakeDraftPage({
       .select('*, player:players(name, position), team:teams(name)')
       .eq('league_id', league.id)
       .order('overall_pick_number', { ascending: true }),
+    supabase.from('pick_overrides')
+      .select('overall_pick_number, owner_team_id')
+      .eq('league_id', league.id),
   ])
 
   const typedTeams = (teams || []) as Team[]
+  const overridesMap = buildPickOverridesMap(overrideRows as { overall_pick_number: number; owner_team_id: string }[] | null)
+  const overridesObj = Object.fromEntries(overridesMap)
   const typedPicks = (snakePicks || []) as (SnakePick & { player: { name: string; position: string | null } | null })[]
   const typedPlayers = (players || []) as PlayerWithTeam[]
 
@@ -200,7 +205,7 @@ async function SnakeDraftPage({
 
   const currentTeam = isDraftComplete
     ? null
-    : getCurrentSnakePicker(completedCount, league.num_teams, typedTeams, league.snake_round_config as boolean[] | null)
+    : getCurrentSnakePicker(completedCount, league.num_teams, typedTeams, league.snake_round_config as boolean[] | null, overridesMap)
 
   // A user may only pick for their own team, and only on their own turn.
   // Admins pick on behalf of a team from the dedicated admin-panel tool.
@@ -293,6 +298,7 @@ async function SnakeDraftPage({
             snakeRoundConfig={league.snake_round_config as boolean[] | null}
             currentPickNumber={isDraftComplete ? totalPicks + 1 : currentPickNumber}
             myTeamId={myTeam?.id ?? null}
+            overrides={overridesObj}
           />
         </div>
       )}

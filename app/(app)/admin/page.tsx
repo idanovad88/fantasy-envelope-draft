@@ -1,14 +1,15 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
-import AdminPanel from './AdminPanel'
-import type { League, Team, Auction, SnakePick } from '@/types'
+import AdminPanel, { type AdminTradeView } from './AdminPanel'
+import type { League, Team, Auction, SnakePick, Trade, TradeAsset } from '@/types'
+import { describePick } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 
 export default async function AdminPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const { tab: tabParam } = await searchParams
-  const validTabs = ['overview', 'teams', 'auction', 'players', 'lottery', 'league', 'draft'] as const
+  const validTabs = ['overview', 'teams', 'auction', 'players', 'lottery', 'league', 'draft', 'trades'] as const
   type TabId = typeof validTabs[number]
   const initialTab: TabId = validTabs.includes(tabParam as TabId) ? (tabParam as TabId) : 'overview'
 
@@ -50,7 +51,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
     }
   }
 
-  const [{ data: teams }, { data: activeAuction }, { data: scheduledAuctions }, { data: players }, { data: pastAuctions }, { data: leagueCreators }, { data: leagueAdminUsers }, { data: snakePicks }] =
+  const [{ data: teams }, { data: activeAuction }, { data: scheduledAuctions }, { data: players }, { data: pastAuctions }, { data: leagueCreators }, { data: leagueAdminUsers }, { data: snakePicks }, { data: tradeRows }] =
     await Promise.all([
       supabase.from('teams').select('*').eq('league_id', lid).order('priority_rank', { ascending: true, nullsFirst: false }),
       !isSnake ? supabase.from('auctions').select('*, player:players(*), bids(id)').eq('league_id', lid).eq('status', 'active').order('scheduled_start', { ascending: false }).limit(1).maybeSingle() : Promise.resolve({ data: null }),
@@ -60,7 +61,34 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       supabase.from('league_creator_whitelist').select('email').order('created_at', { ascending: true }),
       adminDb.from('admin_users').select('user_id').eq('league_id', lid),
       isSnake ? supabase.from('snake_picks').select('*, player:players(name, position), team:teams(name)').eq('league_id', lid).order('overall_pick_number', { ascending: true }) : Promise.resolve({ data: [] }),
+      isSnake ? supabase.from('trades').select('*, assets:trade_assets(*)').eq('league_id', lid).order('created_at', { ascending: false }) : Promise.resolve({ data: [] }),
     ])
+
+  // Build admin trade views (resolve team + player names and pick labels).
+  const typedTeams = (teams || []) as Team[]
+  const teamNameById = new Map(typedTeams.map(t => [t.id, t.name]))
+  const playerNameById = new Map(((players || []) as { id: string; name: string }[]).map(p => [p.id, p.name]))
+  const numTeams = league?.num_teams ?? 0
+  const labelFor = (a: TradeAsset): { type: 'pick' | 'player'; label: string } => {
+    if (a.asset_type === 'pick' && a.overall_pick_number != null) {
+      const { round, pickInRound } = describePick(a.overall_pick_number, numTeams)
+      return { type: 'pick', label: `סיבוב ${round}, בחירה ${pickInRound} (#${a.overall_pick_number})` }
+    }
+    return { type: 'player', label: a.player_id ? (playerNameById.get(a.player_id) ?? 'שחקן') : 'שחקן' }
+  }
+  const tradeViews: AdminTradeView[] = ((tradeRows || []) as (Trade & { assets: TradeAsset[] })[]).map(tr => {
+    const assets = tr.assets ?? []
+    return {
+      id: tr.id,
+      status: tr.status,
+      note: tr.note,
+      rejection_reason: tr.rejection_reason,
+      proposingName: teamNameById.get(tr.proposing_team_id) ?? '—',
+      targetName: teamNameById.get(tr.target_team_id) ?? '—',
+      proposingGives: assets.filter(a => a.from_team_id === tr.proposing_team_id).map(labelFor),
+      targetGives: assets.filter(a => a.from_team_id === tr.target_team_id).map(labelFor),
+    }
+  })
 
   return (
     <>
@@ -76,6 +104,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         adminUserIds={(leagueAdminUsers || []).map(r => r.user_id)}
         currentUserId={user.id}
         snakePicks={(snakePicks || []) as unknown as (SnakePick & { player: { name: string; position: string | null } | null; team: { name: string } | null })[]}
+        trades={tradeViews}
       />
     </>
   )

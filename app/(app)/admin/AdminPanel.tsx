@@ -3,15 +3,28 @@
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatDateTime, formatTime, getSnakeTeamForPick, isSnakeRoundReversed } from '@/lib/utils'
-import type { League, Team, Auction, SnakePick } from '@/types'
+import type { League, Team, Auction, SnakePick, TradeStatus } from '@/types'
 import ImportPlayers from './ImportPlayers'
 
 type PastAuction = { id: string; scheduled_start: string; winning_bid: number | null; player: { name: string } | null; winning_team: { name: string } | null }
 type ScheduledAuction = { id: string; scheduled_start: string; reveal_time: string; player: { name: string } | null }
 type SnakePickFull = SnakePick & { player: { name: string; position: string | null } | null; team: { name: string } | null }
 
+export type AdminTradeView = {
+  id: string
+  status: TradeStatus
+  note: string | null
+  rejection_reason: string | null
+  proposingName: string
+  targetName: string
+  proposingGives: { type: 'pick' | 'player'; label: string }[]
+  targetGives: { type: 'pick' | 'player'; label: string }[]
+}
+
+type AdminTab = 'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league' | 'draft' | 'trades'
+
 interface Props {
-  initialTab?: 'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league' | 'draft'
+  initialTab?: AdminTab
   league: League | null
   teams: Team[]
   activeAuction: (Auction & { player: { name: string }; bids: { id: string }[] }) | null
@@ -22,12 +35,17 @@ interface Props {
   adminUserIds: string[]
   currentUserId: string
   snakePicks?: SnakePickFull[]
+  trades?: AdminTradeView[]
 }
 
-export default function AdminPanel({ initialTab = 'overview', league, teams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators, adminUserIds, currentUserId, snakePicks = [] }: Props) {
+export default function AdminPanel({ initialTab = 'overview', league, teams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators, adminUserIds, currentUserId, snakePicks = [], trades = [] }: Props) {
   const supabase = createClient()
   const isSnake = league?.draft_type === 'snake'
-  const [tab, setTab] = useState<'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league' | 'draft'>(
+  // In snake mode the pick-order lottery may run only once. Once any approved
+  // team has a priority_rank, re-rolling is blocked (manual edits in the "draft"
+  // tab remain the way to adjust the order).
+  const snakeLotteryDone = isSnake && teams.some(t => t.approved && t.priority_rank != null)
+  const [tab, setTab] = useState<AdminTab>(
     isSnake && initialTab === 'auction' ? 'overview' : initialTab
   )
   const [loading, setLoading] = useState('')
@@ -316,6 +334,10 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
 
   async function runNominationLottery() {
     if (!league) return
+    if (snakeLotteryDone) {
+      setMsg('הגרלת סדר הדראפט כבר בוצעה. ניתן לשנות ידנית בטאב "דראפט".')
+      return
+    }
     setLoading('lottery_nomination')
     const approvedTeams = teams.filter(t => t.approved && !t.is_complete)
     const shuffled = [...approvedTeams].sort(() => Math.random() - 0.5)
@@ -477,10 +499,26 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     window.location.reload()
   }
 
+  async function decideTrade(tradeId: string, action: 'approve' | 'reject') {
+    let reason: string | null = null
+    if (action === 'reject') reason = window.prompt('סיבת דחייה (אופציונלי):') ?? null
+    setLoading('trade_' + tradeId)
+    const res = await fetch('/api/admin/trades/decide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trade_id: tradeId, action, rejection_reason: reason }),
+    })
+    const data = await res.json()
+    if (!res.ok) { setMsg('שגיאה: ' + (data.error ?? '')); setLoading(''); return }
+    setMsg(action === 'approve' ? 'הטרייד אושר ובוצע' : 'הטרייד נדחה')
+    window.location.reload()
+  }
+
   const TABS = isSnake
     ? [
         { id: 'overview', label: 'סקירה' },
         { id: 'draft', label: 'דראפט' },
+        { id: 'trades', label: 'טריידים' },
         { id: 'players', label: 'שחקנים' },
         { id: 'teams', label: 'קבוצות' },
         { id: 'lottery', label: 'הגרלה' },
@@ -928,6 +966,86 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
         )
       })()}
 
+      {/* TRADES */}
+      {tab === 'trades' && isSnake && (() => {
+        const STATUS_LABEL: Record<string, string> = {
+          pending_target: 'ממתין לתגובת היריבה',
+          pending_admin: 'ממתין לאישורך',
+          approved: 'בוצע',
+          rejected: 'נדחה',
+          cancelled: 'בוטל',
+        }
+        const STATUS_BADGE: Record<string, string> = {
+          pending_target: 'badge-yellow',
+          pending_admin: 'badge-yellow',
+          approved: 'badge-green',
+          rejected: 'badge-red',
+          cancelled: 'badge-gray',
+        }
+        const pending = trades.filter(t => t.status === 'pending_admin')
+        const history = trades.filter(t => t.status !== 'pending_admin')
+
+        const renderAssets = (gives: { type: string; label: string }[]) =>
+          gives.length === 0
+            ? <span style={{ color: 'var(--muted)' }}>—</span>
+            : gives.map((a, i) => <span key={i} dir={a.type === 'player' ? 'ltr' : 'rtl'} className="block">{a.label}</span>)
+
+        return (
+          <div className="flex flex-col gap-4">
+            <div className="card">
+              <h2 className="font-bold mb-3">ממתינים לאישור ({pending.length})</h2>
+              {pending.length === 0 ? (
+                <p className="text-sm" style={{ color: 'var(--muted)' }}>אין טריידים שממתינים לאישור</p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {pending.map(t => (
+                    <div key={t.id} className="rounded-lg p-3" style={{ background: 'var(--background)', border: '1px solid var(--warning)' }}>
+                      <p className="text-sm font-medium mb-2">{t.proposingName} ↔ {t.targetName}</p>
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <p className="text-xs mb-1" style={{ color: 'var(--muted)' }}>{t.proposingName} נותן</p>
+                          {renderAssets(t.proposingGives)}
+                        </div>
+                        <div>
+                          <p className="text-xs mb-1" style={{ color: 'var(--muted)' }}>{t.targetName} נותן</p>
+                          {renderAssets(t.targetGives)}
+                        </div>
+                      </div>
+                      {t.note && <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>💬 {t.note}</p>}
+                      <div className="flex gap-2 mt-3">
+                        <button className="btn btn-primary text-sm" disabled={loading === 'trade_' + t.id} onClick={() => decideTrade(t.id, 'approve')}>
+                          {loading === 'trade_' + t.id ? '...' : 'אשר ובצע'}
+                        </button>
+                        <button className="btn btn-outline text-sm" disabled={loading === 'trade_' + t.id} onClick={() => decideTrade(t.id, 'reject')}>
+                          דחה
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {history.length > 0 && (
+              <div className="card">
+                <h2 className="font-bold mb-3">היסטוריית טריידים</h2>
+                <div className="flex flex-col gap-2">
+                  {history.map(t => (
+                    <div key={t.id} className="text-sm py-2 border-b" style={{ borderColor: 'var(--border)' }}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium">{t.proposingName} ↔ {t.targetName}</span>
+                        <span className={`badge ${STATUS_BADGE[t.status]} text-xs`}>{STATUS_LABEL[t.status]}</span>
+                      </div>
+                      {t.rejection_reason && <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>{t.rejection_reason}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
       {/* PLAYERS */}
       {tab === 'players' && (
         <div className="flex flex-col gap-4">
@@ -1116,12 +1234,21 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 </div>
               ))}
             </div>
+            {snakeLotteryDone && (
+              <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
+                ✓ סדר הדראפט כבר הוגרל. לא ניתן להגריל שוב — לשינוי ידני עברו לטאב &ldquo;דראפט&rdquo;.
+              </p>
+            )}
             <button
               className="btn btn-primary w-full"
               onClick={runNominationLottery}
-              disabled={!!loading || !league || teams.filter(t => t.approved).length < 2}
+              disabled={!!loading || !league || teams.filter(t => t.approved).length < 2 || snakeLotteryDone}
             >
-              {loading === 'lottery_nomination' ? 'מגריל...' : `🎲 ${isSnake ? 'הגרל סדר דראפט' : 'הגרל סדר העלאות'}`}
+              {loading === 'lottery_nomination'
+                ? 'מגריל...'
+                : snakeLotteryDone
+                  ? '🔒 הסדר כבר הוגרל'
+                  : `🎲 ${isSnake ? 'הגרל סדר דראפט' : 'הגרל סדר העלאות'}`}
             </button>
           </div>
 

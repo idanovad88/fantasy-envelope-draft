@@ -4,15 +4,24 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { Home, Users, ShoppingBag, List, Settings, LogOut, Trophy } from 'lucide-react'
+import { Home, Users, ShoppingBag, List, Settings, LogOut, Trophy, ArrowLeftRight } from 'lucide-react'
 
 const NAV = [
   { href: '/', label: 'בית', icon: Home },
   { href: '/auction', label: 'מכרז', icon: ShoppingBag },
   { href: '/players', label: 'שחקנים', icon: List },
+  { href: '/trades', label: 'טריידים', icon: ArrowLeftRight },
   { href: '/teams', label: 'קבוצות', icon: Users },
   { href: '/leagues', label: 'הליגות שלי', icon: Trophy },
 ]
+
+// /auction is auction-only; /trades is snake-only.
+function visibleNav(isSnake?: boolean) {
+  return NAV.filter(n =>
+    !(isSnake && n.href === '/auction') &&
+    !(!isSnake && n.href === '/trades')
+  )
+}
 
 interface NavbarProps {
   isAdmin?: boolean
@@ -39,7 +48,7 @@ export default function Navbar({ isAdmin, isSnake }: NavbarProps) {
           <span className="font-bold text-lg">פנטזי דראפט</span>
         </div>
 
-        {NAV.filter(n => !(isSnake && n.href === '/auction')).map(({ href, label, icon: Icon }) => (
+        {visibleNav(isSnake).map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}
@@ -83,7 +92,7 @@ export default function Navbar({ isAdmin, isSnake }: NavbarProps) {
 
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 flex border-t" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
-        {NAV.filter(n => !(isSnake && n.href === '/auction')).map(({ href, label, icon: Icon }) => (
+        {visibleNav(isSnake).map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}

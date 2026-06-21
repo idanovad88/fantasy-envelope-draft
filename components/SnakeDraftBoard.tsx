@@ -1,7 +1,7 @@
 'use client'
 
 import type { Team, SnakePick } from '@/types'
-import { isSnakeRoundReversed, getSnakeTeamForPick } from '@/lib/utils'
+import { isSnakeRoundReversed } from '@/lib/utils'
 
 interface Props {
   teams: Team[]
@@ -11,6 +11,8 @@ interface Props {
   snakeRoundConfig: boolean[] | null
   currentPickNumber: number
   myTeamId?: string | null
+  /** overall_pick_number → owning team id, for traded picks */
+  overrides?: Record<number, string> | null
 }
 
 export default function SnakeDraftBoard({
@@ -21,15 +23,18 @@ export default function SnakeDraftBoard({
   snakeRoundConfig,
   currentPickNumber,
   myTeamId,
+  overrides,
 }: Props) {
-  // Map from "round-teamId" to pick
-  const pickMap = new Map<string, typeof snakePicks[0]>()
+  // Map by overall pick number (NOT round+team): after a trade a team can hold
+  // two picks in one round, so a round+team key would collide.
+  const pickMap = new Map<number, typeof snakePicks[0]>()
   for (const pick of snakePicks) {
-    pickMap.set(`${pick.round}-${pick.team_id}`, pick)
+    pickMap.set(pick.overall_pick_number, pick)
   }
 
-  // Map from overall pick number → team (for header order)
-  // Header columns are teams in priority_rank order
+  const teamNameById = new Map(teams.map(t => [t.id, t.name]))
+
+  // Header columns are teams in priority_rank (seat) order.
   const sortedTeams = [...teams].sort((a, b) => (a.priority_rank ?? 999) - (b.priority_rank ?? 999))
 
   return (
@@ -72,8 +77,6 @@ export default function SnakeDraftBoard({
           {Array.from({ length: playersPerTeam }, (_, roundIdx) => {
             const round = roundIdx + 1
             const reversed = isSnakeRoundReversed(round, snakeRoundConfig)
-            const firstPickInRound = (round - 1) * numTeams + 1
-            const lastPickInRound = round * numTeams
 
             return (
               <tr key={round} style={{ borderBottom: '1px solid var(--border)' }}>
@@ -93,11 +96,17 @@ export default function SnakeDraftBoard({
                   </span>
                 </td>
                 {sortedTeams.map(team => {
-                  const pick = pickMap.get(`${round}-${team.id}`)
                   const pickNumberForThisCell = getPickNumberForCell(round, team, sortedTeams, numTeams, snakeRoundConfig)
+                  const pick = pickMap.get(pickNumberForThisCell)
                   const isCurrentPick = pickNumberForThisCell === currentPickNumber
                   const isUpcoming = pickNumberForThisCell > currentPickNumber
                   const isMyTeam = team.id === myTeamId
+
+                  // The seat's default owner is this column's team; an override
+                  // means the pick was traded to another team.
+                  const overrideOwnerId = overrides?.[pickNumberForThisCell]
+                  const isTraded = !!overrideOwnerId && overrideOwnerId !== team.id
+                  const tradedToName = isTraded ? (teamNameById.get(overrideOwnerId!) ?? '—') : null
 
                   return (
                     <td
@@ -125,13 +134,22 @@ export default function SnakeDraftBoard({
                             <div style={{ color: 'var(--muted)', fontSize: '0.7rem' }}>{pick.player.position}</div>
                           )}
                           <div style={{ color: 'var(--muted)', fontSize: '0.65rem' }}>#{pick.overall_pick_number}</div>
+                          {isTraded && (
+                            <div style={{ color: 'var(--primary)', fontSize: '0.62rem', fontWeight: 600 }}>נסחר ← {tradedToName}</div>
+                          )}
                         </div>
                       ) : isCurrentPick ? (
                         <span style={{ color: isMyTeam ? 'white' : 'var(--text)', fontWeight: 600, fontSize: '0.75rem' }}>
                           על הדק #{pickNumberForThisCell}
+                          {isTraded && <div style={{ fontSize: '0.62rem' }}>נסחר ← {tradedToName}</div>}
                         </span>
                       ) : isUpcoming ? (
-                        <span style={{ color: 'var(--border)', fontSize: '0.7rem' }}>#{pickNumberForThisCell}</span>
+                        <span style={{ color: 'var(--border)', fontSize: '0.7rem' }}>
+                          #{pickNumberForThisCell}
+                          {isTraded && (
+                            <div style={{ color: 'var(--primary)', fontSize: '0.62rem', fontWeight: 600 }}>← {tradedToName}</div>
+                          )}
+                        </span>
                       ) : (
                         <span style={{ color: 'var(--muted)' }}>—</span>
                       )}

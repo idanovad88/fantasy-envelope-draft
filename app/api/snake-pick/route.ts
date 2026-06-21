@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
-import { getSnakeTeamForPick } from '@/lib/utils'
+import { resolvePickOwner, buildPickOverridesMap } from '@/lib/utils'
 import type { Team } from '@/types'
 
 export async function POST(req: Request) {
@@ -46,8 +46,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'הדראפט הסתיים' }, { status: 400 })
   }
 
+  // Load trade overrides so traded picks resolve to their new owner.
+  const { data: overrideRows } = await admin
+    .from('pick_overrides')
+    .select('overall_pick_number, owner_team_id')
+    .eq('league_id', league_id)
+  const overrides = buildPickOverridesMap(overrideRows)
+
   const nextPickNumber = (completedCount ?? 0) + 1
-  const currentTeam = getSnakeTeamForPick(nextPickNumber, league.num_teams, teams as Team[], league.snake_round_config as boolean[] | null)
+  const currentTeam = resolvePickOwner(nextPickNumber, league.num_teams, teams as Team[], league.snake_round_config as boolean[] | null, overrides)
   if (!currentTeam) return NextResponse.json({ error: 'לא ניתן לקבוע קבוצה בתור' }, { status: 500 })
 
   // Determine which team is picking

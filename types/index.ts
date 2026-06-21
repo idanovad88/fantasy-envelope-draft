@@ -123,3 +123,50 @@ export interface AdminUser {
   role: 'superadmin' | 'admin'
   created_at: string
 }
+
+// ── Trade system (snake draft) ───────────────────────────────────────────────
+
+export type TradeStatus =
+  | 'pending_target'
+  | 'pending_admin'
+  | 'approved'
+  | 'rejected'
+  | 'cancelled'
+
+export type TradeAssetType = 'pick' | 'player'
+
+export interface PickOverride {
+  league_id: string
+  overall_pick_number: number
+  owner_team_id: string
+  updated_at: string
+}
+
+export interface TradeAsset {
+  id: string
+  trade_id: string
+  from_team_id: string
+  asset_type: TradeAssetType
+  overall_pick_number: number | null
+  player_id: string | null
+  // joined
+  player?: Player
+}
+
+export interface Trade {
+  id: string
+  league_id: string
+  proposing_team_id: string
+  target_team_id: string
+  status: TradeStatus
+  note: string | null
+  rejection_reason: string | null
+  admin_user_id: string | null
+  created_at: string
+  target_responded_at: string | null
+  admin_responded_at: string | null
+  // joined
+  assets?: TradeAsset[]
+  proposing_team?: Team
+  target_team?: Team
+}

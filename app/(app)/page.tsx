@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { formatTime, formatDateTime, formatTimeSince, getCurrentSnakePicker } from '@/lib/utils'
+import { formatTime, formatDateTime, formatTimeSince, getCurrentSnakePicker, buildPickOverridesMap } from '@/lib/utils'
 import type { League, Team, Auction, SnakePick } from '@/types'
 import DraftCountdown from '@/components/DraftCountdown'
 import BidForm from '@/components/BidForm'
@@ -39,12 +39,14 @@ export default async function DashboardPage() {
 
   // ── SNAKE DRAFT DASHBOARD ─────────────────────────────────────────────────────
   if (typedLeague?.draft_type === 'snake') {
-    const [{ data: teams }, { data: snakePicks }] = await Promise.all([
+    const [{ data: teams }, { data: snakePicks }, { data: overrideRows }] = await Promise.all([
       supabase.from('teams').select('*').eq('league_id', selectedLeagueId).eq('approved', true).not('priority_rank', 'is', null).order('priority_rank', { ascending: true }),
       supabase.from('snake_picks').select('*, player:players(name, position), team:teams(name)').eq('league_id', selectedLeagueId).order('overall_pick_number', { ascending: true }),
+      supabase.from('pick_overrides').select('overall_pick_number, owner_team_id').eq('league_id', selectedLeagueId),
     ])
 
     const typedTeams = (teams || []) as Team[]
+    const overridesMap = buildPickOverridesMap(overrideRows as { overall_pick_number: number; owner_team_id: string }[] | null)
     const typedPicks = (snakePicks || []) as (SnakePick & { player: { name: string; position: string | null } | null; team: { name: string } | null })[]
 
     const completedCount = typedPicks.length
@@ -54,7 +56,7 @@ export default async function DashboardPage() {
 
     const currentTeam = isDraftComplete
       ? null
-      : getCurrentSnakePicker(completedCount, typedLeague.num_teams, typedTeams, typedLeague.snake_round_config as boolean[] | null)
+      : getCurrentSnakePicker(completedCount, typedLeague.num_teams, typedTeams, typedLeague.snake_round_config as boolean[] | null, overridesMap)
     const isMyTurn = !!currentTeam && !!typedMyTeam && currentTeam.id === typedMyTeam.id
     const lastPick = typedPicks[typedPicks.length - 1]
     const timeSinceLast = lastPick ? formatTimeSince(lastPick.picked_at) : null

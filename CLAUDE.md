@@ -127,6 +127,22 @@ The API route `POST /api/snake-pick` validates it is the team's turn, inserts in
 
 **DB migration:** `supabase/migration_snake_draft.sql` — adds `draft_type`, `pick_timeout_minutes`, `snake_round_config` to `leagues`; creates `snake_picks` table with RLS.
 
+### Trade system (snake only)
+
+Teams can trade **future draft picks** and **already-drafted players** in packages. Flow: a team proposes → the target team accepts/rejects → the **league admin approves** before it executes. Works both before and during the draft.
+
+**Key insight:** snake pick order is *computed* from `priority_rank` + `snake_round_config`; there is no stored pick slot. Traded picks are an **override layer** — table `pick_overrides (league_id, overall_pick_number → owner_team_id)` that wins over the computed default. `priority_rank` / `snake_round_config` are never mutated by trades. Resolution goes through `resolvePickOwner()` in `lib/utils.ts` (used by `getCurrentSnakePicker`, the `/api/snake-pick` route, both pages, and `SnakeDraftBoard`). `SnakeDraftBoard` keys picks by `overall_pick_number` (not `round-team`) because a team can hold two picks in one round after a trade.
+
+**Roster size is preserved:** trades must be count-neutral — each side gives the same number of assets (picks + players), so every team still finishes with exactly `players_per_team`. Enforced in `lib/trades.ts` `validateTrade()`, which also checks picks are strictly future and currently owned (re-validated at admin approval time, since ownership may have changed).
+
+- Tables: `trades` (lifecycle: `pending_target → pending_admin → approved | rejected | cancelled`), `trade_assets` (one row per pick/player, with `from_team_id`), `pick_overrides`.
+- Execution is atomic via the `execute_trade(p_trade_id)` Postgres function (applies overrides + player transfers via `assign_roster_slot`, recomputes both teams' `player_count`/`is_complete`).
+- API routes: `POST /api/trades/{propose,respond,cancel}` (players), `POST /api/admin/trades/decide` (admin approve/reject → calls `execute_trade`).
+- UI: player **`/trades`** page (`components/TradeCenter.tsx`, snake-only Navbar link); admin **"טריידים"** tab in `AdminPanel`.
+- `RealtimeRefresher` subscribes to `trades`, `pick_overrides`, and `snake_picks` (added to the realtime publication in the migration).
+
+**DB migration:** `supabase/migration_pick_trades.sql` — creates `pick_overrides`, `trades`, `trade_assets` (with RLS public-select), the `execute_trade()` function, and adds the new tables to `supabase_realtime`.
+
 ### Bid priority & tiebreak logic (envelope only)
 
 **Two independent rank columns on `teams`** (envelope only):
