@@ -177,7 +177,11 @@ export default async function AuctionPage() {
           activeAuctionId={activeAuction?.id ?? null}
           recentlyCompleted={recentlyCompleted}
           myTeamId={typedMyTeam?.id ?? null}
-          varGifUrl={typedLeague.var_gif_url ?? null}
+          varGifUrls={
+            (typedLeague.var_gif_urls && typedLeague.var_gif_urls.length > 0)
+              ? typedLeague.var_gif_urls
+              : (typedLeague.var_gif_url ? [typedLeague.var_gif_url] : [])
+          }
         />
       )}
     </div>

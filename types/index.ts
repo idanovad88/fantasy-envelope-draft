@@ -21,6 +21,7 @@ export interface League {
   draft_start_time: string | null
   roster_slots: Record<string, number> | null
   var_gif_url: string | null
+  var_gif_urls: string[] | null
   pick_timeout_minutes: number | null
   snake_round_config: boolean[] | null
   created_by: string

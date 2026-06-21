@@ -82,10 +82,10 @@ interface Props {
   activeAuctionId: string | null
   recentlyCompleted?: RecentlyCompleted
   myTeamId?: string | null
-  varGifUrl?: string | null
+  varGifUrls?: string[] | null
 }
 
-export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCompleted, myTeamId, varGifUrl }: Props) {
+export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCompleted, myTeamId, varGifUrls }: Props) {
   const router = useRouter()
   const [phase, setPhase] = useState<Phase>('idle')
   const [bids, setBids] = useState<BidWithTeam[]>([])
@@ -93,6 +93,7 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
   const [winner, setWinner] = useState<{ teamName: string; amount: number; avatarUrl: string | null } | null>(null)
   const [playerName, setPlayerName] = useState('')
   const [nominatingTeamId, setNominatingTeamId] = useState<string | null>(null)
+  const [chosenGifUrl, setChosenGifUrl] = useState<string | null>(null)
   const [muted, setMuted] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startedRef = useRef(false)
@@ -182,6 +183,9 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
 
         setTimeout(() => {
           if (isTieBroken) {
+            // Pick one VAR clip at random for this tie.
+            const gifs = varGifUrls ?? []
+            setChosenGifUrl(gifs.length > 0 ? gifs[Math.floor(Math.random() * gifs.length)] : null)
             setPhase('var')
             setTimeout(() => {
               setPhase('winner')
@@ -357,10 +361,10 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
               }}>
                 🔍 בדיקת VAR...
               </p>
-              {varGifUrl ? (
-                varGifUrl.toLowerCase().includes('.mp4') ? (
+              {chosenGifUrl ? (
+                chosenGifUrl.toLowerCase().includes('.mp4') ? (
                   <video
-                    src={varGifUrl}
+                    src={chosenGifUrl}
                     autoPlay
                     loop
                     muted
@@ -369,7 +373,7 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
                   />
                 ) : (
                   <img
-                    src={varGifUrl}
+                    src={chosenGifUrl}
                     alt="VAR review"
                     style={{ width: '300px', maxWidth: '85vw', borderRadius: '12px', margin: '0 auto', display: 'block' }}
                   />
