@@ -131,17 +131,25 @@ The API route `POST /api/snake-pick` validates it is the team's turn, inserts in
 
 Teams can trade **future draft picks** and **already-drafted players** in packages. Flow: a team proposes → the target team accepts/rejects → the **league admin approves** before it executes. Works both before and during the draft.
 
-**Key insight:** snake pick order is *computed* from `priority_rank` + `snake_round_config`; there is no stored pick slot. Traded picks are an **override layer** — table `pick_overrides (league_id, overall_pick_number → owner_team_id)` that wins over the computed default. `priority_rank` / `snake_round_config` are never mutated by trades. Resolution goes through `resolvePickOwner()` in `lib/utils.ts` (used by `getCurrentSnakePicker`, the `/api/snake-pick` route, both pages, and `SnakeDraftBoard`). `SnakeDraftBoard` keys picks by `overall_pick_number` (not `round-team`) because a team can hold two picks in one round after a trade.
+**Key insight:** snake pick order is *computed* from `priority_rank` + `snake_round_config`; there is no stored pick slot. Traded picks are an **override layer** — table `pick_overrides (league_id, overall_pick_number → owner_team_id)` that wins over the computed default. `priority_rank` / `snake_round_config` are never mutated by trades. Resolution goes through `resolvePickOwner()` in `lib/utils.ts`. **Every place that maps a pick number to a team must use `resolvePickOwner` (override ?? computed), never `getSnakeTeamForPick` directly** — otherwise traded future picks display/route to the wrong team. Current consumers: `getCurrentSnakePicker`, the `/api/snake-pick` route, the dashboard (`app/(app)/page.tsx`), the players page, the full draft board (`app/(app)/draft-board/page.tsx`), and `SnakeDraftBoard`. `SnakeDraftBoard` keys picks by `overall_pick_number` (not `round-team`) because a team can hold two picks in one round after a trade.
 
 **Roster size is preserved:** trades must be count-neutral — each side gives the same number of assets (picks + players), so every team still finishes with exactly `players_per_team`. Enforced in `lib/trades.ts` `validateTrade()`, which also checks picks are strictly future and currently owned (re-validated at admin approval time, since ownership may have changed).
 
+**No overlap between proposals:** `validateTrade()` rejects any asset (pick or player) already committed to another **open** trade (`pending_target`/`pending_admin`), via an `excludeTradeId` param so a trade doesn't conflict with itself on re-validation. The `/trades` UI disables such assets ("בהצעה פתוחה"). Once a trade is approved, ownership moves (overrides + `players.drafted_by_team_id`), so the previous owner can no longer offer those assets.
+
 - Tables: `trades` (lifecycle: `pending_target → pending_admin → approved | rejected | cancelled`), `trade_assets` (one row per pick/player, with `from_team_id`), `pick_overrides`.
-- Execution is atomic via the `execute_trade(p_trade_id)` Postgres function (applies overrides + player transfers via `assign_roster_slot`, recomputes both teams' `player_count`/`is_complete`).
-- API routes: `POST /api/trades/{propose,respond,cancel}` (players), `POST /api/admin/trades/decide` (admin approve/reject → calls `execute_trade`).
+- Execution is atomic via the `execute_trade(p_trade_id)` Postgres function. It runs in **two phases**: first move every traded player to its new team and clear `roster_slot`, then `assign_roster_slot()` each — so a player↔player swap (e.g. PG↔PG) lands each player in the correct slot instead of a fallback. Finally it recomputes both teams' `player_count`/`is_complete`.
+- API routes: `POST /api/trades/{propose,respond,cancel}` (players), `POST /api/admin/trades/decide` (admin approve/reject → re-validates then calls `execute_trade`).
 - UI: player **`/trades`** page (`components/TradeCenter.tsx`, snake-only Navbar link); admin **"טריידים"** tab in `AdminPanel`.
 - `RealtimeRefresher` subscribes to `trades`, `pick_overrides`, and `snake_picks` (added to the realtime publication in the migration).
 
-**DB migration:** `supabase/migration_pick_trades.sql` — creates `pick_overrides`, `trades`, `trade_assets` (with RLS public-select), the `execute_trade()` function, and adds the new tables to `supabase_realtime`.
+**DB migrations:**
+- `supabase/migration_pick_trades.sql` — creates `pick_overrides`, `trades`, `trade_assets` (with RLS public-select), the `execute_trade()` function, and adds the new tables to `supabase_realtime`.
+- `supabase/migration_pick_trades_fixes.sql` — `CREATE OR REPLACE` of `execute_trade()` with the two-phase roster-slot logic (run on a DB that already has the base migration).
+
+### Full draft board (snake only)
+
+`app/(app)/draft-board/page.tsx` — a single list of every pick slot (past + future) with team and player, linked prominently from the snake dashboard. Resolves ownership via `resolvePickOwner` so traded future picks show the new owner with a "נסחר" badge; exercised picks read `snake_picks.team` directly.
 
 ### Bid priority & tiebreak logic (envelope only)
 
