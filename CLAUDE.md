@@ -54,6 +54,7 @@ Mutations go through API routes in `app/api/`. These routes use `createAdminClie
 - League creators/admins must have their Google email in the `league_creator_whitelist` table.
 - Admin status is determined by: row in `admin_users` table OR `leagues.created_by = user.id`.
 - The layout (`app/(app)/layout.tsx`) checks both and passes `isAdmin` and `isSnake` to `<Navbar>`. The Navbar hides the "מכרז" link for snake leagues.
+- **Logout** lives only on the `/leagues` page (`<LogoutButton>`, bottom "account actions" block) — it is NOT in the Navbar, to keep the mobile bottom bar from overflowing (a snake admin already has up to 7 items). Applies to both draft types.
 
 **Dev mode:** when `NEXT_PUBLIC_DEV_MODE=true`, the login page also shows email/password buttons for test users (team1–6@test.local, password: `test1234`). Run `scripts/seed-test-league.mjs` once to create them.
 
@@ -227,7 +228,9 @@ The dashboard (`app/(app)/page.tsx`) branches on `draft_type`:
 
 ### Styling
 
-Tailwind CSS v4 with CSS variables for theming (`var(--primary)`, `var(--muted)`, `var(--success)`, `var(--danger)`, `var(--warning)`, `var(--border)`, `var(--text)`). Custom utility classes: `card`, `badge`, `badge-green`, `badge-yellow`, `badge-gray`, `badge-red`, `badge-blue`, `input`, `btn`, `btn-primary`, `pulse-glow`.
+Tailwind CSS v4 with CSS variables for theming (`var(--primary)`, `var(--muted)`, `var(--success)`, `var(--danger)`, `var(--warning)`, `var(--border)`, `var(--text)`). Custom utility classes: `card`, `badge`, `badge-green`, `badge-yellow`, `badge-gray`, `badge-red`, `badge-blue`, `input`, `btn`, `btn-primary`, `pulse-glow`, `no-scrollbar`.
+
+`no-scrollbar` hides the scrollbar cross-browser (`::-webkit-scrollbar` for Chrome/Safari + `scrollbar-width`/`-ms-overflow-style` for Firefox/Edge). Used on the `AdminPanel` horizontal tab bar, which scrolls (`overflow-x-auto`) when its 7 snake-mode tabs don't fit on mobile. Prefer this class over an inline `scrollbarWidth` style — inline only works in Firefox.
 
 **RTL note:** The app is Hebrew/RTL. For icon positioning inside inputs (e.g. eye button), use inline `style={{ position: 'absolute', left: '10px' }}` — do NOT use Tailwind `left-*` utilities as they may be reinterpreted in RTL context.
 
