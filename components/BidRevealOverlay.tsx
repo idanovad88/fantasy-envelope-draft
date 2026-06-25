@@ -82,12 +82,13 @@ interface Props {
   activeAuctionId: string | null
   recentlyCompleted?: RecentlyCompleted
   myTeamId?: string | null
-  varGifUrl?: string | null
+  varGifUrls?: string[]
 }
 
-export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCompleted, myTeamId, varGifUrl }: Props) {
+export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCompleted, myTeamId, varGifUrls }: Props) {
   const router = useRouter()
   const [phase, setPhase] = useState<Phase>('idle')
+  const [chosenVarGif, setChosenVarGif] = useState<string | null>(null)
   const [bids, setBids] = useState<BidWithTeam[]>([])
   const [shownCount, setShownCount] = useState(0)
   const [winner, setWinner] = useState<{ teamName: string; amount: number; avatarUrl: string | null } | null>(null)
@@ -182,6 +183,9 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
 
         setTimeout(() => {
           if (isTieBroken) {
+            // Pick one VAR gif at random for this tie
+            const pool = varGifUrls ?? []
+            setChosenVarGif(pool.length ? pool[Math.floor(Math.random() * pool.length)] : null)
             setPhase('var')
             setTimeout(() => {
               setPhase('winner')
@@ -357,10 +361,10 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
               }}>
                 🔍 בדיקת VAR...
               </p>
-              {varGifUrl ? (
-                varGifUrl.toLowerCase().includes('.mp4') ? (
+              {chosenVarGif ? (
+                chosenVarGif.toLowerCase().includes('.mp4') ? (
                   <video
-                    src={varGifUrl}
+                    src={chosenVarGif}
                     autoPlay
                     loop
                     muted
@@ -369,7 +373,7 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
                   />
                 ) : (
                   <img
-                    src={varGifUrl}
+                    src={chosenVarGif}
                     alt="VAR review"
                     style={{ width: '300px', maxWidth: '85vw', borderRadius: '12px', margin: '0 auto', display: 'block' }}
                   />

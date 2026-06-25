@@ -25,8 +25,11 @@ export async function proxy(request: NextRequest) {
 
   const isAuthPage = request.nextUrl.pathname.startsWith('/login')
   const isPublicApi = request.nextUrl.pathname.startsWith('/api/public')
+  // Team-assistant invite pages must be viewable while logged out (the page itself
+  // offers a Google sign-in that returns here via ?next=).
+  const isInvitePage = request.nextUrl.pathname.startsWith('/assist')
 
-  if (!user && !isAuthPage && !isPublicApi) {
+  if (!user && !isAuthPage && !isPublicApi && !isInvitePage) {
     const redirectUrl = request.nextUrl.clone()
     redirectUrl.pathname = '/login'
     return NextResponse.redirect(redirectUrl)

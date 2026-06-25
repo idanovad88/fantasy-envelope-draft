@@ -6,6 +6,7 @@ import Countdown from '@/components/Countdown'
 import AuctionHistory from '@/components/AuctionHistory'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
 import BidRevealOverlay from '@/components/BidRevealOverlay'
+import { myTeamOr } from '@/lib/team'
 import type { Auction, Team, League } from '@/types'
 
 export const dynamic = 'force-dynamic'
@@ -18,8 +19,8 @@ export default async function AuctionPage() {
   const selectedLeagueId = cookieStore.get('selected_league_id')?.value
 
   const { data: myTeam } = selectedLeagueId
-    ? await supabase.from('teams').select('*').eq('user_id', user!.id).eq('league_id', selectedLeagueId).maybeSingle()
-    : await supabase.from('teams').select('*').eq('user_id', user!.id).order('created_at', { ascending: false }).limit(1).maybeSingle()
+    ? await supabase.from('teams').select('*').or(myTeamOr(user!.id)).eq('league_id', selectedLeagueId).limit(1).maybeSingle()
+    : await supabase.from('teams').select('*').or(myTeamOr(user!.id)).order('created_at', { ascending: false }).limit(1).maybeSingle()
 
   const [{ data: adminRow }, { data: createdLeague }] = await Promise.all([
     supabase.from('admin_users').select('league_id').eq('user_id', user!.id).maybeSingle(),
@@ -177,7 +178,13 @@ export default async function AuctionPage() {
           activeAuctionId={activeAuction?.id ?? null}
           recentlyCompleted={recentlyCompleted}
           myTeamId={typedMyTeam?.id ?? null}
-          varGifUrl={typedLeague.var_gif_url ?? null}
+          varGifUrls={
+            typedLeague.var_gif_urls && typedLeague.var_gif_urls.length > 0
+              ? typedLeague.var_gif_urls
+              : typedLeague.var_gif_url
+                ? [typedLeague.var_gif_url]
+                : []
+          }
         />
       )}
     </div>

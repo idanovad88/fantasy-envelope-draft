@@ -15,7 +15,7 @@ export async function POST(req: Request) {
   const admin = createAdminClient()
   const [{ data: adminRow }, { data: league }] = await Promise.all([
     admin.from('admin_users').select('league_id').eq('user_id', user.id).eq('league_id', leagueId).maybeSingle(),
-    admin.from('leagues').select('created_by').eq('id', leagueId).maybeSingle(),
+    admin.from('leagues').select('created_by, var_gif_urls').eq('id', leagueId).maybeSingle(),
   ])
 
   const isAdmin = !!adminRow || league?.created_by === user.id
@@ -25,7 +25,8 @@ export async function POST(req: Request) {
   const buffer = Buffer.from(bytes)
 
   const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : 'gif'
-  const path = `var-gifs/${leagueId}.${ext}`
+  // Unique path per upload so multiple GIFs co-exist (old fixed path overwrote)
+  const path = `var-gifs/${leagueId}-${Date.now()}.${ext}`
 
   const { error: uploadError } = await admin.storage
     .from('draft-media')
@@ -36,7 +37,11 @@ export async function POST(req: Request) {
   const { data: urlData } = admin.storage.from('draft-media').getPublicUrl(path)
   const gifUrl = urlData.publicUrl
 
-  await admin.from('leagues').update({ var_gif_url: gifUrl }).eq('id', leagueId)
+  const existing = Array.isArray(league?.var_gif_urls) ? (league!.var_gif_urls as string[]) : []
+  const urls = [...existing, gifUrl]
 
-  return NextResponse.json({ url: gifUrl })
+  // Keep var_gif_url synced to the first entry for backward compatibility
+  await admin.from('leagues').update({ var_gif_urls: urls, var_gif_url: urls[0] }).eq('id', leagueId)
+
+  return NextResponse.json({ url: gifUrl, urls })
 }

@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
+import { myTeamOr } from '@/lib/team'
 import type { Team, Player, League } from '@/types'
 import TeamsView from '@/components/TeamsView'
 
@@ -12,8 +13,8 @@ export default async function TeamsPage() {
   const selectedLeagueId = cookieStore.get('selected_league_id')?.value
 
   const { data: myTeam } = selectedLeagueId
-    ? await supabase.from('teams').select('league_id').eq('user_id', user!.id).eq('league_id', selectedLeagueId).maybeSingle()
-    : await supabase.from('teams').select('league_id').eq('user_id', user!.id).order('created_at', { ascending: false }).limit(1).maybeSingle()
+    ? await supabase.from('teams').select('league_id').or(myTeamOr(user!.id)).eq('league_id', selectedLeagueId).limit(1).maybeSingle()
+    : await supabase.from('teams').select('league_id').or(myTeamOr(user!.id)).order('created_at', { ascending: false }).limit(1).maybeSingle()
 
   const [{ data: adminRow }, { data: createdLeague }] = await Promise.all([
     supabase.from('admin_users').select('league_id').eq('user_id', user!.id).maybeSingle(),

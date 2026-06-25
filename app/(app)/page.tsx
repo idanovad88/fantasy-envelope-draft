@@ -1,13 +1,15 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { formatTime, formatDateTime, formatTimeSince, getCurrentSnakePicker, buildPickOverridesMap } from '@/lib/utils'
+import { myTeamOr } from '@/lib/team'
 import type { League, Team, Auction, SnakePick } from '@/types'
 import DraftCountdown from '@/components/DraftCountdown'
 import BidForm from '@/components/BidForm'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
 import JoinLeagueForm from '@/components/JoinLeagueForm'
+import AssistantManager from '@/components/AssistantManager'
 import { activateOverdueSnakeDraft } from '@/lib/activateDraft'
 
 export default async function DashboardPage() {
@@ -19,7 +21,7 @@ export default async function DashboardPage() {
   if (!selectedLeagueId) redirect('/leagues')
 
   const { data: myTeam } = await supabase
-    .from('teams').select('*').eq('user_id', user!.id).eq('league_id', selectedLeagueId).maybeSingle()
+    .from('teams').select('*').or(myTeamOr(user!.id)).eq('league_id', selectedLeagueId).limit(1).maybeSingle()
 
   const { data: createdLeague } = !myTeam
     ? await supabase.from('leagues').select('*').eq('created_by', user!.id).eq('id', selectedLeagueId).maybeSingle()
@@ -269,6 +271,15 @@ export default async function DashboardPage() {
     .map(t => ({ team: t, score: prairScore[t.id] ?? 0 }))
     .sort((a, b) => b.score - a.score)
 
+  // Team-assistant manager — shown to the team owner only (not the assistant)
+  const isTeamOwner = !!typedMyTeam && typedMyTeam.user_id === user!.id
+  let assistantEmail: string | null = null
+  if (isTeamOwner && typedMyTeam!.assistant_user_id) {
+    const adminDb = createAdminClient()
+    const { data: assistantUser } = await adminDb.auth.admin.getUserById(typedMyTeam!.assistant_user_id)
+    assistantEmail = assistantUser.user?.email ?? null
+  }
+
   return (
     <div className="max-w-4xl mx-auto">
       <div className="mb-6">
@@ -353,6 +364,13 @@ export default async function DashboardPage() {
               <Link href="/teams" className="btn btn-outline w-full mt-3 text-sm">
                 צפה בקבוצה
               </Link>
+              {isTeamOwner && (
+                <AssistantManager
+                  teamId={typedMyTeam.id}
+                  hasAssistant={!!typedMyTeam.assistant_user_id}
+                  assistantEmail={assistantEmail}
+                />
+              )}
             </div>
           ) : createdLeague ? (
             <div>

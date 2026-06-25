@@ -58,9 +58,14 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   const [adminTeamName, setAdminTeamName] = useState('')
   const [joiningDraft, setJoiningDraft] = useState(false)
   const [uploadingAvatarTeamId, setUploadingAvatarTeamId] = useState<string | null>(null)
-  const [localVarGifUrl, setLocalVarGifUrl] = useState<string | null>(league?.var_gif_url ?? null)
-  const [varPreviewUrl, setVarPreviewUrl] = useState<string | null>(null)
-  const [varIsVideo, setVarIsVideo] = useState(false)
+  const [localVarGifUrls, setLocalVarGifUrls] = useState<string[]>(
+    league?.var_gif_urls && league.var_gif_urls.length > 0
+      ? league.var_gif_urls
+      : league?.var_gif_url
+        ? [league.var_gif_url]
+        : []
+  )
+  const [deletingVarGif, setDeletingVarGif] = useState<string | null>(null)
 
   const adminHasTeam = localTeams.some(t => t.user_id === currentUserId)
 
@@ -79,11 +84,6 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
 
   async function uploadVarGif(file: File) {
     if (!league) return
-    // Show local preview immediately
-    const isVideo = file.type.startsWith('video/')
-    setVarIsVideo(isVideo)
-    const preview = URL.createObjectURL(file)
-    setVarPreviewUrl(preview)
     setLoading('var_gif')
     const formData = new FormData()
     formData.append('file', file)
@@ -92,13 +92,28 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     const json = await res.json()
     if (json.error) {
       setMsg('שגיאה בהעלאה: ' + json.error)
-      URL.revokeObjectURL(preview)
-      setVarPreviewUrl(null)
     } else {
-      setLocalVarGifUrl(json.url)
-      setMsg('קובץ ה-VAR עודכן!')
+      setLocalVarGifUrls(json.urls ?? [])
+      setMsg('גיף VAR נוסף!')
     }
     setLoading('')
+  }
+
+  async function deleteVarGif(url: string) {
+    if (!league) return
+    setDeletingVarGif(url)
+    const res = await fetch('/api/admin/delete-var-gif', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ leagueId: league.id, url }),
+    })
+    const json = await res.json()
+    if (json.error) setMsg('שגיאה במחיקה: ' + json.error)
+    else {
+      setLocalVarGifUrls(json.urls ?? [])
+      setMsg('גיף VAR נמחק')
+    }
+    setDeletingVarGif(null)
   }
 
   // League settings state
@@ -1482,23 +1497,40 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
               </div>
             )}
 
-            {/* VAR GIF upload — envelope only */}
+            {/* VAR GIFs upload — envelope only */}
             {!isSnake && (
             <div>
-              <label className="block text-sm font-medium mb-2">גיף VAR (מוצג כשמכרז נחשף בפריוריטי)</label>
-              {(varPreviewUrl ?? localVarGifUrl) && (() => {
-                const src = varPreviewUrl ?? localVarGifUrl!
-                const isVid = varIsVideo || (localVarGifUrl?.toLowerCase().includes('.mp4') ?? false)
-                return (
-                  <div className="mb-2">
-                    {isVid ? (
-                      <video src={src} autoPlay loop muted playsInline style={{ height: 80, borderRadius: 8, border: '1px solid var(--border)' }} />
-                    ) : (
-                      <img src={src} alt="VAR" style={{ height: 80, borderRadius: 8, border: '1px solid var(--border)' }} />
-                    )}
-                  </div>
-                )
-              })()}
+              <label className="block text-sm font-medium mb-2">גיפים ל-VAR (מוצגים כשמכרז נחשף בפריוריטי)</label>
+              {localVarGifUrls.length > 0 && (
+                <div className="flex flex-wrap gap-3 mb-2">
+                  {localVarGifUrls.map(url => {
+                    const isVid = url.toLowerCase().includes('.mp4')
+                    return (
+                      <div key={url} style={{ position: 'relative' }}>
+                        {isVid ? (
+                          <video src={url} autoPlay loop muted playsInline style={{ height: 80, borderRadius: 8, border: '1px solid var(--border)' }} />
+                        ) : (
+                          <img src={url} alt="VAR" style={{ height: 80, borderRadius: 8, border: '1px solid var(--border)' }} />
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => deleteVarGif(url)}
+                          disabled={deletingVarGif === url}
+                          title="מחק גיף"
+                          style={{
+                            position: 'absolute', top: -8, insetInlineEnd: -8,
+                            width: 22, height: 22, borderRadius: '50%',
+                            background: 'var(--danger)', color: '#fff', border: 'none',
+                            cursor: 'pointer', fontSize: 14, lineHeight: 1,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            opacity: deletingVarGif === url ? 0.4 : 1,
+                          }}
+                        >×</button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
               <label style={{ cursor: loading === 'var_gif' ? 'not-allowed' : 'pointer', display: 'inline-flex' }}>
                 <input
                   type="file"
@@ -1512,11 +1544,11 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                   }}
                 />
                 <span className="btn btn-outline text-sm" style={{ opacity: loading === 'var_gif' ? 0.5 : 1, pointerEvents: 'none' }}>
-                  {loading === 'var_gif' ? 'מעלה...' : localVarGifUrl ? '🔄 החלף קובץ VAR' : '⬆️ העלה קובץ VAR (GIF / MP4)'}
+                  {loading === 'var_gif' ? 'מעלה...' : localVarGifUrls.length > 0 ? '➕ הוסף עוד גיף' : '⬆️ העלה גיף VAR (GIF / MP4)'}
                 </span>
               </label>
               <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
-                מוצג לפני הכרזת הזוכה כשיש הצעות שוות
+                מוצג לפני הכרזת הזוכה כשיש הצעות שוות. אם הוגדרו כמה — אחד מוגרל בכל פעם.
               </p>
             </div>
             )}

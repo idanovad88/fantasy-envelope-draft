@@ -31,6 +31,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'לא ניתן לבטל את הרשאות הניהול שלך' }, { status: 400 })
   }
 
+  // Protect league creators — their admin_users row must always persist so they can
+  // manage (and nominate in) their own league(s). admin_users has one row per user (PK),
+  // so deleting it here would break them across every league they created.
+  if (!grant) {
+    const { data: createdLeague } = await admin
+      .from('leagues').select('id').eq('created_by', team.user_id).limit(1).maybeSingle()
+    if (createdLeague) {
+      return NextResponse.json({ error: 'לא ניתן לבטל הרשאות ניהול ממקים ליגה' }, { status: 400 })
+    }
+  }
+
   if (grant) {
     const { error } = await admin.from('admin_users').upsert(
       { user_id: team.user_id, league_id: team.league_id, role: 'admin' },

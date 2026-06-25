@@ -94,6 +94,15 @@ All join logic is in `app/api/join-league/route.ts` (uses admin client to bypass
 5. Check capacity: `teams.count < league.num_teams`
 6. Create new team with `approved: true`
 
+### Team assistant managers (עוזר מנהל)
+
+A team can have **one optional assistant manager** (`teams.assistant_user_id`) who can place/view the team's sealed bids alongside the owner. Scoped to **envelope** (the bid RLS is what was extended; snake picks still check ownership in `/api/snake-pick`).
+
+- **"My team" resolution must use `myTeamOr(user.id)` from `lib/team.ts`** (`user_id.eq.X,assistant_user_id.eq.X`) so the assistant is recognised — applied on the dashboard, auction, and teams pages. Always pair `.or(myTeamOr(...))` with `.limit(1).maybeSingle()` (a user could in rare cases match two rows). `BidForm` bids by the resolved `team.id`, so once resolution includes the assistant, bidding works under the extended `bids` RLS.
+- **Invite flow:** owner generates a link from `AssistantManager` (mounted owner-only in the envelope dashboard "my team" card) → `POST /api/team/invite` creates a `team_invites` row (service-role-only table, 7-day expiry) → recipient opens `/assist/[token]` → `POST /api/team/accept-invite` sets `assistant_user_id` and lands them in the league. Remove via `POST /api/team/remove-assistant` (owner or league admin/creator).
+- `/assist/[token]` must be reachable **logged out** — it's excluded from the redirect in `proxy.ts` (`isInvitePage`), and `AcceptInvite` signs in via Google with `?next=/assist/<token>`, which `app/auth/callback/route.ts` honors (same-origin relative paths only).
+- **DB migration:** `supabase/migration_team_assistant.sql` — adds `assistant_user_id`, the `team_invites` table (RLS-locked), and extends the three `bids` policies to include the assistant.
+
 ### Nomination turn logic (envelope only)
 
 `priority_rank` on teams determines nomination order. The team with the lowest `priority_rank` among approved, non-complete teams is the current nominator. This is computed in `app/(app)/players/page.tsx`:
@@ -258,7 +267,7 @@ The admin UI is at `app/(app)/admin/` (page + AdminPanel client component).
 
 The "draft" tab (snake only) shows current pick status, admin pick-on-behalf form (team + player dropdowns), pick order editing, and picks history. The lottery tab for snake shows only draft order (no tiebreak). League settings for snake include `pick_timeout_minutes` and per-round direction toggles (`snake_round_config`).
 
-**League creator** can optionally join as a player (choose at creation time or from admin overview "הצטרפות לדראפט" card). Creator's row in `admin_users` is protected — cannot be revoked via UI or API.
+**League creator** can optionally join as a player (choose at creation time or from admin overview "הצטרפות לדראפט" card). Creator's row in `admin_users` is protected — `set-team-admin` refuses to delete the row of any user who is `created_by` of a league, so creators always retain admin (and the ability to nominate). This matters because `admin_users` has one row per user (PK), and admin writes (e.g. the admin panel's direct `auctions` insert) are gated by RLS membership in `admin_users`. `create-league` upserts the creator's row on creation, so every creator has one.
 
 ### League creation
 
