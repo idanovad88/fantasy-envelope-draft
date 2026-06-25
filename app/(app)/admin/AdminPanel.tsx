@@ -45,6 +45,10 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   // team has a priority_rank, re-rolling is blocked (manual edits in the "draft"
   // tab remain the way to adjust the order).
   const snakeLotteryDone = isSnake && teams.some(t => t.approved && t.priority_rank != null)
+  // Once the draft has actually started (status is past setup/lottery) the
+  // nomination/priority lotteries are locked — re-rolling order mid-draft would
+  // corrupt an in-progress draft.
+  const draftStarted = ['active', 'paused', 'completed'].includes(league?.status ?? '')
   const [tab, setTab] = useState<AdminTab>(
     isSnake && initialTab === 'auction' ? 'overview' : initialTab
   )
@@ -334,6 +338,10 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
 
   async function runNominationLottery() {
     if (!league) return
+    if (draftStarted) {
+      setMsg('הדראפט כבר התחיל — לא ניתן להגריל מחדש את סדר ההעלאות.')
+      return
+    }
     if (snakeLotteryDone) {
       setMsg('הגרלת סדר הדראפט כבר בוצעה. ניתן לשנות ידנית בטאב "דראפט".')
       return
@@ -352,6 +360,10 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
 
   async function runTiebreakLottery() {
     if (!league) return
+    if (draftStarted) {
+      setMsg('הדראפט כבר התחיל — לא ניתן להגריל מחדש את סדר הפריוריטי.')
+      return
+    }
     setLoading('lottery_tiebreak')
     const approvedTeams = teams.filter(t => t.approved && !t.is_complete)
     const shuffled = [...approvedTeams].sort(() => Math.random() - 0.5)
@@ -1239,16 +1251,23 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 ✓ סדר הדראפט כבר הוגרל. לא ניתן להגריל שוב — לשינוי ידני עברו לטאב &ldquo;דראפט&rdquo;.
               </p>
             )}
+            {draftStarted && (
+              <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
+                🔒 הדראפט כבר התחיל — לא ניתן להגריל מחדש את סדר ההעלאות.
+              </p>
+            )}
             <button
               className="btn btn-primary w-full"
               onClick={runNominationLottery}
-              disabled={!!loading || !league || teams.filter(t => t.approved).length < 2 || snakeLotteryDone}
+              disabled={!!loading || !league || teams.filter(t => t.approved).length < 2 || snakeLotteryDone || draftStarted}
             >
               {loading === 'lottery_nomination'
                 ? 'מגריל...'
-                : snakeLotteryDone
-                  ? '🔒 הסדר כבר הוגרל'
-                  : `🎲 ${isSnake ? 'הגרל סדר דראפט' : 'הגרל סדר העלאות'}`}
+                : draftStarted
+                  ? '🔒 הדראפט כבר התחיל'
+                  : snakeLotteryDone
+                    ? '🔒 הסדר כבר הוגרל'
+                    : `🎲 ${isSnake ? 'הגרל סדר דראפט' : 'הגרל סדר העלאות'}`}
             </button>
           </div>
 
@@ -1269,12 +1288,21 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                   </div>
                 ))}
               </div>
+              {draftStarted && (
+                <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
+                  🔒 הדראפט כבר התחיל — לא ניתן להגריל מחדש את סדר הפריוריטי.
+                </p>
+              )}
               <button
                 className="btn btn-primary w-full"
                 onClick={runTiebreakLottery}
-                disabled={!!loading || !league || teams.filter(t => t.approved).length < 2}
+                disabled={!!loading || !league || teams.filter(t => t.approved).length < 2 || draftStarted}
               >
-                {loading === 'lottery_tiebreak' ? 'מגריל...' : '🏆 הגרל סדר פריוריטי'}
+                {loading === 'lottery_tiebreak'
+                  ? 'מגריל...'
+                  : draftStarted
+                    ? '🔒 הדראפט כבר התחיל'
+                    : '🏆 הגרל סדר פריוריטי'}
               </button>
             </div>
           )}
