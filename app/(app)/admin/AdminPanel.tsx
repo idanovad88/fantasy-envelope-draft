@@ -396,31 +396,25 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
 
     setLoading('nominate')
 
-    const durationHours = league.auction_duration_hours ?? 1.5
-    const revealTime = new Date(scheduledStart.getTime() + durationHours * 60 * 60 * 1000)
-
-    const existingCount = await supabase.from('auctions').select('id', { count: 'exact' }).eq('league_id', league.id)
-    const slotNum = (existingCount.count ?? 0) + 1
-    const auctionStatus = scheduledStart > new Date() ? 'pending' : 'active'
-
-    const { error: auctionErr } = await supabase.from('auctions').insert({
-      league_id: league.id,
-      player_id: selectedPlayer,
-      nominating_team_id: selectedNominator || null,
-      slot_number: slotNum,
-      scheduled_start: scheduledStart.toISOString(),
-      reveal_time: revealTime.toISOString(),
-      status: auctionStatus,
+    const res = await fetch('/api/admin/queue-auction', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        player_id: selectedPlayer,
+        league_id: league.id,
+        nominating_team_id: selectedNominator || null,
+        scheduled_start: scheduledStart.toISOString(),
+      }),
     })
+    const data = await res.json()
 
-    if (!auctionErr) {
-      await supabase.from('players').update({ status: 'on_auction' }).eq('id', selectedPlayer)
+    if (res.ok) {
       setMsg(hasExisting
         ? `מכרז תוזמן לפתיחה ב-${formatDateTime(scheduledStart.toISOString())}`
         : 'שחקן הועלה למכרז!')
       setSelectedPlayer('')
     } else {
-      setMsg('שגיאה: ' + auctionErr.message)
+      setMsg('שגיאה: ' + (data.error ?? 'נכשל'))
     }
     setLoading('')
     window.location.reload()
