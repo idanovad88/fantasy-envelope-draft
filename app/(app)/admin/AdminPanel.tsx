@@ -147,6 +147,19 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     teams.forEach(t => { m[t.id] = String(t.priority_rank ?? '') })
     return m
   })
+  // Envelope-only manual lottery entry (draw order + tiebreak order by hand)
+  const [nominationMode, setNominationMode] = useState<'auto' | 'manual'>('auto')
+  const [tiebreakMode, setTiebreakMode] = useState<'auto' | 'manual'>('auto')
+  const [nominationEdits, setNominationEdits] = useState<Record<string, string>>(() => {
+    const m: Record<string, string> = {}
+    teams.forEach(t => { m[t.id] = String(t.priority_rank ?? '') })
+    return m
+  })
+  const [tiebreakEdits, setTiebreakEdits] = useState<Record<string, string>>(() => {
+    const m: Record<string, string> = {}
+    teams.forEach(t => { m[t.id] = String(t.tiebreak_rank ?? '') })
+    return m
+  })
   const [snakeAdminPickTeam, setSnakeAdminPickTeam] = useState('')
   const [snakeAdminPickPlayer, setSnakeAdminPickPlayer] = useState('')
 
@@ -375,6 +388,52 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     )
     await Promise.all(updates)
     setMsg('הגרלת סדר פריוריטי בוצעה!')
+    setLoading('')
+    window.location.reload()
+  }
+
+  // Validate that manual rank entries form a complete permutation 1..N (unique, no gaps).
+  function validateManualRanks(edits: Record<string, string>, approvedTeams: Team[]): string | null {
+    const ranks = approvedTeams.map(t => parseInt(edits[t.id] ?? ''))
+    if (ranks.some(r => isNaN(r))) return 'יש למלא מספר סדר לכל קבוצה'
+    const n = approvedTeams.length
+    const sorted = [...ranks].sort((a, b) => a - b)
+    for (let i = 0; i < n; i++) {
+      if (sorted[i] !== i + 1) return `הסדר חייב להיות רצף מ-1 עד ${n} ללא כפילויות`
+    }
+    return null
+  }
+
+  async function saveNominationOrder() {
+    if (!league) return
+    if (snakeLotteryDone) {
+      setMsg('הגרלת סדר הדראפט כבר בוצעה. ניתן לשנות ידנית בטאב "דראפט".')
+      return
+    }
+    const approvedTeams = teams.filter(t => t.approved && !t.is_complete)
+    const err = validateManualRanks(nominationEdits, approvedTeams)
+    if (err) { setMsg(err); return }
+    setLoading('lottery_nomination')
+    const updates = approvedTeams.map(t =>
+      supabase.from('teams').update({ priority_rank: parseInt(nominationEdits[t.id]), updated_at: new Date().toISOString() }).eq('id', t.id)
+    )
+    await Promise.all(updates)
+    setMsg('סדר העלאות נקבע ידנית!')
+    setLoading('')
+    window.location.reload()
+  }
+
+  async function saveTiebreakOrder() {
+    if (!league) return
+    const approvedTeams = teams.filter(t => t.approved && !t.is_complete)
+    const err = validateManualRanks(tiebreakEdits, approvedTeams)
+    if (err) { setMsg(err); return }
+    setLoading('lottery_tiebreak')
+    const updates = approvedTeams.map(t =>
+      supabase.from('teams').update({ tiebreak_rank: parseInt(tiebreakEdits[t.id]), updated_at: new Date().toISOString() }).eq('id', t.id)
+    )
+    await Promise.all(updates)
+    setMsg('סדר פריוריטי נקבע ידנית!')
     setLoading('')
     window.location.reload()
   }
@@ -1254,17 +1313,65 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 ✓ סדר הדראפט כבר הוגרל. לא ניתן להגריל שוב — לשינוי ידני עברו לטאב &ldquo;דראפט&rdquo;.
               </p>
             )}
-            <button
-              className="btn btn-primary w-full"
-              onClick={runNominationLottery}
-              disabled={!!loading || !league || teams.filter(t => t.approved).length < 2 || snakeLotteryDone}
-            >
-              {loading === 'lottery_nomination'
-                ? 'מגריל...'
-                : snakeLotteryDone
-                  ? '🔒 הסדר כבר הוגרל'
-                  : `🎲 ${isSnake ? 'הגרל סדר דראפט' : 'הגרל סדר העלאות'}`}
-            </button>
+            {/* Mode toggle — envelope only (snake edits order in the "draft" tab) */}
+            {!isSnake && !snakeLotteryDone && (
+              <div className="flex gap-2 mb-3">
+                <button
+                  className={`btn flex-1 ${nominationMode === 'auto' ? 'btn-primary' : ''}`}
+                  onClick={() => setNominationMode('auto')}
+                >
+                  🎲 אקראי
+                </button>
+                <button
+                  className={`btn flex-1 ${nominationMode === 'manual' ? 'btn-primary' : ''}`}
+                  onClick={() => setNominationMode('manual')}
+                >
+                  ✍️ ידני
+                </button>
+              </div>
+            )}
+            {!isSnake && nominationMode === 'manual' && !snakeLotteryDone ? (
+              <>
+                <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
+                  קבע מספר סדר (1 עד {teams.filter(t => t.approved && !t.is_complete).length}) לכל קבוצה — ללא כפילויות.
+                </p>
+                <div className="flex flex-col gap-2 mb-4">
+                  {teams.filter(t => t.approved && !t.is_complete).map(team => (
+                    <div key={team.id} className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        className="input text-center w-16"
+                        min={1}
+                        max={teams.filter(t => t.approved && !t.is_complete).length}
+                        dir="ltr"
+                        value={nominationEdits[team.id] ?? ''}
+                        onChange={e => setNominationEdits(prev => ({ ...prev, [team.id]: e.target.value }))}
+                      />
+                      <span className="font-medium">{team.name}</span>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  className="btn btn-primary w-full"
+                  onClick={saveNominationOrder}
+                  disabled={!!loading || !league || teams.filter(t => t.approved && !t.is_complete).length < 2}
+                >
+                  {loading === 'lottery_nomination' ? 'שומר...' : '✍️ שמור סדר העלאות'}
+                </button>
+              </>
+            ) : (
+              <button
+                className="btn btn-primary w-full"
+                onClick={runNominationLottery}
+                disabled={!!loading || !league || teams.filter(t => t.approved).length < 2 || snakeLotteryDone}
+              >
+                {loading === 'lottery_nomination'
+                  ? 'מגריל...'
+                  : snakeLotteryDone
+                    ? '🔒 הסדר כבר הוגרל'
+                    : `🎲 ${isSnake ? 'הגרל סדר דראפט' : 'הגרל סדר העלאות'}`}
+              </button>
+            )}
           </div>
 
           {/* Tiebreak priority lottery — envelope only */}
@@ -1284,13 +1391,58 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                   </div>
                 ))}
               </div>
-              <button
-                className="btn btn-primary w-full"
-                onClick={runTiebreakLottery}
-                disabled={!!loading || !league || teams.filter(t => t.approved).length < 2}
-              >
-                {loading === 'lottery_tiebreak' ? 'מגריל...' : '🏆 הגרל סדר פריוריטי'}
-              </button>
+              <div className="flex gap-2 mb-3">
+                <button
+                  className={`btn flex-1 ${tiebreakMode === 'auto' ? 'btn-primary' : ''}`}
+                  onClick={() => setTiebreakMode('auto')}
+                >
+                  🎲 אקראי
+                </button>
+                <button
+                  className={`btn flex-1 ${tiebreakMode === 'manual' ? 'btn-primary' : ''}`}
+                  onClick={() => setTiebreakMode('manual')}
+                >
+                  ✍️ ידני
+                </button>
+              </div>
+              {tiebreakMode === 'manual' ? (
+                <>
+                  <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
+                    קבע מספר סדר (1 עד {teams.filter(t => t.approved && !t.is_complete).length}) לכל קבוצה — ללא כפילויות.
+                  </p>
+                  <div className="flex flex-col gap-2 mb-4">
+                    {teams.filter(t => t.approved && !t.is_complete).map(team => (
+                      <div key={team.id} className="flex items-center gap-3">
+                        <input
+                          type="number"
+                          className="input text-center w-16"
+                          min={1}
+                          max={teams.filter(t => t.approved && !t.is_complete).length}
+                          dir="ltr"
+                          value={tiebreakEdits[team.id] ?? ''}
+                          onChange={e => setTiebreakEdits(prev => ({ ...prev, [team.id]: e.target.value }))}
+                        />
+                        <span className="font-medium">{team.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    className="btn btn-primary w-full"
+                    onClick={saveTiebreakOrder}
+                    disabled={!!loading || !league || teams.filter(t => t.approved && !t.is_complete).length < 2}
+                  >
+                    {loading === 'lottery_tiebreak' ? 'שומר...' : '✍️ שמור סדר פריוריטי'}
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="btn btn-primary w-full"
+                  onClick={runTiebreakLottery}
+                  disabled={!!loading || !league || teams.filter(t => t.approved).length < 2}
+                >
+                  {loading === 'lottery_tiebreak' ? 'מגריל...' : '🏆 הגרל סדר פריוריטי'}
+                </button>
+              )}
             </div>
           )}
 
