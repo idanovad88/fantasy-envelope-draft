@@ -6,6 +6,7 @@ import SnakeDraftBoard from '@/components/SnakeDraftBoard'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
 import type { Player, League, Team, SnakePick } from '@/types'
 import { formatTime, formatTimeSince, getCurrentSnakePicker, buildPickOverridesMap } from '@/lib/utils'
+import { myTeamOr } from '@/lib/team'
 import { activateOverdueSnakeDraft } from '@/lib/activateDraft'
 
 export const dynamic = 'force-dynamic'
@@ -21,8 +22,8 @@ export default async function PlayersPage() {
   const selectedLeagueId = cookieStore.get('selected_league_id')?.value
 
   const { data: myTeam } = selectedLeagueId
-    ? await supabase.from('teams').select('*').eq('user_id', user!.id).eq('league_id', selectedLeagueId).maybeSingle()
-    : await supabase.from('teams').select('*').eq('user_id', user!.id).order('created_at', { ascending: false }).limit(1).maybeSingle()
+    ? await supabase.from('teams').select('*').or(myTeamOr(user!.id)).eq('league_id', selectedLeagueId).limit(1).maybeSingle()
+    : await supabase.from('teams').select('*').or(myTeamOr(user!.id)).order('created_at', { ascending: false }).limit(1).maybeSingle()
 
   const [{ data: adminRow }, { data: createdLeague }] = await Promise.all([
     supabase.from('admin_users').select('league_id').eq('user_id', user!.id).maybeSingle(),
@@ -207,7 +208,7 @@ async function SnakeDraftPage({
     ? null
     : getCurrentSnakePicker(completedCount, league.num_teams, typedTeams, league.snake_round_config as boolean[] | null, overridesMap)
 
-  // A user may only pick for their own team, and only on their own turn.
+  // A user may only pick for their own team (as owner or assistant), and only on their own turn.
   // Admins pick on behalf of a team from the dedicated admin-panel tool.
   const isMyTurn = !!currentTeam && !!myTeam && currentTeam.id === myTeam.id
   const canPick = league.status === 'active' && !isDraftComplete && isMyTurn

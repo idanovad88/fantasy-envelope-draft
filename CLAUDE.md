@@ -96,10 +96,14 @@ All join logic is in `app/api/join-league/route.ts` (uses admin client to bypass
 
 ### Team assistant managers (עוזר מנהל)
 
-A team can have **one optional assistant manager** (`teams.assistant_user_id`) who can place/view the team's sealed bids alongside the owner. Scoped to **envelope** (the bid RLS is what was extended; snake picks still check ownership in `/api/snake-pick`).
+A team can have **one optional assistant manager** (`teams.assistant_user_id`) who acts as the team on **draft actions only**:
 
-- **"My team" resolution must use `myTeamOr(user.id)` from `lib/team.ts`** (`user_id.eq.X,assistant_user_id.eq.X`) so the assistant is recognised — applied on the dashboard, auction, and teams pages. Always pair `.or(myTeamOr(...))` with `.limit(1).maybeSingle()` (a user could in rare cases match two rows). `BidForm` bids by the resolved `team.id`, so once resolution includes the assistant, bidding works under the extended `bids` RLS.
-- **Invite flow:** owner generates a link from `AssistantManager` (mounted owner-only in the envelope dashboard "my team" card) → `POST /api/team/invite` creates a `team_invites` row (service-role-only table, 7-day expiry) → recipient opens `/assist/[token]` → `POST /api/team/accept-invite` sets `assistant_user_id` and lands them in the league. Remove via `POST /api/team/remove-assistant` (owner or league admin/creator).
+- **Envelope** — place/view the team's sealed bids alongside the owner.
+- **Snake** — pick players when the team is on the clock, exactly like the owner.
+- **Never trades.** `/api/trades/{propose,respond,cancel}` and the `/trades` page deliberately resolve the team by `user_id` only, so the assistant cannot propose, accept, reject, or cancel a trade (and the page tells them they have no team). Keep it that way — trades are the least reversible action a team can take.
+
+- **"My team" resolution must use `myTeamOr(user.id)` from `lib/team.ts`** (`user_id.eq.X,assistant_user_id.eq.X`) so the assistant is recognised — applied on the dashboard, auction, teams, and players pages. Always pair `.or(myTeamOr(...))` with `.limit(1).maybeSingle()` (a user could in rare cases match two rows). `BidForm` bids by the resolved `team.id`, so once resolution includes the assistant, bidding works under the extended `bids` RLS. `/api/snake-pick` authorizes non-admin picks with the same helper; the insert runs through the service-role client, so no snake RLS change was needed.
+- **Invite flow:** owner generates a link from `AssistantManager` (mounted in the "my team" card of **both** the envelope and snake dashboards) → `POST /api/team/invite` creates a `team_invites` row (service-role-only table, 7-day expiry) → recipient opens `/assist/[token]` → `POST /api/team/accept-invite` sets `assistant_user_id` and lands them in the league. Remove via `POST /api/team/remove-assistant` — allowed for the owner, the league admin/creator, **or the assistant themselves stepping down** (`AssistantManager` with `role="assistant"` renders just that button).
 - `/assist/[token]` must be reachable **logged out** — it's excluded from the redirect in `proxy.ts` (`isInvitePage`), and `AcceptInvite` signs in via Google with `?next=/assist/<token>`, which `app/auth/callback/route.ts` honors (same-origin relative paths only).
 - **DB migration:** `supabase/migration_team_assistant.sql` — adds `assistant_user_id`, the `team_invites` table (RLS-locked), and extends the three `bids` policies to include the assistant.
 

@@ -39,6 +39,16 @@ export default async function DashboardPage() {
   const typedLeague = league as League | null
   const typedMyTeam = myTeam as Team | null
 
+  // Team-assistant manager card — the owner invites/removes, the assistant may step down.
+  const isTeamOwner = !!typedMyTeam && typedMyTeam.user_id === user!.id
+  const isTeamAssistant = !!typedMyTeam && typedMyTeam.assistant_user_id === user!.id
+  let assistantEmail: string | null = null
+  if (isTeamOwner && typedMyTeam!.assistant_user_id) {
+    const adminDb = createAdminClient()
+    const { data: assistantUser } = await adminDb.auth.admin.getUserById(typedMyTeam!.assistant_user_id)
+    assistantEmail = assistantUser.user?.email ?? null
+  }
+
   // ── SNAKE DRAFT DASHBOARD ─────────────────────────────────────────────────────
   if (typedLeague?.draft_type === 'snake') {
     const [{ data: teams }, { data: snakePicks }, { data: overrideRows }] = await Promise.all([
@@ -153,6 +163,14 @@ export default async function DashboardPage() {
                   </div>
                 </div>
                 <Link href="/teams" className="btn btn-outline w-full mt-3 text-sm">צפה בקבוצה</Link>
+                {(isTeamOwner || isTeamAssistant) && (
+                  <AssistantManager
+                    teamId={typedMyTeam.id}
+                    hasAssistant={!!typedMyTeam.assistant_user_id}
+                    assistantEmail={assistantEmail}
+                    role={isTeamOwner ? 'owner' : 'assistant'}
+                  />
+                )}
               </div>
             ) : createdLeague ? (
               <div>
@@ -271,15 +289,6 @@ export default async function DashboardPage() {
     .map(t => ({ team: t, score: prairScore[t.id] ?? 0 }))
     .sort((a, b) => b.score - a.score)
 
-  // Team-assistant manager — shown to the team owner only (not the assistant)
-  const isTeamOwner = !!typedMyTeam && typedMyTeam.user_id === user!.id
-  let assistantEmail: string | null = null
-  if (isTeamOwner && typedMyTeam!.assistant_user_id) {
-    const adminDb = createAdminClient()
-    const { data: assistantUser } = await adminDb.auth.admin.getUserById(typedMyTeam!.assistant_user_id)
-    assistantEmail = assistantUser.user?.email ?? null
-  }
-
   return (
     <div className="max-w-4xl mx-auto">
       <div className="mb-6">
@@ -364,11 +373,12 @@ export default async function DashboardPage() {
               <Link href="/teams" className="btn btn-outline w-full mt-3 text-sm">
                 צפה בקבוצה
               </Link>
-              {isTeamOwner && (
+              {(isTeamOwner || isTeamAssistant) && (
                 <AssistantManager
                   teamId={typedMyTeam.id}
                   hasAssistant={!!typedMyTeam.assistant_user_id}
                   assistantEmail={assistantEmail}
+                  role={isTeamOwner ? 'owner' : 'assistant'}
                 />
               )}
             </div>

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { resolvePickOwner, buildPickOverridesMap } from '@/lib/utils'
+import { myTeamOr } from '@/lib/team'
 import type { Team } from '@/types'
 
 export async function POST(req: Request) {
@@ -65,12 +66,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `לא תור הקבוצה הזו. תור: ${currentTeam.name}` }, { status: 400 })
     }
   } else {
-    // Non-admin: must be the current team's user
+    // Non-admin: must be the current team's owner or assistant manager
     const { data: myTeam } = await admin
       .from('teams')
       .select('id')
       .eq('league_id', league_id)
-      .eq('user_id', user.id)
+      .or(myTeamOr(user.id))
+      .limit(1)
       .maybeSingle()
 
     if (!myTeam) return NextResponse.json({ error: 'אינך חלק מהליגה' }, { status: 403 })

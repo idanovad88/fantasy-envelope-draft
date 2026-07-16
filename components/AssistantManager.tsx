@@ -6,6 +6,8 @@ interface AssistantManagerProps {
   teamId: string
   hasAssistant: boolean
   assistantEmail: string | null
+  // 'owner' invites/removes an assistant; 'assistant' can only step down.
+  role?: 'owner' | 'assistant'
 }
 
 // Subtle text-link style — keeps the invite option unobtrusive inside the team card.
@@ -18,7 +20,7 @@ const linkStyle: React.CSSProperties = {
   textDecoration: 'underline',
 }
 
-export default function AssistantManager({ teamId, hasAssistant, assistantEmail }: AssistantManagerProps) {
+export default function AssistantManager({ teamId, hasAssistant, assistantEmail, role = 'owner' }: AssistantManagerProps) {
   const [loading, setLoading] = useState(false)
   const [link, setLink] = useState('')
   const [copied, setCopied] = useState(false)
@@ -49,7 +51,10 @@ export default function AssistantManager({ teamId, hasAssistant, assistantEmail 
   }
 
   async function remove() {
-    if (!confirm('להסיר את עוזר המנהל מהקבוצה?')) return
+    const prompt = role === 'assistant'
+      ? 'להתנתק מהקבוצה? לא תוכל להגיש הצעות או לבחור שחקנים בשמה.'
+      : 'להסיר את עוזר המנהל מהקבוצה?'
+    if (!confirm(prompt)) return
     setLoading(true)
     setError('')
     const res = await fetch('/api/team/remove-assistant', {
@@ -64,6 +69,21 @@ export default function AssistantManager({ teamId, hasAssistant, assistantEmail 
       return
     }
     window.location.reload()
+  }
+
+  // The assistant's own view: no invite controls, just the option to step down.
+  if (role === 'assistant') {
+    return (
+      <div className="mt-2" style={{ textAlign: 'left' }}>
+        <span className="text-xs inline-flex items-center gap-1.5" style={{ color: 'var(--muted)' }}>
+          <span>אתה עוזר המנהל</span>
+          <button onClick={remove} disabled={loading} className="text-xs" style={{ ...linkStyle, color: 'var(--danger)' }}>
+            {loading ? '...' : 'התנתק'}
+          </button>
+        </span>
+        {error && <p className="text-xs mt-1" style={{ color: 'var(--danger)', textAlign: 'right' }}>{error}</p>}
+      </div>
+    )
   }
 
   // Generated invite link — only appears after the owner explicitly asks for it.
