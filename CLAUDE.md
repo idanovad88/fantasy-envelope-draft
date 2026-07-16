@@ -22,7 +22,9 @@ Required in `.env.local` and in Vercel dashboard:
 - `SUPABASE_SERVICE_ROLE_KEY` — used by `createAdminClient()` for all admin API routes
 
 Dev only (`.env.local` only, never in production):
-- `NEXT_PUBLIC_DEV_MODE=true` — shows quick-login buttons on login page (Team 1–6)
+- `NEXT_PUBLIC_DEV_MODE=true` — currently read by nothing. The quick-login buttons it used to gate were removed from the login page.
+
+⚠️ **There is no separate dev database.** `.env.local` points `NEXT_PUBLIC_SUPABASE_URL` at the *production* Supabase project, so `npm run dev` reads and writes live league data — including drafts in progress. Scope any test data to a throwaway league and delete it afterwards; never mutate a real league from a local session.
 
 ## Architecture
 
@@ -55,13 +57,10 @@ Mutations go through API routes in `app/api/`. These routes use `createAdminClie
 - Admin status is determined by: row in `admin_users` table OR `leagues.created_by = user.id`.
 - The layout (`app/(app)/layout.tsx`) checks both and passes `isAdmin` and `isSnake` to `<Navbar>`. The Navbar hides the "מכרז" link for snake leagues.
 
-**Dev mode:** when `NEXT_PUBLIC_DEV_MODE=true`, the login page also shows email/password buttons for test users (team1–6@test.local, password: `test1234`). Run `scripts/seed-test-league.mjs` once to create them.
+**Test users:** six `team1–6@test.local` users (password `test1234`) exist in the Supabase project. There is **no quick-login UI** — the login page offers only Google OAuth, plus an email/password form behind "הקמת ליגה (מנהלים)" that signs you out unless your email is in `league_creator_whitelist`. To get a session as a test user locally, add that email to `league_creator_whitelist`, sign in through that form, then remove the row (the session survives).
 
-```bash
-node --env-file=.env.local scripts/seed-test-league.mjs
-```
+There is no seed script — `scripts/` is empty.
 
-The dev reset API (`POST /api/dev/reset-test-league`) wipes auctions/teams and re-creates the 6 test teams. Only works in `NODE_ENV=development`.
 
 ### Multi-league support & league selection
 
@@ -225,6 +224,8 @@ node -e "const sharp = require('sharp'); const src = './public/logo.png'; Promis
 ```
 
 **Vercel deploy:** GitHub auto-deploy is NOT connected. Run `npx vercel --prod` to deploy manually.
+
+⚠️ `vercel --prod` uploads the **local working directory**, not a git ref. Merging a PR on GitHub therefore ships nothing, and deploying from a stale checkout silently reverts whatever the last deploy contained. Before deploying, run `git fetch && git status` and make sure local main is not behind `origin/main`.
 
 ### Supabase clients
 

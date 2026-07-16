@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatDateTime, formatTime, getSnakeTeamForPick, isSnakeRoundReversed } from '@/lib/utils'
 import type { League, Team, Auction, SnakePick, TradeStatus } from '@/types'
@@ -45,6 +45,10 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   // team has a priority_rank, re-rolling is blocked (manual edits in the "draft"
   // tab remain the way to adjust the order).
   const snakeLotteryDone = isSnake && teams.some(t => t.approved && t.priority_rank != null)
+  // Once the draft has actually started (status is past setup/lottery) the
+  // nomination/priority lotteries are locked — re-rolling order mid-draft would
+  // corrupt an in-progress draft.
+  const draftStarted = ['active', 'paused', 'completed'].includes(league?.status ?? '')
   const [tab, setTab] = useState<AdminTab>(
     isSnake && initialTab === 'auction' ? 'overview' : initialTab
   )
@@ -362,6 +366,10 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
 
   async function runNominationLottery() {
     if (!league) return
+    if (draftStarted) {
+      setMsg('הדראפט כבר התחיל — לא ניתן להגריל מחדש את סדר ההעלאות.')
+      return
+    }
     if (snakeLotteryDone) {
       setMsg('הגרלת סדר הדראפט כבר בוצעה. ניתן לשנות ידנית בטאב "דראפט".')
       return
@@ -380,6 +388,10 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
 
   async function runTiebreakLottery() {
     if (!league) return
+    if (draftStarted) {
+      setMsg('הדראפט כבר התחיל — לא ניתן להגריל מחדש את סדר הפריוריטי.')
+      return
+    }
     setLoading('lottery_tiebreak')
     const approvedTeams = teams.filter(t => t.approved && !t.is_complete)
     const shuffled = [...approvedTeams].sort(() => Math.random() - 0.5)
@@ -406,6 +418,10 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
 
   async function saveNominationOrder() {
     if (!league) return
+    if (draftStarted) {
+      setMsg('הדראפט כבר התחיל — לא ניתן לשנות את סדר ההעלאות.')
+      return
+    }
     if (snakeLotteryDone) {
       setMsg('הגרלת סדר הדראפט כבר בוצעה. ניתן לשנות ידנית בטאב "דראפט".')
       return
@@ -425,6 +441,10 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
 
   async function saveTiebreakOrder() {
     if (!league) return
+    if (draftStarted) {
+      setMsg('הדראפט כבר התחיל — לא ניתן לשנות את סדר הפריוריטי.')
+      return
+    }
     const approvedTeams = teams.filter(t => t.approved && !t.is_complete)
     const err = validateManualRanks(tiebreakEdits, approvedTeams)
     if (err) { setMsg(err); return }
@@ -458,31 +478,25 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
 
     setLoading('nominate')
 
-    const durationHours = league.auction_duration_hours ?? 1.5
-    const revealTime = new Date(scheduledStart.getTime() + durationHours * 60 * 60 * 1000)
-
-    const existingCount = await supabase.from('auctions').select('id', { count: 'exact' }).eq('league_id', league.id)
-    const slotNum = (existingCount.count ?? 0) + 1
-    const auctionStatus = scheduledStart > new Date() ? 'pending' : 'active'
-
-    const { error: auctionErr } = await supabase.from('auctions').insert({
-      league_id: league.id,
-      player_id: selectedPlayer,
-      nominating_team_id: selectedNominator || null,
-      slot_number: slotNum,
-      scheduled_start: scheduledStart.toISOString(),
-      reveal_time: revealTime.toISOString(),
-      status: auctionStatus,
+    const res = await fetch('/api/admin/queue-auction', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        player_id: selectedPlayer,
+        league_id: league.id,
+        nominating_team_id: selectedNominator || null,
+        scheduled_start: scheduledStart.toISOString(),
+      }),
     })
+    const data = await res.json()
 
-    if (!auctionErr) {
-      await supabase.from('players').update({ status: 'on_auction' }).eq('id', selectedPlayer)
+    if (res.ok) {
       setMsg(hasExisting
         ? `מכרז תוזמן לפתיחה ב-${formatDateTime(scheduledStart.toISOString())}`
         : 'שחקן הועלה למכרז!')
       setSelectedPlayer('')
     } else {
-      setMsg('שגיאה: ' + auctionErr.message)
+      setMsg('שגיאה: ' + (data.error ?? 'נכשל'))
     }
     setLoading('')
     window.location.reload()
@@ -618,12 +632,12 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 p-1 rounded-lg" style={{ background: 'var(--card)' }}>
+      <div className="flex gap-1 mb-6 p-1 rounded-lg overflow-x-auto no-scrollbar" style={{ background: 'var(--card)' }}>
         {TABS.map(t => (
           <button
             key={t.id}
             onClick={() => { setTab(t.id as typeof tab); window.history.replaceState(null, '', `?tab=${t.id}`) }}
-            className="flex-1 py-2 px-2 rounded-md text-sm font-medium transition-all"
+            className="flex-shrink-0 py-2 px-3 rounded-md text-sm font-medium transition-all whitespace-nowrap"
             style={tab === t.id ? { background: 'var(--primary)', color: 'white' } : { color: 'var(--muted)' }}
           >
             {t.label}
@@ -1313,8 +1327,13 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 ✓ סדר הדראפט כבר הוגרל. לא ניתן להגריל שוב — לשינוי ידני עברו לטאב &ldquo;דראפט&rdquo;.
               </p>
             )}
+            {draftStarted && (
+              <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
+                🔒 הדראפט כבר התחיל — לא ניתן להגריל מחדש את סדר ההעלאות.
+              </p>
+            )}
             {/* Mode toggle — envelope only (snake edits order in the "draft" tab) */}
-            {!isSnake && !snakeLotteryDone && (
+            {!isSnake && !snakeLotteryDone && !draftStarted && (
               <div className="flex gap-2 mb-3">
                 <button
                   className={`btn flex-1 ${nominationMode === 'auto' ? 'btn-primary' : ''}`}
@@ -1330,7 +1349,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 </button>
               </div>
             )}
-            {!isSnake && nominationMode === 'manual' && !snakeLotteryDone ? (
+            {!isSnake && nominationMode === 'manual' && !snakeLotteryDone && !draftStarted ? (
               <>
                 <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
                   קבע מספר סדר (1 עד {teams.filter(t => t.approved && !t.is_complete).length}) לכל קבוצה — ללא כפילויות.
@@ -1363,13 +1382,15 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
               <button
                 className="btn btn-primary w-full"
                 onClick={runNominationLottery}
-                disabled={!!loading || !league || teams.filter(t => t.approved).length < 2 || snakeLotteryDone}
+                disabled={!!loading || !league || teams.filter(t => t.approved).length < 2 || snakeLotteryDone || draftStarted}
               >
                 {loading === 'lottery_nomination'
                   ? 'מגריל...'
-                  : snakeLotteryDone
-                    ? '🔒 הסדר כבר הוגרל'
-                    : `🎲 ${isSnake ? 'הגרל סדר דראפט' : 'הגרל סדר העלאות'}`}
+                  : draftStarted
+                    ? '🔒 הדראפט כבר התחיל'
+                    : snakeLotteryDone
+                      ? '🔒 הסדר כבר הוגרל'
+                      : `🎲 ${isSnake ? 'הגרל סדר דראפט' : 'הגרל סדר העלאות'}`}
               </button>
             )}
           </div>
@@ -1391,21 +1412,28 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                   </div>
                 ))}
               </div>
-              <div className="flex gap-2 mb-3">
-                <button
-                  className={`btn flex-1 ${tiebreakMode === 'auto' ? 'btn-primary' : ''}`}
-                  onClick={() => setTiebreakMode('auto')}
-                >
-                  🎲 אקראי
-                </button>
-                <button
-                  className={`btn flex-1 ${tiebreakMode === 'manual' ? 'btn-primary' : ''}`}
-                  onClick={() => setTiebreakMode('manual')}
-                >
-                  ✍️ ידני
-                </button>
-              </div>
-              {tiebreakMode === 'manual' ? (
+              {draftStarted && (
+                <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
+                  🔒 הדראפט כבר התחיל — לא ניתן להגריל מחדש את סדר הפריוריטי.
+                </p>
+              )}
+              {!draftStarted && (
+                <div className="flex gap-2 mb-3">
+                  <button
+                    className={`btn flex-1 ${tiebreakMode === 'auto' ? 'btn-primary' : ''}`}
+                    onClick={() => setTiebreakMode('auto')}
+                  >
+                    🎲 אקראי
+                  </button>
+                  <button
+                    className={`btn flex-1 ${tiebreakMode === 'manual' ? 'btn-primary' : ''}`}
+                    onClick={() => setTiebreakMode('manual')}
+                  >
+                    ✍️ ידני
+                  </button>
+                </div>
+              )}
+              {tiebreakMode === 'manual' && !draftStarted ? (
                 <>
                   <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
                     קבע מספר סדר (1 עד {teams.filter(t => t.approved && !t.is_complete).length}) לכל קבוצה — ללא כפילויות.
@@ -1438,9 +1466,13 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 <button
                   className="btn btn-primary w-full"
                   onClick={runTiebreakLottery}
-                  disabled={!!loading || !league || teams.filter(t => t.approved).length < 2}
+                  disabled={!!loading || !league || teams.filter(t => t.approved).length < 2 || draftStarted}
                 >
-                  {loading === 'lottery_tiebreak' ? 'מגריל...' : '🏆 הגרל סדר פריוריטי'}
+                  {loading === 'lottery_tiebreak'
+                    ? 'מגריל...'
+                    : draftStarted
+                      ? '🔒 הדראפט כבר התחיל'
+                      : '🏆 הגרל סדר פריוריטי'}
                 </button>
               )}
             </div>

@@ -2,9 +2,8 @@
 
 import Link from 'next/link'
 import Image from 'next/image'
-import { usePathname, useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
-import { Home, Users, ShoppingBag, List, Settings, LogOut, Trophy, ArrowLeftRight } from 'lucide-react'
+import { usePathname } from 'next/navigation'
+import { Home, Users, ShoppingBag, List, Settings, Trophy, ArrowLeftRight } from 'lucide-react'
 
 const NAV = [
   { href: '/', label: 'בית', icon: Home },
@@ -30,14 +29,6 @@ interface NavbarProps {
 
 export default function Navbar({ isAdmin, isSnake }: NavbarProps) {
   const pathname = usePathname()
-  const router = useRouter()
-  const supabase = createClient()
-
-  async function logout() {
-    await supabase.auth.signOut()
-    router.push('/login')
-    router.refresh()
-  }
 
   return (
     <>
@@ -79,15 +70,6 @@ export default function Navbar({ isAdmin, isSnake }: NavbarProps) {
             ניהול
           </Link>
         )}
-
-        <button
-          onClick={logout}
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mt-auto"
-          style={{ color: 'var(--muted)' }}
-        >
-          <LogOut size={18} />
-          יציאה
-        </button>
       </nav>
 
       {/* Mobile bottom nav */}
@@ -113,14 +95,6 @@ export default function Navbar({ isAdmin, isSnake }: NavbarProps) {
             ניהול
           </Link>
         )}
-        <button
-          onClick={logout}
-          className="flex-1 flex flex-col items-center py-3 gap-1 text-xs font-medium"
-          style={{ color: 'var(--muted)' }}
-        >
-          <LogOut size={20} />
-          יציאה
-        </button>
       </nav>
     </>
   )
