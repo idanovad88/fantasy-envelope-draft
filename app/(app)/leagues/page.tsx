@@ -1,4 +1,5 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { myTeamOr } from '@/lib/team'
 import type { League, Team } from '@/types'
 import LeagueSelectButton from '@/components/LeagueSelectButton'
 import JoinLeagueForm from '@/components/JoinLeagueForm'
@@ -17,11 +18,12 @@ export default async function LeaguesPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  // Fetch all teams for this user (across all leagues)
+  // Fetch all teams for this user (across all leagues) — as owner or assistant manager,
+  // otherwise a league the user only assists in would be missing from the switcher.
   const { data: myTeams } = await admin
     .from('teams')
     .select('*')
-    .eq('user_id', user.id)
+    .or(myTeamOr(user.id))
     .order('created_at', { ascending: false })
 
   // Fetch admin memberships
@@ -107,6 +109,7 @@ export default async function LeaguesPage() {
                 {myTeam && (
                   <p className="text-sm mt-0.5" style={{ color: 'var(--muted)' }}>
                     קבוצה: {myTeam.name}
+                    {myTeam.user_id !== user.id && ' (עוזר)'}
                   </p>
                 )}
               </div>
