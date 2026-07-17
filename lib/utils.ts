@@ -5,6 +5,11 @@ export function cn(...inputs: ClassValue[]) {
   return inputs.filter(Boolean).join(' ')
 }
 
+// How long after an auction closes a page load still replays the bid reveal.
+// Deliberately independent of the reveal's own pacing — a late viewer always
+// watches from the first bid, so this never has to track REVEAL_INTERVAL.
+export const REVEAL_WINDOW_MS = 120000
+
 export function formatCurrency(amount: number) {
   return `$${amount}`
 }

@@ -1,6 +1,6 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
-import { formatTime, formatDateTime } from '@/lib/utils'
+import { formatTime, formatDateTime, REVEAL_WINDOW_MS } from '@/lib/utils'
 import BidForm from '@/components/BidForm'
 import Countdown from '@/components/Countdown'
 import AuctionHistory from '@/components/AuctionHistory'
@@ -77,7 +77,6 @@ export default async function AuctionPage() {
   const typedLeague = league as League | null
   const typedMyTeam = myTeam as Team | null
 
-  const REVEAL_WINDOW_MS = 60000
   const recentlyCompleted = recentCompleted && (
     Date.now() - new Date(recentCompleted.updated_at).getTime() < REVEAL_WINDOW_MS
   ) ? {

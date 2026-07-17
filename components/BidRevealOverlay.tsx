@@ -2,8 +2,22 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { REVEAL_WINDOW_MS } from '@/lib/utils'
 import { getMuted, toggleMute, unlockAudio, playDrumroll, playBidReveal, playFanfare } from '@/lib/sounds'
+
+const SEEN_KEY = 'auction-reveal-seen'
+
+// Only the most recently completed auction can ever trigger a reveal, so a single
+// id is enough to remember — the next auction to close overwrites it.
+function hasSeenReveal(auctionId: string): boolean {
+  try { return localStorage.getItem(SEEN_KEY) === auctionId } catch { return false }
+}
+
+function markRevealSeen(auctionId: string): void {
+  try { localStorage.setItem(SEEN_KEY, auctionId) } catch {}
+}
 
 type BidWithTeam = {
   id: string
@@ -96,9 +110,44 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
   const [nominatingTeamId, setNominatingTeamId] = useState<string | null>(null)
   const [muted, setMuted] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([])
   const startedRef = useRef(false)
+  const auctionIdRef = useRef<string | null>(null)
+  const winnerCardRef = useRef<HTMLDivElement | null>(null)
+
+  function clearAllTimers() {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
+    }
+    timeoutsRef.current.forEach(clearTimeout)
+    timeoutsRef.current = []
+  }
+
+  // Every deferred step of the reveal goes through here so a skip or an unmount
+  // can cancel the whole chain — otherwise a pending step reopens the overlay.
+  function later(fn: () => void, ms: number) {
+    timeoutsRef.current.push(setTimeout(fn, ms))
+  }
+
+  // Natural end and skip are the same thing: stop everything, don't show it again.
+  function endReveal() {
+    clearAllTimers()
+    if (auctionIdRef.current) markRevealSeen(auctionIdRef.current)
+    setPhase('idle')
+    startedRef.current = false
+    router.refresh()
+  }
 
   useEffect(() => { setMuted(getMuted()) }, [])
+
+  // On a short screen (iPhone SE) the losing bids push the winner card below the
+  // fold, and nobody scrolls during a 4-second payoff. Pull it into view.
+  useEffect(() => {
+    if (phase === 'winner') {
+      winnerCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [phase])
 
   useEffect(() => {
     const unlock = () => unlockAudio()
@@ -112,11 +161,13 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
     }
   }, [])
 
-  const REVEAL_INTERVAL = 3000
+  const REVEAL_INTERVAL = 5000
 
-  async function startReveal(auctionId: string, winningTeamId: string | null, winningBid: number | null, startIndex = 0) {
+  async function startReveal(auctionId: string, winningTeamId: string | null, winningBid: number | null) {
     if (startedRef.current) return
+    if (hasSeenReveal(auctionId)) return
     startedRef.current = true
+    auctionIdRef.current = auctionId
 
     const supabase = createClient()
 
@@ -170,42 +221,35 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
     setNominatingTeamId(nomTeamId)
     setWinner(winnerInfo)
     setBids(shuffled)
-    setShownCount(startIndex)
+    setShownCount(0)
     setPhase('revealing')
     playDrumroll(2)
 
-    let count = startIndex
+    let count = 0
     intervalRef.current = setInterval(() => {
       count++
       if (count >= shuffled.length) {
         clearInterval(intervalRef.current!)
+        intervalRef.current = null
         setShownCount(shuffled.length)
 
-        setTimeout(() => {
+        later(() => {
           if (isTieBroken) {
             // Pick one VAR gif at random for this tie
             const pool = varGifUrls ?? []
             setChosenVarGif(pool.length ? pool[Math.floor(Math.random() * pool.length)] : null)
             setPhase('var')
-            setTimeout(() => {
+            later(() => {
               setPhase('winner')
               playFanfare()
               if (myTeamId && winningTeamId === myTeamId) spawnConfetti()
-              setTimeout(() => {
-                setPhase('idle')
-                startedRef.current = false
-                router.refresh()
-              }, 4000)
+              later(endReveal, 4000)
             }, 4500)
           } else {
             setPhase('winner')
             playFanfare()
             if (myTeamId && winningTeamId === myTeamId) spawnConfetti()
-            setTimeout(() => {
-              setPhase('idle')
-              startedRef.current = false
-              router.refresh()
-            }, 4000)
+            later(endReveal, 4000)
           }
         }, 3000)
       } else {
@@ -218,13 +262,14 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
   useEffect(() => {
     if (!recentlyCompleted || startedRef.current) return
     const elapsed = Date.now() - new Date(recentlyCompleted.updatedAt).getTime()
-    if (elapsed > 60000) return
-    const startIndex = Math.min(Math.floor(elapsed / REVEAL_INTERVAL), 20)
+    if (elapsed > REVEAL_WINDOW_MS) return
+    // startReveal only setStates after an await, and endReveal only runs off a
+    // timer — the rule can't see through `later` to know that.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     startReveal(
       recentlyCompleted.id,
       recentlyCompleted.winningTeamId,
       recentlyCompleted.winningBid,
-      startIndex,
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -246,7 +291,7 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
 
     return () => {
       supabase.removeChannel(channel)
-      if (intervalRef.current) clearInterval(intervalRef.current)
+      clearAllTimers()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leagueId])
@@ -294,12 +339,32 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
           style={{
             position: 'fixed', inset: 0, zIndex: 50,
             background: 'rgba(0,0,0,0.88)',
-            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
             padding: '24px',
             animation: 'fadeIn 0.3s ease',
             overflowY: 'auto',
           }}
         >
+          {/* RTL: position inline, not via Tailwind left-* utilities */}
+          <button
+            onClick={endReveal}
+            title="דלג"
+            aria-label="דלג על החשיפה"
+            style={{
+              position: 'fixed', top: '20px', left: '20px', zIndex: 60,
+              background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: '50%',
+              width: '40px', height: '40px', color: '#fff',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              opacity: 0.7,
+            }}
+          >
+            <X size={20} />
+          </button>
+
+          {/* margin:auto centres this but keeps overflow reachable — justify-content:center
+              would clip the top out of scroll range on short screens. */}
+          <div style={{ margin: 'auto', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+
           {/* Header — always visible during reveal and winner phases */}
           {phase !== 'var' && (
             <div style={{ textAlign: 'center', marginBottom: '24px' }}>
@@ -308,43 +373,49 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
             </div>
           )}
 
-          {/* Bids reveal list */}
+          {/* Bids reveal list — two columns so a full 12-team league fits without scrolling */}
           {phase === 'revealing' && (
-            <div style={{ width: '100%', maxWidth: '420px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {visibleBids.map((bid, i) => {
-                const isDefault = bid.team_id === nominatingTeamId && bid.amount === 1
-                return (
-                  <div
-                    key={bid.id}
-                    style={{
-                      background: 'rgba(255,255,255,0.07)',
-                      border: '1px solid rgba(255,255,255,0.12)',
-                      borderRadius: '12px',
-                      padding: '12px 16px',
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      animation: i === visibleBids.length - 1 ? 'slideInUp 0.4s ease' : 'none',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <Avatar url={bid.team?.avatar_url ?? null} name={bid.team?.name ?? '?'} size={40} />
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <span style={{ color: '#fff', fontWeight: 600, fontSize: '15px' }}>
-                          {bid.team?.name ?? '—'}
-                        </span>
-                        {isDefault && (
-                          <span style={{ color: 'var(--muted)', fontSize: '11px' }}>ברירת מחדל</span>
-                        )}
+            <div style={{ width: '100%', maxWidth: '420px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                {visibleBids.map((bid, i) => {
+                  const isDefault = bid.team_id === nominatingTeamId && bid.amount === 1
+                  return (
+                    <div
+                      key={bid.id}
+                      style={{
+                        background: 'rgba(255,255,255,0.07)',
+                        border: '1px solid rgba(255,255,255,0.12)',
+                        borderRadius: '10px',
+                        padding: '6px 8px',
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        gap: '6px', minWidth: 0,
+                        animation: i === visibleBids.length - 1 ? 'slideInUp 0.4s ease' : 'none',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
+                        <Avatar url={bid.team?.avatar_url ?? null} name={bid.team?.name ?? '?'} size={26} />
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', minWidth: 0 }}>
+                          <span style={{
+                            color: '#fff', fontWeight: 600, fontSize: '12px',
+                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                          }}>
+                            {bid.team?.name ?? '—'}
+                          </span>
+                          {isDefault && (
+                            <span style={{ color: 'var(--muted)', fontSize: '9px' }}>ברירת מחדל</span>
+                          )}
+                        </div>
                       </div>
+                      <span style={{ color: 'var(--success)', fontWeight: 800, fontSize: '15px', flexShrink: 0 }}>
+                        ${bid.amount}
+                      </span>
                     </div>
-                    <span style={{ color: 'var(--success)', fontWeight: 800, fontSize: '20px' }}>
-                      ${bid.amount}
-                    </span>
-                  </div>
-                )
-              })}
+                  )
+                })}
+              </div>
 
               {shownCount < bids.length && (
-                <div style={{ textAlign: 'center', color: 'var(--muted)', fontSize: '13px', marginTop: '8px' }}>
+                <div style={{ textAlign: 'center', color: 'var(--muted)', fontSize: '13px', marginTop: '10px' }}>
                   {bids.length - shownCount} נותרו...
                 </div>
               )}
@@ -390,8 +461,11 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
           {/* Winner reveal */}
           {phase === 'winner' && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', width: '100%' }}>
-              {/* Losing bids (dimmed) */}
-              <div style={{ width: '100%', maxWidth: '420px', display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
+              {/* Losing bids (dimmed) — two columns, same reason as the reveal list */}
+              <div style={{
+                width: '100%', maxWidth: '420px', marginBottom: '8px',
+                display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px',
+              }}>
                 {bids.filter(b => b.team?.name !== winner?.teamName).map(bid => (
                   <div
                     key={bid.id}
@@ -399,16 +473,22 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
                       background: 'rgba(255,255,255,0.04)',
                       border: '1px solid rgba(255,255,255,0.07)',
                       borderRadius: '10px',
-                      padding: '8px 14px',
+                      padding: '5px 8px',
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      gap: '6px', minWidth: 0,
                       opacity: 0.4,
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Avatar url={bid.team?.avatar_url ?? null} name={bid.team?.name ?? '?'} size={28} />
-                      <span style={{ color: '#ccc', fontSize: '13px' }}>{bid.team?.name ?? '—'}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
+                      <Avatar url={bid.team?.avatar_url ?? null} name={bid.team?.name ?? '?'} size={22} />
+                      <span style={{
+                        color: '#ccc', fontSize: '11px',
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>
+                        {bid.team?.name ?? '—'}
+                      </span>
                     </div>
-                    <span style={{ color: '#aaa', fontSize: '15px', fontWeight: 700 }}>${bid.amount}</span>
+                    <span style={{ color: '#aaa', fontSize: '13px', fontWeight: 700, flexShrink: 0 }}>${bid.amount}</span>
                   </div>
                 ))}
               </div>
@@ -416,6 +496,7 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
               {/* Winner card */}
               {winner && (
                 <div
+                  ref={winnerCardRef}
                   style={{
                     width: '100%', maxWidth: '420px',
                     background: 'rgba(34,197,94,0.15)',
@@ -438,6 +519,8 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
               )}
             </div>
           )}
+
+          </div>
         </div>
       )}
     </>
