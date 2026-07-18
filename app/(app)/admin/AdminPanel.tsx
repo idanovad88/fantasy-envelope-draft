@@ -684,13 +684,18 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 </div>
                 <div className="flex gap-2 mt-4 flex-wrap">
                   {league.status === 'active' && (
-                    <button className="btn btn-danger" onClick={() => setLeagueStatus('paused')} disabled={!!loading}>
+                    <button className="btn" style={{ backgroundColor: 'var(--warning)', color: 'white' }} onClick={() => setLeagueStatus('paused')} disabled={!!loading}>
                       ⏸ השהה דראפט
                     </button>
                   )}
                   {league.status === 'paused' && (
                     <button className="btn btn-success" onClick={() => setLeagueStatus('active')} disabled={!!loading}>
                       ▶ המשך דראפט
+                    </button>
+                  )}
+                  {isCreator && (
+                    <button className="btn btn-primary" onClick={resetDraft} disabled={!!loading}>
+                      ♻ איפוס דראפט
                     </button>
                   )}
                   {league.status === 'active' && (
@@ -700,14 +705,9 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                   )}
                 </div>
                 {isCreator && (
-                  <div className="mt-6 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
-                    <button className="btn btn-danger" onClick={resetDraft} disabled={!!loading}>
-                      ♻ איפוס דראפט
-                    </button>
-                    <p className="text-sm mt-2" style={{ color: 'var(--muted)' }}>
-                      מוחק את כל המכרזים/הבחירות, מאפס תקציבים וסדר הגרלות ומחזיר לשלב ההקמה. הקבוצות והמנהלים יישארו. פעולה בלתי הפיכה.
-                    </p>
-                  </div>
+                  <p className="text-sm mt-2" style={{ color: 'var(--muted)' }}>
+                    איפוס דראפט מוחק את כל המכרזים/הבחירות, מאפס תקציבים וסדר הגרלות ומחזיר לשלב ההקמה. הקבוצות והמנהלים יישארו. פעולה בלתי הפיכה.
+                  </p>
                 )}
               </>
             ) : (
