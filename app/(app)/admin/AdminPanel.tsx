@@ -41,6 +41,8 @@ interface Props {
 export default function AdminPanel({ initialTab = 'overview', league, teams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators, adminUserIds, currentUserId, snakePicks = [], trades = [] }: Props) {
   const supabase = createClient()
   const isSnake = league?.draft_type === 'snake'
+  // Reset draft is creator-only (route re-checks server-side; this gates the UI).
+  const isCreator = !!league && league.created_by === currentUserId
   // In snake mode the pick-order lottery may run only once. Once any approved
   // team has a priority_rank, re-rolling is blocked (manual edits in the "draft"
   // tab remain the way to adjust the order).
@@ -364,6 +366,28 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     window.location.reload()
   }
 
+  async function resetDraft() {
+    if (!league) return
+    const typed = prompt(
+      `איפוס דראפט ימחק את כל המכרזים/הבחירות, יאפס תקציבים וסדר הגרלות ויחזיר את הליגה לשלב ההקמה.\nהקבוצות והמנהלים יישארו רשומים.\n\nלאישור, הקלד את שם הליגה: ${league.name}`
+    )
+    if (typed === null) return
+    if (typed.trim() !== league.name.trim()) {
+      setMsg('שם הליגה לא תואם — האיפוס בוטל.')
+      return
+    }
+    setLoading('reset')
+    const res = await fetch('/api/admin/reset-draft', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ leagueId: league.id }),
+    })
+    const json = await res.json()
+    if (!res.ok) { setMsg('שגיאה באיפוס: ' + (json.error ?? '')); setLoading(''); return }
+    setMsg('הדראפט אופס. הליגה חזרה לשלב ההקמה.')
+    window.location.reload()
+  }
+
   async function runNominationLottery() {
     if (!league) return
     if (draftStarted) {
@@ -675,6 +699,16 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                     </button>
                   )}
                 </div>
+                {isCreator && (
+                  <div className="mt-6 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+                    <button className="btn btn-danger" onClick={resetDraft} disabled={!!loading}>
+                      ♻ איפוס דראפט
+                    </button>
+                    <p className="text-sm mt-2" style={{ color: 'var(--muted)' }}>
+                      מוחק את כל המכרזים/הבחירות, מאפס תקציבים וסדר הגרלות ומחזיר לשלב ההקמה. הקבוצות והמנהלים יישארו. פעולה בלתי הפיכה.
+                    </p>
+                  </div>
+                )}
               </>
             ) : (
               <p style={{ color: 'var(--muted)' }}>ליגה טרם נוצרה. עבור להגדרות.</p>
