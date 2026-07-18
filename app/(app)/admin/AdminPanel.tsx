@@ -859,8 +859,8 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 <label className="block text-sm font-medium mb-1.5">קבוצה מעלה (מנומינייטור)</label>
                 <select className="input" value={selectedNominator} onChange={e => setSelectedNominator(e.target.value)}>
                   <option value="">בחר קבוצה...</option>
-                  {teams.filter(t => t.approved && !t.is_complete).sort((a, b) => (a.priority_rank ?? 99) - (b.priority_rank ?? 99)).map(t => (
-                    <option key={t.id} value={t.id}>#{t.priority_rank} {t.name}</option>
+                  {teams.filter(t => t.approved && !t.is_complete).sort((a, b) => (a.priority_rank ?? 99) - (b.priority_rank ?? 99)).map((t, i) => (
+                    <option key={t.id} value={t.id}>#{i + 1} {t.name}</option>
                   ))}
                 </select>
               </div>
