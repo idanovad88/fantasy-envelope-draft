@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
   const { count: slotCount } = await supabase.from('auctions').select('id', { count: 'exact', head: true }).eq('league_id', league_id)
   const slotNum = (slotCount ?? 0) + 1
 
-  const { data: auction, error: auctionErr } = await supabase.from('auctions').insert({
+  const { error: auctionErr } = await supabase.from('auctions').insert({
     league_id,
     player_id,
     nominating_team_id: nominatingTeamId,
@@ -64,16 +64,15 @@ export async function POST(req: NextRequest) {
     scheduled_start: now.toISOString(),
     reveal_time: revealTime.toISOString(),
     status: 'active',
-  }).select().single()
+  })
 
   if (auctionErr) return NextResponse.json({ error: auctionErr.message }, { status: 500 })
 
   await supabase.from('players').update({ status: 'on_auction' }).eq('id', player_id)
 
-  // Auto-bid $1 for the nominating team so they always have a bid in
-  if (nominatingTeamId) {
-    await supabase.from('bids').insert({ auction_id: auction.id, team_id: nominatingTeamId, amount: 1 })
-  }
+  // The $1 auto-bid is inserted by the trg_auto_bid_nominating_team trigger on
+  // auction insert. Doing it here as well would collide with the bids
+  // UNIQUE(auction_id, team_id) constraint.
 
   return NextResponse.json({ success: true })
 }
