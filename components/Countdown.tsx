@@ -29,7 +29,7 @@ export default function Countdown({ targetDate, label }: { targetDate: string; l
   return (
     <div className={`flex items-center gap-1 text-center${isUrgent ? ' pulse-glow-danger' : ''}`} style={{ borderRadius: '8px', padding: isUrgent ? '4px 8px' : '0' }}>
       <p className="text-xs mb-2" style={{ color: isUrgent ? 'var(--danger)' : 'var(--muted)' }}>{label}</p>
-      <div className="flex gap-2">
+      <div className="flex gap-2" dir="ltr">
         {cd.hours > 0 && (
           <div className="countdown-digit">
             <span className="text-2xl font-bold tabular-nums" style={{ color: isUrgent ? 'var(--danger)' : undefined }}>
