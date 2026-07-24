@@ -25,16 +25,28 @@ export async function POST(req: NextRequest) {
   const auctionDurationHours = league.auction_duration_hours ?? 1.5
   const revealTime = new Date(now.getTime() + auctionDurationHours * 60 * 60 * 1000)
 
-  const { data: nominatingTeams } = await supabase
-    .from('teams')
-    .select('id')
-    .eq('league_id', league_id)
-    .eq('approved', true)
-    .eq('is_complete', false)
-    .not('priority_rank', 'is', null)
-    .order('priority_rank', { ascending: true })
-    .limit(1)
-  const nominatingTeamId = nominatingTeams?.[0]?.id ?? null
+  // Skip teams that already hold an active or scheduled auction — their
+  // priority_rank rotates only when that auction resolves, so without this the
+  // same team would be handed two nominations in a row.
+  const [{ data: nominatingTeams }, { data: openAuctions }] = await Promise.all([
+    supabase
+      .from('teams')
+      .select('id')
+      .eq('league_id', league_id)
+      .eq('approved', true)
+      .eq('is_complete', false)
+      .not('priority_rank', 'is', null)
+      .order('priority_rank', { ascending: true }),
+    supabase
+      .from('auctions')
+      .select('nominating_team_id')
+      .eq('league_id', league_id)
+      .in('status', ['active', 'pending']),
+  ])
+  const alreadyNominated = new Set(
+    (openAuctions ?? []).map(a => a.nominating_team_id).filter(Boolean) as string[]
+  )
+  const nominatingTeamId = (nominatingTeams ?? []).find(t => !alreadyNominated.has(t.id))?.id ?? null
 
   const { count: slotCount } = await supabase.from('auctions').select('id', { count: 'exact', head: true }).eq('league_id', league_id)
   const slotNum = (slotCount ?? 0) + 1

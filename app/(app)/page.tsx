@@ -2,7 +2,7 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { formatTime, formatDateTime, formatTimeSince, getCurrentSnakePicker, buildPickOverridesMap } from '@/lib/utils'
+import { formatTime, formatDateTime, formatTimeSince, getCurrentSnakePicker, buildPickOverridesMap, getEnvelopeNominationOrder } from '@/lib/utils'
 import { myTeamOr } from '@/lib/team'
 import type { League, Team, Auction, SnakePick } from '@/types'
 import DraftCountdown from '@/components/DraftCountdown'
@@ -228,7 +228,7 @@ export default async function DashboardPage() {
 
   // ── ENVELOPE DRAFT DASHBOARD (unchanged) ─────────────────────────────────────
 
-  const [{ data: featuredAuction }, { data: teams }] =
+  const [{ data: featuredAuction }, { data: teams }, { data: openAuctions }] =
     await Promise.all([
       league
         ? supabase.from('auctions')
@@ -242,6 +242,13 @@ export default async function DashboardPage() {
       league
         ? supabase.from('teams').select('*').eq('league_id', league.id).order('priority_rank', { ascending: true, nullsFirst: false })
         : Promise.resolve({ data: [] }),
+      // Every nomination already made this cycle — active or merely scheduled.
+      league
+        ? supabase.from('auctions')
+            .select('nominating_team_id')
+            .eq('league_id', league.id)
+            .in('status', ['active', 'pending'])
+        : Promise.resolve({ data: [] }),
     ])
 
   const myTeamId = typedMyTeam?.id
@@ -253,6 +260,12 @@ export default async function DashboardPage() {
     : { data: null }
 
   const typedTeams = (teams || []) as Team[]
+
+  const nominationOrder = getEnvelopeNominationOrder(
+    typedTeams,
+    ((openAuctions || []) as { nominating_team_id: string | null }[]).map(a => a.nominating_team_id)
+  )
+  const allTeamsNominated = nominationOrder.length > 0 && !nominationOrder.some(n => n.isNext)
 
   const { data: completedAuctions } = league
     ? await supabase
@@ -423,29 +436,32 @@ export default async function DashboardPage() {
         <div className="card">
           <h2 className="font-bold mb-1">סדר העלאות</h2>
           <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>מי מעלה שחקן למכרז עכשיו</p>
-          {typedTeams.filter(t => !t.is_complete && t.priority_rank !== null).length === 0 ? (
+          {nominationOrder.length === 0 ? (
             <p className="text-sm" style={{ color: 'var(--muted)' }}>הגרלה טרם בוצעה</p>
           ) : (
             <div className="flex flex-col gap-1">
-              {typedTeams
-                .filter(t => !t.is_complete && t.priority_rank !== null)
-                .sort((a, b) => (a.priority_rank ?? 99) - (b.priority_rank ?? 99))
-                .map((team, i) => {
-                  const isFirst = i === 0
-                  const isMe = team.user_id === user?.id
-                  return (
-                    <div key={team.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm"
-                      style={{
-                        background: isMe ? 'rgba(99,102,241,0.1)' : isFirst ? 'rgba(234,179,8,0.08)' : 'var(--background)',
-                        border: isMe ? '1px solid rgba(99,102,241,0.3)' : isFirst ? '1px solid rgba(234,179,8,0.25)' : '1px solid transparent',
-                      }}>
-                      <span className="font-bold w-5 text-center" style={{ color: isFirst ? 'var(--warning)' : 'var(--muted)' }}>{i + 1}</span>
-                      <span className="font-medium flex-1">{team.name}</span>
-                      {isFirst && <span className="badge badge-yellow text-xs">הבא</span>}
-                      {isMe && <span className="badge badge-blue text-xs">אתה</span>}
-                    </div>
-                  )
-                })}
+              {nominationOrder.map(({ team, hasNominated, isNext }, i) => {
+                const isMe = team.user_id === user?.id
+                return (
+                  <div key={team.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm"
+                    style={{
+                      background: isMe ? 'rgba(99,102,241,0.1)' : isNext ? 'rgba(234,179,8,0.08)' : 'var(--background)',
+                      border: isMe ? '1px solid rgba(99,102,241,0.3)' : isNext ? '1px solid rgba(234,179,8,0.25)' : '1px solid transparent',
+                      opacity: hasNominated ? 0.6 : 1,
+                    }}>
+                    <span className="font-bold w-5 text-center" style={{ color: isNext ? 'var(--warning)' : 'var(--muted)' }}>{i + 1}</span>
+                    <span className="font-medium flex-1">{team.name}</span>
+                    {isNext && <span className="badge badge-yellow text-xs">הבא</span>}
+                    {hasNominated && <span className="badge badge-gray text-xs">העלה</span>}
+                    {isMe && <span className="badge badge-blue text-xs">אתה</span>}
+                  </div>
+                )
+              })}
+              {allTeamsNominated && (
+                <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                  כל הקבוצות העלו — ממתין לסיום מכרזים
+                </p>
+              )}
             </div>
           )}
         </div>

@@ -135,6 +135,32 @@ export function getFuturePickNumbersForTeam(
   return result
 }
 
+// Envelope nomination order. A team counts as "already nominated" once it holds
+// an auction that is active or merely scheduled (pending) — its priority_rank
+// only rotates when that auction resolves, so until then it must not be shown as
+// next up. The order itself never moves: "next" is simply the first team in
+// priority_rank order that has not nominated yet, so nominating out of turn does
+// not cost the team that was skipped its turn.
+export function getEnvelopeNominationOrder(
+  teams: Team[],
+  openNominatorIds: Iterable<string | null | undefined>
+): { team: Team; hasNominated: boolean; isNext: boolean }[] {
+  const nominated = new Set<string>()
+  for (const id of openNominatorIds) if (id) nominated.add(id)
+
+  const ordered = teams
+    .filter(t => !t.is_complete && t.priority_rank !== null)
+    .sort((a, b) => (a.priority_rank ?? 99) - (b.priority_rank ?? 99))
+
+  const nextId = ordered.find(t => !nominated.has(t.id))?.id ?? null
+
+  return ordered.map(team => ({
+    team,
+    hasNominated: nominated.has(team.id),
+    isNext: team.id === nextId,
+  }))
+}
+
 // Round/pick-in-round breakdown for a given overall pick number (display helper).
 export function describePick(overallPickNumber: number, numTeams: number): { round: number; pickInRound: number } {
   return {

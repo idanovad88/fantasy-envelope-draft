@@ -55,7 +55,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
     await Promise.all([
       supabase.from('teams').select('*').eq('league_id', lid).order('priority_rank', { ascending: true, nullsFirst: false }),
       !isSnake ? supabase.from('auctions').select('*, player:players(*), bids(id)').eq('league_id', lid).eq('status', 'active').order('scheduled_start', { ascending: false }).limit(1).maybeSingle() : Promise.resolve({ data: null }),
-      !isSnake ? supabase.from('auctions').select('id, scheduled_start, reveal_time, player:players(name)').eq('league_id', lid).eq('status', 'pending').order('scheduled_start', { ascending: true }) : Promise.resolve({ data: [] }),
+      !isSnake ? supabase.from('auctions').select('id, scheduled_start, reveal_time, nominating_team_id, player:players(name)').eq('league_id', lid).eq('status', 'pending').order('scheduled_start', { ascending: true }) : Promise.resolve({ data: [] }),
       supabase.from('players').select('id, name, status, ranking, position').eq('league_id', lid).order('ranking', { ascending: true }),
       !isSnake ? supabase.from('auctions').select('id, scheduled_start, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)').eq('league_id', lid).eq('status', 'completed').order('scheduled_start', { ascending: false }).limit(50) : Promise.resolve({ data: [] }),
       supabase.from('league_creator_whitelist').select('email').order('created_at', { ascending: true }),
@@ -97,7 +97,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         league={league as League | null}
         teams={(teams || []) as Team[]}
         activeAuction={activeAuction as (Auction & { player: { name: string }; bids: { id: string }[] }) | null}
-        scheduledAuctions={(scheduledAuctions || []) as unknown as { id: string; scheduled_start: string; reveal_time: string; player: { name: string } | null }[]}
+        scheduledAuctions={(scheduledAuctions || []) as unknown as { id: string; scheduled_start: string; reveal_time: string; nominating_team_id: string | null; player: { name: string } | null }[]}
         players={players || []}
         pastAuctions={(pastAuctions || []) as unknown as { id: string; scheduled_start: string; winning_bid: number | null; player: { name: string } | null; winning_team: { name: string } | null }[]}
         leagueCreators={(leagueCreators || []).map(r => r.email)}
