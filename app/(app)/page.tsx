@@ -263,7 +263,8 @@ export default async function DashboardPage() {
 
   const nominationOrder = getEnvelopeNominationOrder(
     typedTeams,
-    ((openAuctions || []) as { nominating_team_id: string | null }[]).map(a => a.nominating_team_id)
+    ((openAuctions || []) as { nominating_team_id: string | null }[]).map(a => a.nominating_team_id),
+    typedLeague?.players_per_team
   )
   const allTeamsNominated = nominationOrder.length > 0 && !nominationOrder.some(n => n.isNext)
 
@@ -447,21 +448,20 @@ export default async function DashboardPage() {
                     style={{
                       background: isMe ? 'rgba(99,102,241,0.1)' : isNext ? 'rgba(234,179,8,0.08)' : 'var(--background)',
                       border: isMe ? '1px solid rgba(99,102,241,0.3)' : isNext ? '1px solid rgba(234,179,8,0.25)' : '1px solid transparent',
+                      // Dimmed while its auction is open; no badge — "הבא" alone
+                      // carries the turn.
                       opacity: hasNominated ? 0.6 : 1,
                     }}>
                     <span className="font-bold w-5 text-center" style={{ color: isNext ? 'var(--warning)' : 'var(--muted)' }}>{i + 1}</span>
                     <span className="font-medium flex-1">{team.name}</span>
                     {isNext && <span className="badge badge-yellow text-xs">הבא</span>}
-                    {/* Skipped only while its auction is open — once that resolves the
-                        team rotates to the bottom and comes back around. */}
-                    {hasNominated && <span className="badge badge-gray text-xs">מכרז פתוח</span>}
                     {isMe && <span className="badge badge-blue text-xs">אתה</span>}
                   </div>
                 )
               })}
               {allTeamsNominated && (
                 <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
-                  לכל הקבוצות יש מכרז פתוח — התור יתחדש כשייסגרו
+                  ממתין לסגירת מכרזים
                 </p>
               )}
             </div>

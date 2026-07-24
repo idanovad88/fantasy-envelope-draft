@@ -191,7 +191,8 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   // on even though its priority_rank only rotates when that auction resolves.
   const nominationOrder = getEnvelopeNominationOrder(
     teams.filter(t => t.approved),
-    [activeAuction?.nominating_team_id, ...scheduledAuctions.map(a => a.nominating_team_id)]
+    [activeAuction?.nominating_team_id, ...scheduledAuctions.map(a => a.nominating_team_id)],
+    league?.players_per_team
   )
   const nextNominatorId = nominationOrder.find(n => n.isNext)?.team.id ?? ''
 
@@ -914,9 +915,11 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 <label className="block text-sm font-medium mb-1.5">קבוצה מעלה (מנומינייטור)</label>
                 <select className="input" value={selectedNominator} onChange={e => setSelectedNominator(e.target.value)}>
                   <option value="">בחר קבוצה...</option>
-                  {nominationOrder.map(({ team, hasNominated, isNext }, i) => (
+                  {/* Only teams eligible to nominate are listed: not complete,
+                      and able to afford the $1 auto-bid. */}
+                  {nominationOrder.map(({ team, isNext }, i) => (
                     <option key={team.id} value={team.id}>
-                      #{i + 1} {team.name}{isNext ? ' — הבא' : hasNominated ? ' — מכרז פתוח' : ''}
+                      #{i + 1} {team.name}{isNext ? ' — הבא' : ''}
                     </option>
                   ))}
                 </select>

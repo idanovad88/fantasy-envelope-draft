@@ -110,22 +110,27 @@ A team can have **one optional assistant manager** (`teams.assistant_user_id`) w
 
 `priority_rank` on teams determines nomination order, but **whose turn it is now is derived from the nominations actually made**, not from `priority_rank` alone. `priority_rank` only rotates when an auction *resolves* (`demote_nomination_rank()` inside `resolve_auction()`), so between nominating and the reveal — often days, when auctions are queued ahead — the team that already nominated would otherwise still read as "next".
 
-**Always use `getEnvelopeNominationOrder(teams, openNominatorIds)` from `lib/utils.ts`** — never sort by `priority_rank` directly for the nomination turn:
+**Always use `getEnvelopeNominationOrder(teams, openNominatorIds, playersPerTeam)` from `lib/utils.ts`** — never sort by `priority_rank` directly for the nomination turn:
 
 ```ts
 // openNominatorIds = nominating_team_id of every auction with status active | pending
-getEnvelopeNominationOrder(teams, openNominatorIds)
+getEnvelopeNominationOrder(teams, openNominatorIds, league.players_per_team)
   // → { team, hasNominated, isNext }[]
 ```
 
-- Filters out completed teams (`is_complete`, and `priority_rank === null`, which `remove_complete_team_from_priority()` sets on completion) — **a team that filled its roster leaves the rotation permanently and is skipped**.
+**Only teams eligible to nominate are in the returned list.** Two things drop a team out entirely:
+
+1. **Roster complete** — `is_complete`, or `priority_rank === null` which `remove_complete_team_from_priority()` sets on completion. Permanent.
+2. **Cannot afford the $1 auto-bid** — `getMaxBid(budget_remaining, player_count, playersPerTeam) < 1`. Nominating forces a $1 bid via `trg_auto_bid_nominating_team`, so a team that cannot cover it must not be handed a turn. `getMaxBid` already reserves $1 per remaining slot, so this is exactly "has budget left to spend". Omitting `playersPerTeam` skips this check.
+
+Beyond that:
 - Sorts by `priority_rank` ASC. **The order itself never moves**: `isNext` is simply the first team that has not nominated yet, so nominating out of turn does not cost the skipped team its turn.
+- A team with an open auction stays in the list, just dimmed and never `isNext`. **No badge** — "הבא" is the only tag; earlier "העלה" / "מכרז פתוח" labels read as permanent states and were removed. The skip lasts only while the auction is open; once it resolves the team rotates to the bottom of `priority_rank` and comes back around.
 - Consumers: the dashboard "סדר העלאות" card (`app/(app)/page.tsx`) and the admin nominator dropdown, which also pre-selects `isNext`.
-- A skipped team is badged **"מכרז פתוח"**, not "העלה" — the skip lasts only while its auction is open. When that auction resolves the team rotates to the bottom of `priority_rank` and comes back around. Only completing a roster removes a team permanently.
 
 Because it is derived it self-heals: `cancel-auction` deletes the auction row, so the team becomes "next" again; and when an auction resolves, the DB rotation and the derived order converge in the same step.
 
-Server-side, `/api/admin/queue-auction` rejects a `nominating_team_id` that is not in the league, not approved, or already complete — the `trg_auto_bid_nominating_team` trigger would otherwise insert a $1 bid that team can never honour. `/api/nominate` (not currently mounted in any page) picks the lowest `priority_rank` team with no open auction.
+Server-side, `/api/admin/queue-auction` rejects a `nominating_team_id` that is not in the league, not approved, already complete, or unable to afford the $1 auto-bid — so **an admin cannot nominate on behalf of a finished or broke team even by crafting the request**. `/api/nominate` (not currently mounted in any page) applies the same eligibility test when auto-picking the nominator.
 
 ### Snake draft pick logic
 
