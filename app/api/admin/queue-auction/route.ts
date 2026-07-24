@@ -1,4 +1,5 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { getMaxBid } from '@/lib/utils'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(req: NextRequest) {
@@ -32,7 +33,7 @@ export async function POST(req: NextRequest) {
   if (nominating_team_id) {
     const { data: nominator } = await supabase
       .from('teams')
-      .select('name, approved, is_complete')
+      .select('name, approved, is_complete, budget_remaining, player_count')
       .eq('id', nominating_team_id)
       .eq('league_id', league_id)
       .maybeSingle()
@@ -40,6 +41,10 @@ export async function POST(req: NextRequest) {
     if (!nominator.approved) return NextResponse.json({ error: 'הקבוצה המעלה לא אושרה' }, { status: 400 })
     if (nominator.is_complete) {
       return NextResponse.json({ error: `${nominator.name} השלימה את הסגל ולא מעלה שחקנים יותר` }, { status: 400 })
+    }
+    // Nominating forces a $1 auto-bid, so the team must be able to afford one.
+    if (getMaxBid(nominator.budget_remaining, nominator.player_count, league.players_per_team) < 1) {
+      return NextResponse.json({ error: `ל${nominator.name} אין תקציב פנוי להעלאת שחקן` }, { status: 400 })
     }
   }
 

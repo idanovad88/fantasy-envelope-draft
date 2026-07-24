@@ -1,4 +1,5 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { getMaxBid } from '@/lib/utils'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(req: NextRequest) {
@@ -27,11 +28,12 @@ export async function POST(req: NextRequest) {
 
   // Skip teams that already hold an active or scheduled auction — their
   // priority_rank rotates only when that auction resolves, so without this the
-  // same team would be handed two nominations in a row.
+  // same team would be handed two nominations in a row. Teams that cannot
+  // afford the $1 auto-bid are skipped too.
   const [{ data: nominatingTeams }, { data: openAuctions }] = await Promise.all([
     supabase
       .from('teams')
-      .select('id')
+      .select('id, budget_remaining, player_count')
       .eq('league_id', league_id)
       .eq('approved', true)
       .eq('is_complete', false)
@@ -46,7 +48,10 @@ export async function POST(req: NextRequest) {
   const alreadyNominated = new Set(
     (openAuctions ?? []).map(a => a.nominating_team_id).filter(Boolean) as string[]
   )
-  const nominatingTeamId = (nominatingTeams ?? []).find(t => !alreadyNominated.has(t.id))?.id ?? null
+  const nominatingTeamId = (nominatingTeams ?? []).find(t =>
+    !alreadyNominated.has(t.id) &&
+    getMaxBid(t.budget_remaining, t.player_count, league.players_per_team) >= 1
+  )?.id ?? null
 
   const { count: slotCount } = await supabase.from('auctions').select('id', { count: 'exact', head: true }).eq('league_id', league_id)
   const slotNum = (slotCount ?? 0) + 1
