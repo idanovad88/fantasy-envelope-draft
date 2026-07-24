@@ -108,15 +108,24 @@ A team can have **one optional assistant manager** (`teams.assistant_user_id`) w
 
 ### Nomination turn logic (envelope only)
 
-`priority_rank` on teams determines nomination order. The team with the lowest `priority_rank` among approved, non-complete teams is the current nominator. This is computed in `app/(app)/players/page.tsx`:
+`priority_rank` on teams determines nomination order, but **whose turn it is now is derived from the nominations actually made**, not from `priority_rank` alone. `priority_rank` only rotates when an auction *resolves* (`demote_nomination_rank()` inside `resolve_auction()`), so between nominating and the reveal — often days, when auctions are queued ahead — the team that already nominated would otherwise still read as "next".
+
+**Always use `getEnvelopeNominationOrder(teams, openNominatorIds)` from `lib/utils.ts`** — never sort by `priority_rank` directly for the nomination turn:
 
 ```ts
-const currentNominatorId = allTeams?.[0]?.id ?? null  // sorted by priority_rank ASC
-const isMyTurn = typedMyTeam?.id === currentNominatorId && !typedMyTeam.is_complete
-const canNominate = isMyTurn && league.status === 'active' && !activeAuction
+// openNominatorIds = nominating_team_id of every auction with status active | pending
+getEnvelopeNominationOrder(teams, openNominatorIds)
+  // → { team, hasNominated, isNext }[]
 ```
 
-The API route `/api/nominate` re-validates this server-side before creating an auction.
+- Filters out completed teams (`is_complete`, and `priority_rank === null`, which `remove_complete_team_from_priority()` sets on completion) — **a team that filled its roster leaves the rotation permanently and is skipped**.
+- Sorts by `priority_rank` ASC. **The order itself never moves**: `isNext` is simply the first team that has not nominated yet, so nominating out of turn does not cost the skipped team its turn.
+- Consumers: the dashboard "סדר העלאות" card (`app/(app)/page.tsx`) and the admin nominator dropdown, which also pre-selects `isNext`.
+- A skipped team is badged **"מכרז פתוח"**, not "העלה" — the skip lasts only while its auction is open. When that auction resolves the team rotates to the bottom of `priority_rank` and comes back around. Only completing a roster removes a team permanently.
+
+Because it is derived it self-heals: `cancel-auction` deletes the auction row, so the team becomes "next" again; and when an auction resolves, the DB rotation and the derived order converge in the same step.
+
+Server-side, `/api/admin/queue-auction` rejects a `nominating_team_id` that is not in the league, not approved, or already complete — the `trg_auto_bid_nominating_team` trigger would otherwise insert a $1 bid that team can never honour. `/api/nominate` (not currently mounted in any page) picks the lowest `priority_rank` team with no open auction.
 
 ### Snake draft pick logic
 
@@ -169,7 +178,16 @@ Teams can trade **future draft picks** and **already-drafted players** in packag
 - `priority_rank` — nomination turn order. After each auction, the nominating team is demoted to the bottom (regardless of outcome). Managed by `demote_nomination_rank()` Supabase function. In snake drafts, `priority_rank` is reused as pick order but is never mutated during the draft.
 - `tiebreak_rank` — priority order for breaking equal bids. When multiple teams submit the same highest bid, the team with the lowest `tiebreak_rank` wins. That team is then demoted to the bottom of `tiebreak_rank`. Managed by `demote_tiebreak_rank()` Supabase function. Set via the lottery in the admin panel. Not used in snake drafts.
 
-**These two orders are completely independent** — winning an auction never affects `priority_rank`, and nominating never affects `tiebreak_rank`.
+**These two orders are completely independent** — winning an auction never affects `priority_rank`, and nominating never affects `tiebreak_rank`. Audited end to end; the four places the two could leak into each other, and what each must look like:
+
+| Where | Rule |
+|---|---|
+| `resolve_auction()` nomination rotation | `demote_nomination_rank(nominating_team)` — touches `priority_rank` only, every auction, win or lose |
+| `resolve_auction()` tiebreak penalty | `demote_tiebreak_rank(winning_team)` — touches `tiebreak_rank` only, and only when the win came from a tie |
+| Tie winner selection | `ORDER BY t.tiebreak_rank ASC NULLS LAST` — **never** `COALESCE(tiebreak_rank, priority_rank)`. The fallback let a team's nomination position decide a tie whenever its `tiebreak_rank` was unset. |
+| `demote_priority()` (legacy alias) | Forwards to `demote_nomination_rank()`. It historically demoted `tiebreak_rank`, which is how the two got crossed in the first place. |
+
+App-side there is no coupling: every `tiebreak_rank` read sorts or displays `tiebreak_rank` alone, and nomination turn goes exclusively through `getEnvelopeNominationOrder()`. The admin lottery writes each column in its own action.
 
 **Auto-bid:** When any auction is created, a DB trigger (`trg_auto_bid_nominating_team`) automatically inserts a $1 bid for the nominating team. This means:
 - If no other team bids, the nominating team wins at $1.
@@ -180,6 +198,17 @@ Teams can trade **future draft picks** and **already-drafted players** in packag
 - `demote_tiebreak_rank(team_id, league_id)` — moves team to bottom of `tiebreak_rank`
 - `resolve_auction(auction_id)` — determines winner, assigns player, runs both demotions as needed
 - `auto_bid_nominating_team()` — trigger function that inserts the $1 auto-bid on auction insert
+
+**Completed teams are invisible to auction resolution.** `resolve_auction()` computes the winning amount with `MAX(amount)` filtered by `t.is_complete = FALSE`, matching the filter used to pick the winner. Both filters must stay in sync: when they disagreed, a completed team's top bid produced a NULL winner and the player was still marked `drafted` with `drafted_by_team_id = NULL` — gone from the pool with no owner.
+
+⚠️ **`migration_auction_priority_tiebreak.sql` and `migration_auto_bid_trigger.sql` (commit fd9018f) were never applied to the production database.** Until `migration_fix_nomination_rotation.sql` was run, the live `resolve_auction()` was the `migration_roster_slots.sql` version, which called `demote_priority()` for nomination rotation — and `demote_priority()` demotes `tiebreak_rank`. So `priority_rank` never rotated and every nomination silently demoted the nominator's tiebreak priority. Confirmed via `SELECT reason, count(*) FROM priority_log GROUP BY reason` returning only `tie_break_demotion`.
+
+**Never assume a migration file in this directory has been run.** Check the live body before replacing any function:
+```sql
+SELECT prosrc FROM pg_proc WHERE proname = 'resolve_auction';
+```
+
+**DB migration:** `supabase/migration_fix_nomination_rotation.sql` — self-contained and idempotent. Creates `demote_nomination_rank()` / `demote_tiebreak_rank()`, repoints `demote_priority()` at the nomination rotation, replaces `resolve_auction()` (correct `MAX` filter, NULL-winner guard, `assign_roster_slot()` preserved, the two rank orders finally independent), and creates the `trg_auto_bid_nominating_team` trigger. Supersedes `migration_auction_priority_tiebreak.sql` and `migration_auto_bid_trigger.sql` — do not run those.
 
 ### Roster slots
 

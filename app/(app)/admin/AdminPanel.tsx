@@ -2,12 +2,12 @@
 
 import React, { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { formatDateTime, formatTime, getSnakeTeamForPick, isSnakeRoundReversed } from '@/lib/utils'
+import { formatDateTime, formatTime, getSnakeTeamForPick, isSnakeRoundReversed, getEnvelopeNominationOrder } from '@/lib/utils'
 import type { League, Team, Auction, SnakePick, TradeStatus } from '@/types'
 import ImportPlayers from './ImportPlayers'
 
 type PastAuction = { id: string; scheduled_start: string; winning_bid: number | null; player: { name: string } | null; winning_team: { name: string } | null }
-type ScheduledAuction = { id: string; scheduled_start: string; reveal_time: string; player: { name: string } | null }
+type ScheduledAuction = { id: string; scheduled_start: string; reveal_time: string; nominating_team_id: string | null; player: { name: string } | null }
 type SnakePickFull = SnakePick & { player: { name: string; position: string | null } | null; team: { name: string } | null }
 
 export type AdminTradeView = {
@@ -186,11 +186,21 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     return new Date(activeAuction.reveal_time).toISOString().slice(0, 16)
   })
 
+  // Nomination order, derived from the nominations actually made: a team holding
+  // an active or scheduled auction has already nominated, so the turn has moved
+  // on even though its priority_rank only rotates when that auction resolves.
+  const nominationOrder = getEnvelopeNominationOrder(
+    teams.filter(t => t.approved),
+    [activeAuction?.nominating_team_id, ...scheduledAuctions.map(a => a.nominating_team_id)]
+  )
+  const nextNominatorId = nominationOrder.find(n => n.isNext)?.team.id ?? ''
+
   // Auction nomination state
   const [selectedPlayer, setSelectedPlayer] = useState('')
   const [playerSearch, setPlayerSearch] = useState('')
   const [showPlayerResults, setShowPlayerResults] = useState(false)
-  const [selectedNominator, setSelectedNominator] = useState('')
+  // Pre-select whoever is up next; the admin can still override manually.
+  const [selectedNominator, setSelectedNominator] = useState(nextNominatorId)
   const [nominationTime, setNominationTime] = useState(() => {
     const revealTimes: string[] = []
     if (activeAuction?.reveal_time) revealTimes.push(activeAuction.reveal_time)
@@ -796,13 +806,23 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
             <div className="card" style={{ borderColor: 'var(--muted)', opacity: 0.9 }}>
               <h2 className="font-bold mb-3">⏰ תור מכרזים ({scheduledAuctions.length})</h2>
               <div className="flex flex-col gap-2">
-                {scheduledAuctions.map((a, i) => (
+                {scheduledAuctions.map((a, i) => {
+                  const nominator = teams.find(t => t.id === a.nominating_team_id)
+                  return (
                   <div key={a.id} className="flex items-center justify-between py-2 border-t text-sm" style={{ borderColor: 'var(--border)' }}>
                     <div>
                       <span className="font-medium">{i + 1}. {a.player?.name ?? '—'}</span>
                       <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
                         פתיחה: {formatDateTime(a.scheduled_start)} · סגירה: {formatDateTime(a.reveal_time)}
+                        {nominator && ` · מעלה: ${nominator.name}`}
                       </p>
+                      {/* The nominator finished its roster after this was queued — its
+                          turn is gone, so the queued nomination is stale. */}
+                      {nominator?.is_complete && (
+                        <p className="text-xs mt-0.5" style={{ color: 'var(--danger)' }}>
+                          ⚠️ {nominator.name} השלימה את הסגל — כדאי לבטל ולהעלות מחדש
+                        </p>
+                      )}
                     </div>
                     <button
                       className="text-xs px-2 py-1 rounded flex-shrink-0"
@@ -813,7 +833,8 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                       {loading === 'cancel_' + a.id ? '...' : '✕'}
                     </button>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -893,8 +914,10 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 <label className="block text-sm font-medium mb-1.5">קבוצה מעלה (מנומינייטור)</label>
                 <select className="input" value={selectedNominator} onChange={e => setSelectedNominator(e.target.value)}>
                   <option value="">בחר קבוצה...</option>
-                  {teams.filter(t => t.approved && !t.is_complete).sort((a, b) => (a.priority_rank ?? 99) - (b.priority_rank ?? 99)).map((t, i) => (
-                    <option key={t.id} value={t.id}>#{i + 1} {t.name}</option>
+                  {nominationOrder.map(({ team, hasNominated, isNext }, i) => (
+                    <option key={team.id} value={team.id}>
+                      #{i + 1} {team.name}{isNext ? ' — הבא' : hasNominated ? ' — מכרז פתוח' : ''}
+                    </option>
                   ))}
                 </select>
               </div>

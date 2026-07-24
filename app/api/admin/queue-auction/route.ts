@@ -26,6 +26,23 @@ export async function POST(req: NextRequest) {
   if (!player) return NextResponse.json({ error: 'שחקן לא נמצא' }, { status: 404 })
   if (player.status !== 'available') return NextResponse.json({ error: 'שחקן לא זמין' }, { status: 400 })
 
+  // A team that finished its roster is out of the nomination rotation for good —
+  // it must not be handed a turn, and the $1 auto-bid the insert trigger would
+  // add for it can never be honoured.
+  if (nominating_team_id) {
+    const { data: nominator } = await supabase
+      .from('teams')
+      .select('name, approved, is_complete')
+      .eq('id', nominating_team_id)
+      .eq('league_id', league_id)
+      .maybeSingle()
+    if (!nominator) return NextResponse.json({ error: 'קבוצה מעלה לא נמצאה בליגה' }, { status: 400 })
+    if (!nominator.approved) return NextResponse.json({ error: 'הקבוצה המעלה לא אושרה' }, { status: 400 })
+    if (nominator.is_complete) {
+      return NextResponse.json({ error: `${nominator.name} השלימה את הסגל ולא מעלה שחקנים יותר` }, { status: 400 })
+    }
+  }
+
   const scheduledStart = new Date(scheduled_start)
   if (isNaN(scheduledStart.getTime())) return NextResponse.json({ error: 'שעת פתיחה לא תקינה' }, { status: 400 })
 
