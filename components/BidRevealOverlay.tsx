@@ -105,7 +105,7 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
   const [chosenVarGif, setChosenVarGif] = useState<string | null>(null)
   const [bids, setBids] = useState<BidWithTeam[]>([])
   const [shownCount, setShownCount] = useState(0)
-  const [winner, setWinner] = useState<{ teamName: string; amount: number; avatarUrl: string | null } | null>(null)
+  const [winner, setWinner] = useState<{ teamId: string; teamName: string; amount: number; avatarUrl: string | null } | null>(null)
   const [playerName, setPlayerName] = useState('')
   const [nominatingTeamId, setNominatingTeamId] = useState<string | null>(null)
   const [muted, setMuted] = useState(false)
@@ -178,14 +178,15 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
         .eq('auction_id', auctionId),
       supabase
         .from('auctions')
-        .select('player:players(name), nominating_team_id, nominating_team:teams!nominating_team_id(name), tie_broken_by_priority')
+        .select('player:players(name), nominating_team_id, nominating_team:teams!nominating_team_id(name, avatar_url), tie_broken_by_priority')
         .eq('id', auctionId)
         .single(),
     ])
 
     const pName = (auctionMeta?.player as unknown as { name: string } | null)?.name ?? 'שחקן'
     const nomTeamId = auctionMeta?.nominating_team_id ?? null
-    const nomTeamName = (auctionMeta?.nominating_team as unknown as { name: string } | null)?.name ?? null
+    const nomTeam = auctionMeta?.nominating_team as unknown as { name: string; avatar_url: string | null } | null
+    const nomTeamName = nomTeam?.name ?? null
     const dbTieBroken = (auctionMeta as { tie_broken_by_priority?: boolean } | null)?.tie_broken_by_priority ?? false
 
     let allBids = (bidsData ?? []) as unknown as BidWithTeam[]
@@ -196,7 +197,7 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
         id: 'default-' + nomTeamId,
         team_id: nomTeamId,
         amount: 1,
-        team: { name: nomTeamName, avatar_url: null },
+        team: { name: nomTeamName, avatar_url: nomTeam?.avatar_url ?? null },
       }]
     }
 
@@ -211,6 +212,7 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
     const winnerBid = shuffled.find(b => b.team_id === winningTeamId) ?? null
     const winnerInfo = winnerBid
       ? {
+          teamId: winnerBid.team_id,
           teamName: winnerBid.team?.name ?? '—',
           amount: winningBid ?? winnerBid.amount,
           avatarUrl: winnerBid.team?.avatar_url ?? null,
@@ -461,12 +463,58 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
           {/* Winner reveal */}
           {phase === 'winner' && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', width: '100%' }}>
+              {/* Winner card first: the avatar and the amount are the payoff, so they must
+                  never sit below the fold behind a list of losing bids. */}
+              {winner && (
+                <div
+                  ref={winnerCardRef}
+                  style={{
+                    width: '100%', maxWidth: '420px',
+                    background: 'rgba(34,197,94,0.15)',
+                    border: '2px solid var(--success)',
+                    borderRadius: '16px',
+                    padding: '20px 24px 24px',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px',
+                    animation: 'winnerPop 0.6s cubic-bezier(0.34,1.56,0.64,1)',
+                    boxShadow: '0 0 40px rgba(34,197,94,0.35)',
+                  }}
+                >
+                  <span style={{ fontSize: '30px', lineHeight: 1 }}>🏆</span>
+
+                  <div style={{
+                    borderRadius: '50%', padding: '4px',
+                    background: 'var(--success)',
+                    boxShadow: '0 0 24px rgba(34,197,94,0.6)',
+                    display: 'flex',
+                  }}>
+                    <Avatar url={winner.avatarUrl} name={winner.teamName} size={128} />
+                  </div>
+
+                  <span style={{ color: 'var(--success)', fontWeight: 800, fontSize: '24px', textAlign: 'center' }}>
+                    {winner.teamName}
+                  </span>
+
+                  <div style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px',
+                    background: 'rgba(0,0,0,0.35)',
+                    border: '1px solid var(--success)',
+                    borderRadius: '12px',
+                    padding: '8px 28px',
+                  }}>
+                    <span style={{ color: 'var(--muted)', fontSize: '11px', letterSpacing: '0.05em' }}>ההצעה הזוכה</span>
+                    <span style={{ color: '#fff', fontWeight: 800, fontSize: '40px', lineHeight: 1.1 }} dir="ltr">
+                      ${winner.amount}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Losing bids (dimmed) — two columns, same reason as the reveal list */}
               <div style={{
                 width: '100%', maxWidth: '420px', marginBottom: '8px',
                 display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px',
               }}>
-                {bids.filter(b => b.team?.name !== winner?.teamName).map(bid => (
+                {bids.filter(b => b.team_id !== winner?.teamId).map(bid => (
                   <div
                     key={bid.id}
                     style={{
@@ -493,30 +541,6 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
                 ))}
               </div>
 
-              {/* Winner card */}
-              {winner && (
-                <div
-                  ref={winnerCardRef}
-                  style={{
-                    width: '100%', maxWidth: '420px',
-                    background: 'rgba(34,197,94,0.15)',
-                    border: '2px solid var(--success)',
-                    borderRadius: '16px',
-                    padding: '24px',
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px',
-                    animation: 'winnerPop 0.6s cubic-bezier(0.34,1.56,0.64,1)',
-                  }}
-                >
-                  <Avatar url={winner.avatarUrl} name={winner.teamName} size={96} />
-                  <span style={{ fontSize: '32px' }}>🏆</span>
-                  <span style={{ color: 'var(--success)', fontWeight: 800, fontSize: '22px', textAlign: 'center' }}>
-                    {winner.teamName}
-                  </span>
-                  <span style={{ color: '#fff', fontWeight: 700, fontSize: '28px' }}>
-                    ${winner.amount}
-                  </span>
-                </div>
-              )}
             </div>
           )}
 
