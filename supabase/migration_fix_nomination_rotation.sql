@@ -122,9 +122,9 @@ BEGIN
   ELSE
     -- Tie: team with the lowest tiebreak_rank (= highest priority) wins.
     -- tiebreak_rank ONLY — never fall back to priority_rank. The old version
-    -- ordered by COALESCE(tiebreak_rank, priority_rank), which let a team's
-    -- nomination position decide a tie whenever its tiebreak_rank was unset.
-    -- The two orders must stay completely independent.
+    -- coalesced the two, which let a team's nomination position decide a tie
+    -- whenever its tiebreak_rank was unset. The two orders must stay
+    -- completely independent.
     v_tie_broken := TRUE;
     SELECT b.team_id INTO v_winning_team_id
     FROM bids b JOIN teams t ON t.id = b.team_id
