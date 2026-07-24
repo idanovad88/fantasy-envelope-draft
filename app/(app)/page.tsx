@@ -452,14 +452,16 @@ export default async function DashboardPage() {
                     <span className="font-bold w-5 text-center" style={{ color: isNext ? 'var(--warning)' : 'var(--muted)' }}>{i + 1}</span>
                     <span className="font-medium flex-1">{team.name}</span>
                     {isNext && <span className="badge badge-yellow text-xs">הבא</span>}
-                    {hasNominated && <span className="badge badge-gray text-xs">העלה</span>}
+                    {/* Skipped only while its auction is open — once that resolves the
+                        team rotates to the bottom and comes back around. */}
+                    {hasNominated && <span className="badge badge-gray text-xs">מכרז פתוח</span>}
                     {isMe && <span className="badge badge-blue text-xs">אתה</span>}
                   </div>
                 )
               })}
               {allTeamsNominated && (
                 <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
-                  כל הקבוצות העלו — ממתין לסיום מכרזים
+                  לכל הקבוצות יש מכרז פתוח — התור יתחדש כשייסגרו
                 </p>
               )}
             </div>

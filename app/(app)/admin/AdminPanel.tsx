@@ -916,7 +916,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                   <option value="">בחר קבוצה...</option>
                   {nominationOrder.map(({ team, hasNominated, isNext }, i) => (
                     <option key={team.id} value={team.id}>
-                      #{i + 1} {team.name}{isNext ? ' — הבא' : hasNominated ? ' ✓ העלה' : ''}
+                      #{i + 1} {team.name}{isNext ? ' — הבא' : hasNominated ? ' — מכרז פתוח' : ''}
                     </option>
                   ))}
                 </select>

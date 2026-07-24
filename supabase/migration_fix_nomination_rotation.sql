@@ -120,13 +120,17 @@ BEGIN
     FROM bids b JOIN teams t ON t.id = b.team_id
     WHERE b.auction_id = p_auction_id AND b.amount = v_max_bid AND t.is_complete = FALSE;
   ELSE
-    -- Tie: team with the lowest tiebreak_rank (= highest priority) wins
+    -- Tie: team with the lowest tiebreak_rank (= highest priority) wins.
+    -- tiebreak_rank ONLY — never fall back to priority_rank. The old version
+    -- ordered by COALESCE(tiebreak_rank, priority_rank), which let a team's
+    -- nomination position decide a tie whenever its tiebreak_rank was unset.
+    -- The two orders must stay completely independent.
     v_tie_broken := TRUE;
     SELECT b.team_id INTO v_winning_team_id
     FROM bids b JOIN teams t ON t.id = b.team_id
     WHERE b.auction_id = p_auction_id AND b.amount = v_max_bid
       AND t.is_complete = FALSE
-    ORDER BY COALESCE(t.tiebreak_rank, t.priority_rank) ASC NULLS LAST
+    ORDER BY t.tiebreak_rank ASC NULLS LAST
     LIMIT 1;
   END IF;
 
