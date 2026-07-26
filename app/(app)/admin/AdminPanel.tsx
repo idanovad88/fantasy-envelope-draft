@@ -550,16 +550,6 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     window.location.reload()
   }
 
-  async function revealAuction(auctionId: string) {
-    setLoading('reveal_' + auctionId)
-    await supabase.rpc('resolve_auction', { p_auction_id: auctionId })
-    // Activate next scheduled auction if its start time has arrived
-    await fetch('/api/admin/activate-pending-auction', { method: 'POST' })
-    setMsg('תוצאות נחשפו והשחקן הועבר לקבוצה הזוכה')
-    setLoading('')
-    window.location.reload()
-  }
-
   async function deleteLeague() {
     if (!league) return
     if (!confirm(`למחוק לצמיתות את הליגה "${league.name}"?\n\nכל הקבוצות, השחקנים, המכרזים וההגדרות יימחקו ולא ניתן יהיה לשחזר אותם.`)) return
@@ -791,10 +781,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
               </div>
 
               <div className="flex gap-2">
-                <button className="btn btn-primary flex-1" onClick={() => revealAuction(activeAuction.id)} disabled={!!loading}>
-                  {loading === 'reveal_' + activeAuction.id ? 'מסדר...' : '👁 חשוף תוצאות'}
-                </button>
-                <button className="btn btn-outline flex-shrink-0" onClick={() => cancelAuction(activeAuction.id)} disabled={!!loading}
+                <button className="btn btn-outline flex-1" onClick={() => cancelAuction(activeAuction.id)} disabled={!!loading}
                   style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}>
                   {loading === 'cancel_' + activeAuction.id ? '...' : '✕ בטל מכרז'}
                 </button>
