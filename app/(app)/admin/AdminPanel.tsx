@@ -750,15 +750,6 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 חשיפה: {formatDateTime(activeAuction.reveal_time)}
               </p>
 
-              {/* Bid count only — amounts hidden until reveal */}
-              <div className="mb-3">
-                <p className="text-sm" style={{ color: 'var(--muted)' }}>
-                  הצעות שהוגשו: <strong style={{ color: 'var(--text)' }}>
-                    {((activeAuction as { bids?: unknown[] }).bids || []).length}
-                  </strong>
-                </p>
-              </div>
-
               {/* Edit reveal time */}
               <div className="mb-4">
                 <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted)' }}>שנה זמן סגירה</label>
