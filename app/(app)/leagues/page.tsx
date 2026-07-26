@@ -2,6 +2,7 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { myTeamOr } from '@/lib/team'
 import type { League, Team } from '@/types'
 import LeagueSelectButton from '@/components/LeagueSelectButton'
+import LeagueHideButton from '@/components/LeagueHideButton'
 import JoinLeagueForm from '@/components/JoinLeagueForm'
 import LogoutButton from '@/components/LogoutButton'
 
@@ -63,7 +64,17 @@ export default async function LeaguesPage() {
     leagueMap.set(league.id, { league, myTeam, isAdmin })
   }
 
-  const entries = Array.from(leagueMap.values())
+  const allEntries = Array.from(leagueMap.values())
+
+  // Per-user hidden leagues — split them out of the main list.
+  const { data: hiddenRows } = await admin
+    .from('league_hidden')
+    .select('league_id')
+    .eq('user_id', user.id)
+  const hiddenIds = new Set((hiddenRows ?? []).map(r => r.league_id))
+
+  const entries = allEntries.filter(e => !hiddenIds.has(e.league.id))
+  const hiddenEntries = allEntries.filter(e => hiddenIds.has(e.league.id))
 
   // Check whitelist for "create league" option
   const { data: whitelistRow } = await supabase
@@ -114,10 +125,52 @@ export default async function LeaguesPage() {
                   </p>
                 )}
               </div>
-              <LeagueSelectButton leagueId={league.id} />
+              <div className="flex items-center gap-2 shrink-0">
+                <LeagueSelectButton leagueId={league.id} />
+                <LeagueHideButton leagueId={league.id} hidden={false} />
+              </div>
             </div>
           ))}
         </div>
+      )}
+
+      {/* Hidden leagues (per-user) */}
+      {hiddenEntries.length > 0 && (
+        <details className="mb-6">
+          <summary className="cursor-pointer text-sm font-bold mb-3" style={{ color: 'var(--muted)' }}>
+            ליגות מוסתרות ({hiddenEntries.length})
+          </summary>
+          <div className="flex flex-col gap-3">
+            {hiddenEntries.map(({ league, myTeam, isAdmin }) => (
+              <div key={league.id} className="card flex items-center justify-between gap-4" style={{ opacity: 0.6 }}>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold">{league.name}</span>
+                    {isAdmin && (
+                      <span className="badge badge-yellow text-xs">מנהל</span>
+                    )}
+                    <span className={`badge text-xs ${league.status === 'active' ? 'badge-green' : 'badge-gray'}`}>
+                      {statusLabel[league.status] ?? league.status}
+                    </span>
+                    <span className="badge badge-blue text-xs">
+                      {league.draft_type === 'snake' ? 'סנייק' : 'מעטפות'}
+                    </span>
+                  </div>
+                  {myTeam && (
+                    <p className="text-sm mt-0.5" style={{ color: 'var(--muted)' }}>
+                      קבוצה: {myTeam.name}
+                      {myTeam.user_id !== user.id && ' (עוזר)'}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <LeagueSelectButton leagueId={league.id} />
+                  <LeagueHideButton leagueId={league.id} hidden={true} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </details>
       )}
 
       {/* Join another league */}
