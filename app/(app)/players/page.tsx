@@ -71,8 +71,18 @@ export default async function PlayersPage() {
   )
 
   const available = typedPlayers.filter(p => p.status === 'available')
-  const onAuction = typedPlayers.filter(p => p.status === 'on_auction')
   const drafted = typedPlayers.filter(p => p.status === 'drafted')
+
+  // Order on-auction players by when they go up: the active auction first,
+  // then pending auctions by their scheduled start time — not by ranking.
+  const auctionOrder = new Map<string, number>()
+  if (activeAuctionPlayerId) auctionOrder.set(activeAuctionPlayerId, 0)
+  ;(pendingAuctions || []).forEach((a: { player_id: string }, i: number) =>
+    auctionOrder.set(a.player_id, i + 1)
+  )
+  const onAuction = typedPlayers
+    .filter(p => p.status === 'on_auction')
+    .sort((a, b) => (auctionOrder.get(a.id) ?? Infinity) - (auctionOrder.get(b.id) ?? Infinity))
 
   return (
     <div className="max-w-4xl mx-auto">
