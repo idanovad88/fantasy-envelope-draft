@@ -83,6 +83,8 @@ const leagueId = selectedLeagueId ?? myTeam?.league_id ?? adminRow?.league_id ??
 
 The home page (`/`) redirects to `/leagues` if no cookie is set.
 
+**Hiding a league (per-user):** Any league member (team owner/assistant, admin, or creator) can hide a league from their own `/leagues` list via `POST /api/leagues/hide` (`{ leagueId, hidden }`). Hides are stored per-user in the `league_hidden` table `(user_id, league_id)` and only affect that user — data is untouched and it's reversible. The `/leagues` page (`app/(app)/leagues/page.tsx`) splits entries into the main list and a collapsible "ליגות מוסתרות" section; `LeagueHideButton` toggles the state. This is distinct from **full deletion** (`POST /api/admin/delete-league`, "אזור מסוכן" in `AdminPanel`), which physically wipes the league for everyone and stays **creator-only**. Migration: `supabase/migration_league_hidden.sql` (`league_hidden` table, RLS: each user reads/writes only their own rows; `ON DELETE CASCADE` on `league_id` so a real deletion cleans up hide rows).
+
 ### Join flow
 
 All join logic is in `app/api/join-league/route.ts` (uses admin client to bypass RLS):
