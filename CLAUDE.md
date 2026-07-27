@@ -21,6 +21,14 @@ Required in `.env.local` and in Vercel dashboard:
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY` — used by `createAdminClient()` for all admin API routes
 
+Push notifications (see **Push notifications** below) — all four required for the feature to work:
+- `NEXT_PUBLIC_VAPID_PUBLIC_KEY` — must be `NEXT_PUBLIC_`; read by `components/PushSubscribe.tsx` in the browser
+- `VAPID_PRIVATE_KEY` — server only
+- `VAPID_SUBJECT` — e.g. `mailto:you@example.com`. Push services reject a missing/invalid subject
+- `CRON_SECRET` — bearer token for `/api/cron/notify-auctions`. The route 500s if unset (never open)
+
+⚠️ **VAPID keys are permanent.** Regenerating the public key invalidates every row in `push_subscriptions` — all sends start returning 403 and every user must re-opt-in. Generate once (`npx web-push generate-vapid-keys`) and store durably.
+
 Dev only (`.env.local` only, never in production):
 - `NEXT_PUBLIC_DEV_MODE=true` — currently read by nothing. The quick-login buttons it used to gate were removed from the login page.
 
@@ -42,7 +50,7 @@ Mutations go through API routes in `app/api/`. These routes use `createAdminClie
 
 ### Key types (`types/index.ts`)
 
-- **League** — single league with status (`setup | lottery | active | paused | completed`), budget, `players_per_team`, `nomination_interval_hours`, `reveal_before_minutes`, `created_by` (UUID of creator), `roster_slots` (JSONB, optional — see Roster slots below), `draft_type` (`'envelope' | 'snake'`), `pick_timeout_minutes` (nullable), `snake_round_config` (boolean[] | null — per-round reversal; null = standard snake)
+- **League** — single league with status (`setup | lottery | active | paused | completed`), budget, `players_per_team`, `nomination_interval_hours`, `reveal_before_minutes`, `created_by` (UUID of creator), `roster_slots` (JSONB, optional — see Roster slots below), `draft_type` (`'envelope' | 'snake'`), `pick_timeout_minutes` (nullable), `snake_round_config` (boolean[] | null — per-round reversal; null = standard snake), `notify_before_minutes` (INTEGER NOT NULL DEFAULT 1, CHECK 1–60 — envelope push reminder lead time)
 - **Team** — user's team, tracks `budget_remaining`, `player_count`, `priority_rank` (nomination/pick order), `tiebreak_rank` (tiebreak priority order for envelope only), `is_complete`, `approved`
 - **Player** — status: `available | on_auction | drafted`; `roster_slot` (TEXT, optional — assigned after draft)
 - **Auction** — status: `pending | active | revealed | completed`; has `reveal_time` computed at nomination time (envelope only)
@@ -226,6 +234,38 @@ Leagues can optionally define a roster slot configuration via `roster_slots` JSO
 - Team pages display players sorted by slot order; each player shows a blue badge with their slot. If the player's actual position differs from the slot, it appears in grey parentheses.
 - Migration: `supabase/migration_roster_slots.sql` — adds `roster_slots` to `leagues`, `roster_slot` to `players`, creates `assign_roster_slot()`, and updates `resolve_auction()` to call it.
 
+### Push notifications (envelope only)
+
+Web Push reminder sent `leagues.notify_before_minutes` (default 1) before an auction's `reveal_time`, **to every team manager and assistant manager in the league** — regardless of whether they've already bid. Completed rosters (`is_complete = true`) are excluded, since a full team can no longer bid. Works with the app closed. This is the only scheduled server-side work in the project.
+
+⚠️ **The schedule lives in the database, not in this repo.** Nothing in the codebase reveals that a cron exists. It is a `pg_cron` job created by hand once from `supabase/cron_notify_auctions.sql`:
+```sql
+SELECT * FROM cron.job;                                             -- is it scheduled?
+SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 10; -- is it running?
+SELECT cron.unschedule('notify-auctions');                          -- remove
+```
+Requires the `pg_cron` and `pg_net` extensions (Supabase Dashboard → Database → Extensions). Vercel Cron was *not* used: the Hobby plan caps cron at once per day. Switching later = add `vercel.json` + `cron.unschedule`; the route itself is unchanged.
+
+**Pieces:**
+- `public/sw.js` — service worker: `push` + `notificationclick` (opens `/auction`). Deliberately **no `fetch` handler** (would break cookie-auth SSR). Must stay excluded in the `proxy.ts` matcher.
+- `components/PushSubscribe.tsx` — opt-in button, mounted in the "my team" card of the **envelope** dashboard only. `Notification.requestPermission()` must stay the **first** `await` — iOS drops the user-gesture context otherwise.
+- `POST /api/push/{subscribe,unsubscribe}` → `push_subscriptions` (service-role-only table, RLS with no policies, like `team_invites` — an endpoint is a bearer capability to push to a device and must never be publicly selectable). `subscribe` upserts on `endpoint`, so re-POSTing on every mount is free and self-heals rotated endpoints.
+- `GET /api/cron/notify-auctions` — `runtime = 'nodejs'` (web-push needs Node crypto; edge breaks it). Bearer `CRON_SECRET`. Also activates overdue `pending` auctions first, since nothing else does so on a timer. Recipients = `user_id` + `assistant_user_id` of every approved, non-complete team.
+
+**Idempotency:** `auction_notifications` with `UNIQUE (auction_id, kind, reveal_time)`. The cron inserts the claim row **before** sending, so overlapping ticks can't double-send. `reveal_time` is part of the key on purpose: if an admin moves the deadline, that's a new key and a fresh reminder goes out (the `tag` on the notification replaces the stale one in the tray).
+
+**Accuracy:** a 1-minute cron means the push lands between N and N−1 minutes before reveal. It's a reminder, not a timer — don't promise an exact lead time.
+
+**Never put bid amounts or bidder identities in the push payload** — the cron reads with the service-role client, bypassing the sealed-bid RLS. Payload is player name + auction id only.
+
+**Migration:** `supabase/migration_push_notifications.sql` — `push_subscriptions`, `auction_notifications`, `leagues.notify_before_minutes`, partial index on `auctions(reveal_time)`. Run it **before** deploying: `saveLeague()` sends `notify_before_minutes`, and if the column is missing PostgREST rejects the *entire* league-settings save.
+
+### Auction activation (`lib/auctions.ts`)
+
+A queued auction stays `pending` until something notices `scheduled_start` has passed — there is no timer on the DB side. `activateOverduePendingAuctions(leagueId)` is the single implementation, and **every caller must use it** rather than re-rolling the query: the auction page (`app/(app)/auction/page.tsx`, on load), `POST /api/admin/activate-pending-auction`, and the notify cron. The per-league guarded version is the correct one: it refuses to activate a second auction while one is live, because activating a second would run two sealed-bid auctions at once.
+
+`activateAllOverduePendingAuctions()` wraps it for the cron, which has no single league context. Both no-op unless a transition is due, so they're safe to call on every request.
+
 ### Admin auction tab (envelope only)
 
 Sections appear in this order: **active auction → auction queue → add to queue → history**.
@@ -239,10 +279,12 @@ In Next.js 16, the middleware file is **`proxy.ts`** (root of the project), not 
 The middleware refreshes the Supabase session and redirects unauthenticated users to `/login`. The matcher **excludes** static assets so they remain publicly accessible:
 
 ```ts
-matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)']
+matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)']
 ```
 
-**Important:** Any new public routes (PWA assets, open API endpoints, etc.) must be added to this matcher exclusion list, otherwise they will be blocked with a 307 redirect to `/login`.
+**Important:** Any new public routes (PWA assets, open API endpoints, etc.) must be added to this matcher exclusion list, otherwise they will be blocked with a 307 redirect to `/login`. Note `sw\\.js` — the service worker is a `.js` file, and `.js` is *not* covered by the extension group above.
+
+Paths that bypass the auth redirect inside the `proxy` function itself (not the matcher): `/login`, `/api/public/*`, `/assist/*` (logged-out invite pages), and `/api/cron/*` (pg_cron carries no session cookie; those routes authenticate with `CRON_SECRET` instead). Both kinds of exclusion fail *silently* as a 307 to `/login` — assert `401`, not a redirect, when testing.
 
 ### PWA / App icons
 

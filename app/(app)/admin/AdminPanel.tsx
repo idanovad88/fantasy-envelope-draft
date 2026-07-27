@@ -129,6 +129,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   const [budgetPerTeam, setBudgetPerTeam] = useState(league?.budget_per_team ?? 200)
   const [joinCode, setJoinCode] = useState(league?.join_code ?? '')
   const [auctionDurationHours, setAuctionDurationHours] = useState(league?.auction_duration_hours ?? 1.5)
+  const [notifyBeforeMinutes, setNotifyBeforeMinutes] = useState(league?.notify_before_minutes ?? 1)
   const SLOT_TYPES = ['PG', 'SG', 'G', 'SF', 'PF', 'F', 'C', 'UTIL', 'BENCH'] as const
   const [rosterSlots, setRosterSlots] = useState<Record<string, number>>(
     league?.roster_slots ?? {}
@@ -354,7 +355,9 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
       ...(isSnake ? {
         pick_timeout_minutes: isNaN(timeout) || pickTimeoutMinutes === '' ? null : timeout,
         snake_round_config: snakeRoundConfig,
-      } : {}),
+      } : {
+        notify_before_minutes: notifyBeforeMinutes,
+      }),
       updated_at: new Date().toISOString(),
     }
     if (league) {
@@ -1608,6 +1611,24 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 />
                 <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
                   זמן הסגירה של כל מכרז — ברירת מחדל: 1.5 שעות (90 דקות)
+                </p>
+              </div>
+            )}
+
+            {!isSnake && (
+              <div>
+                <label className="block text-sm font-medium mb-1.5">התראה לפני חשיפה (דקות)</label>
+                <input
+                  type="number"
+                  className="input text-center"
+                  value={notifyBeforeMinutes}
+                  onChange={e => setNotifyBeforeMinutes(Number(e.target.value))}
+                  min={1}
+                  max={60}
+                  dir="ltr"
+                />
+                <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                  ההתראה תישלח לכל מנהלי הקבוצות ועוזריהם. ברירת מחדל: דקה אחת
                 </p>
               </div>
             )}

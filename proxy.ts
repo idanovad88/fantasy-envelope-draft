@@ -28,8 +28,12 @@ export async function proxy(request: NextRequest) {
   // Team-assistant invite pages must be viewable while logged out (the page itself
   // offers a Google sign-in that returns here via ?next=).
   const isInvitePage = request.nextUrl.pathname.startsWith('/assist')
+  // The notify cron is called by Supabase pg_cron, which carries no session
+  // cookie. It authenticates itself with CRON_SECRET; without this bypass it
+  // would silently 307 to /login and the job would never run.
+  const isCronApi = request.nextUrl.pathname.startsWith('/api/cron')
 
-  if (!user && !isAuthPage && !isPublicApi && !isInvitePage) {
+  if (!user && !isAuthPage && !isPublicApi && !isInvitePage && !isCronApi) {
     const redirectUrl = request.nextUrl.clone()
     redirectUrl.pathname = '/login'
     return NextResponse.redirect(redirectUrl)
@@ -45,5 +49,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'],
 }

@@ -17,6 +17,7 @@ export interface League {
   nomination_interval_hours: number
   reveal_before_minutes: number
   auction_duration_hours: number
+  notify_before_minutes: number
   join_code: string | null
   draft_start_time: string | null
   roster_slots: Record<string, number> | null

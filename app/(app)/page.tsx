@@ -10,6 +10,7 @@ import BidForm from '@/components/BidForm'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
 import JoinLeagueForm from '@/components/JoinLeagueForm'
 import AssistantManager from '@/components/AssistantManager'
+import PushSubscribe from '@/components/PushSubscribe'
 import { activateOverdueSnakeDraft } from '@/lib/activateDraft'
 
 export default async function DashboardPage() {
@@ -395,6 +396,7 @@ export default async function DashboardPage() {
                   role={isTeamOwner ? 'owner' : 'assistant'}
                 />
               )}
+              {(isTeamOwner || isTeamAssistant) && <PushSubscribe />}
             </div>
           ) : createdLeague ? (
             <div>

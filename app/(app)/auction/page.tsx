@@ -1,5 +1,6 @@
-import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
+import { activateOverduePendingAuctions } from '@/lib/auctions'
 import { formatTime, formatDateTime, REVEAL_WINDOW_MS } from '@/lib/utils'
 import BidForm from '@/components/BidForm'
 import Countdown from '@/components/Countdown'
@@ -35,19 +36,7 @@ export default async function AuctionPage() {
 
   // Auto-activate any pending auction whose scheduled_start has passed
   if (leagueId) {
-    const adminDb = createAdminClient()
-    const nowIso = new Date().toISOString()
-    const [{ data: alreadyActive }, { data: overdue }] = await Promise.all([
-      adminDb.from('auctions').select('id').eq('league_id', leagueId).eq('status', 'active').maybeSingle(),
-      adminDb.from('auctions').select('id, player_id').eq('league_id', leagueId).eq('status', 'pending')
-        .lte('scheduled_start', nowIso).order('scheduled_start', { ascending: true }).limit(1).maybeSingle(),
-    ])
-    if (!alreadyActive && overdue) {
-      await Promise.all([
-        adminDb.from('auctions').update({ status: 'active' }).eq('id', overdue.id),
-        adminDb.from('players').update({ status: 'on_auction' }).eq('id', overdue.player_id),
-      ])
-    }
+    await activateOverduePendingAuctions(leagueId)
   }
 
   const [{ data: auctions }, { data: myBids }, { data: recentCompleted }] =
