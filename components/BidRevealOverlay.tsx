@@ -36,15 +36,6 @@ type RecentlyCompleted = {
 
 type Phase = 'idle' | 'revealing' | 'var' | 'winner'
 
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr]
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[a[i], a[j]] = [a[j], a[i]]
-  }
-  return a
-}
-
 function spawnConfetti() {
   const colors = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#ffffff', '#fbbf24']
   for (let i = 0; i < 70; i++) {
@@ -208,8 +199,10 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
     const maxBidAmount = Math.max(...allBids.map(b => b.amount))
     const isTieBroken = dbTieBroken || allBids.filter(b => b.amount === maxBidAmount).length >= 2
 
-    const shuffled = shuffle(allBids)
-    const winnerBid = shuffled.find(b => b.team_id === winningTeamId) ?? null
+    // Lowest → highest so tension builds and the winning (highest) bid lands last.
+    // Tied top bids stay adjacent at the end, feeding straight into the VAR phase.
+    const ordered = [...allBids].sort((a, b) => a.amount - b.amount)
+    const winnerBid = ordered.find(b => b.team_id === winningTeamId) ?? null
     const winnerInfo = winnerBid
       ? {
           teamId: winnerBid.team_id,
@@ -222,7 +215,7 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
     setPlayerName(pName)
     setNominatingTeamId(nomTeamId)
     setWinner(winnerInfo)
-    setBids(shuffled)
+    setBids(ordered)
     setShownCount(0)
     setPhase('revealing')
     playDrumroll(2)
@@ -230,10 +223,10 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
     let count = 0
     intervalRef.current = setInterval(() => {
       count++
-      if (count >= shuffled.length) {
+      if (count >= ordered.length) {
         clearInterval(intervalRef.current!)
         intervalRef.current = null
-        setShownCount(shuffled.length)
+        setShownCount(ordered.length)
 
         later(() => {
           if (isTieBroken) {
