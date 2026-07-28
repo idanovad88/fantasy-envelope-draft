@@ -361,10 +361,28 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
       updated_at: new Date().toISOString(),
     }
     if (league) {
-      await supabase.from('leagues').update(payload).eq('id', league.id)
+      // Save through the admin API (service-role) so a league creator who isn't
+      // in admin_users can still write, and so a rejection actually surfaces
+      // instead of the old silent-success + reload that hid failed saves.
+      const res = await fetch('/api/admin/save-league', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leagueId: league.id, ...payload }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data.error) {
+        setMsg('שגיאה בשמירה: ' + (data.error || 'השמירה נכשלה'))
+        setLoading('')
+        return
+      }
     } else {
       const { data: { user } } = await supabase.auth.getUser()
-      await supabase.from('leagues').insert({ ...payload, created_by: user?.id })
+      const { error } = await supabase.from('leagues').insert({ ...payload, created_by: user?.id })
+      if (error) {
+        setMsg('שגיאה בשמירה: ' + error.message)
+        setLoading('')
+        return
+      }
     }
     setMsg('הליגה נשמרה')
     setLoading('')
