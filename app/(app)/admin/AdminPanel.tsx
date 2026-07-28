@@ -564,7 +564,10 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     const res = await fetch('/api/admin/update-reveal-time', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ auctionId: activeAuction.id, revealTime: newRevealTime }),
+      // Convert the datetime-local value to ISO in the browser, where the
+      // user's timezone applies. Sending the raw local string would let the
+      // UTC server misread it (e.g. 10:00 → stored as 10:00 UTC → shown 13:00).
+      body: JSON.stringify({ auctionId: activeAuction.id, revealTime: new Date(newRevealTime).toISOString() }),
     })
     if (res.ok) {
       setMsg('זמן הסגירה עודכן!')
