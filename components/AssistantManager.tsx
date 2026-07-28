@@ -17,8 +17,11 @@ const linkStyle: React.CSSProperties = {
   padding: 0,
   font: 'inherit',
   cursor: 'pointer',
-  textDecoration: 'underline',
+  textDecoration: 'none',
 }
+
+// Small, right-aligned caption row inside the team card (RTL → right = start).
+const rowStyle: React.CSSProperties = { textAlign: 'right', fontSize: '0.7rem' }
 
 export default function AssistantManager({ teamId, hasAssistant, assistantEmail, role = 'owner' }: AssistantManagerProps) {
   const [loading, setLoading] = useState(false)
@@ -74,14 +77,14 @@ export default function AssistantManager({ teamId, hasAssistant, assistantEmail,
   // The assistant's own view: no invite controls, just the option to step down.
   if (role === 'assistant') {
     return (
-      <div className="mt-2" style={{ textAlign: 'left' }}>
-        <span className="text-xs inline-flex items-center gap-1.5" style={{ color: 'var(--muted)' }}>
+      <div className="mt-2" style={rowStyle}>
+        <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--muted)' }}>
           <span>אתה עוזר המנהל</span>
-          <button onClick={remove} disabled={loading} className="text-xs" style={{ ...linkStyle, color: 'var(--danger)' }}>
+          <button onClick={remove} disabled={loading} style={{ ...linkStyle, color: 'var(--danger)' }}>
             {loading ? '...' : 'התנתק'}
           </button>
         </span>
-        {error && <p className="text-xs mt-1" style={{ color: 'var(--danger)', textAlign: 'right' }}>{error}</p>}
+        {error && <p className="mt-1" style={{ color: 'var(--danger)' }}>{error}</p>}
       </div>
     )
   }
@@ -100,24 +103,24 @@ export default function AssistantManager({ teamId, hasAssistant, assistantEmail,
     )
   }
 
-  // Default: a small, left-aligned link — unobtrusive within the team card.
+  // Default: a small, right-aligned link — unobtrusive within the team card.
   return (
-    <div className="mt-2" style={{ textAlign: 'left' }}>
+    <div className="mt-2" style={rowStyle}>
       {hasAssistant ? (
-        <span className="text-xs inline-flex items-center gap-1.5" style={{ color: 'var(--muted)' }}>
+        <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--muted)' }}>
           <span className="truncate" dir="ltr" style={{ maxWidth: 150, display: 'inline-block', verticalAlign: 'bottom' }}>
             עוזר: {assistantEmail ?? 'מחובר'}
           </span>
-          <button onClick={remove} disabled={loading} className="text-xs" style={{ ...linkStyle, color: 'var(--danger)' }}>
+          <button onClick={remove} disabled={loading} style={{ ...linkStyle, color: 'var(--danger)' }}>
             {loading ? '...' : 'הסר'}
           </button>
         </span>
       ) : (
-        <button onClick={generate} disabled={loading} className="text-xs" style={{ ...linkStyle, color: 'var(--muted)' }}>
+        <button onClick={generate} disabled={loading} style={{ ...linkStyle, color: 'var(--primary)' }}>
           {loading ? 'יוצר...' : '+ הזמן עוזר מנהל'}
         </button>
       )}
-      {error && <p className="text-xs mt-1" style={{ color: 'var(--danger)', textAlign: 'right' }}>{error}</p>}
+      {error && <p className="mt-1" style={{ color: 'var(--danger)' }}>{error}</p>}
     </div>
   )
 }

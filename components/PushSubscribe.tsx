@@ -9,8 +9,11 @@ const linkStyle: React.CSSProperties = {
   padding: 0,
   font: 'inherit',
   cursor: 'pointer',
-  textDecoration: 'underline',
+  textDecoration: 'none',
 }
+
+// Small, right-aligned caption row inside the team card (RTL → right = start).
+const rowStyle: React.CSSProperties = { textAlign: 'right', fontSize: '0.7rem' }
 
 // VAPID public keys are base64url; PushManager requires the raw bytes.
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
@@ -139,8 +142,8 @@ export default function PushSubscribe() {
 
   if (state === 'ios-not-installed') {
     return (
-      <div className="mt-2" style={{ textAlign: 'left' }}>
-        <span className="text-xs" style={{ color: 'var(--muted)' }}>
+      <div className="mt-2" style={rowStyle}>
+        <span style={{ color: 'var(--muted)' }}>
           🔔 הוסף למסך הבית כדי לקבל התראות
         </span>
       </div>
@@ -149,8 +152,8 @@ export default function PushSubscribe() {
 
   if (state === 'denied') {
     return (
-      <div className="mt-2" style={{ textAlign: 'left' }}>
-        <span className="text-xs" style={{ color: 'var(--muted)' }}>
+      <div className="mt-2" style={rowStyle}>
+        <span style={{ color: 'var(--muted)' }}>
           🔔 התראות חסומות — אפשר אותן בהגדרות הדפדפן
         </span>
       </div>
@@ -158,20 +161,20 @@ export default function PushSubscribe() {
   }
 
   return (
-    <div className="mt-2" style={{ textAlign: 'left' }}>
+    <div className="mt-2" style={rowStyle}>
       {state === 'subscribed' ? (
-        <span className="text-xs inline-flex items-center gap-1.5" style={{ color: 'var(--muted)' }}>
+        <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--muted)' }}>
           <span>🔔 התראות פעילות</span>
-          <button onClick={disable} disabled={busy} className="text-xs" style={{ ...linkStyle, color: 'var(--danger)' }}>
+          <button onClick={disable} disabled={busy} style={{ ...linkStyle, color: 'var(--danger)' }}>
             {busy ? '...' : 'כבה'}
           </button>
         </span>
       ) : (
-        <button onClick={enable} disabled={busy} className="text-xs" style={{ ...linkStyle, color: 'var(--muted)' }}>
+        <button onClick={enable} disabled={busy} style={{ ...linkStyle, color: 'var(--primary)' }}>
           {busy ? 'מפעיל...' : '🔔 הפעל התראות לפני חשיפת מכרז'}
         </button>
       )}
-      {error && <p className="text-xs mt-1" style={{ color: 'var(--danger)', textAlign: 'right' }}>{error}</p>}
+      {error && <p className="mt-1" style={{ color: 'var(--danger)' }}>{error}</p>}
     </div>
   )
 }
