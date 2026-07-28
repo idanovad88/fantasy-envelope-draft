@@ -258,7 +258,7 @@ Requires the `pg_cron` and `pg_net` extensions (Supabase Dashboard → Database 
 
 **Never put bid amounts or bidder identities in the push payload** — the cron reads with the service-role client, bypassing the sealed-bid RLS. Payload is player name + auction id only.
 
-**Migration:** `supabase/migration_push_notifications.sql` — `push_subscriptions`, `auction_notifications`, `leagues.notify_before_minutes`, partial index on `auctions(reveal_time)`. Run it **before** deploying: `saveLeague()` sends `notify_before_minutes`, and if the column is missing PostgREST rejects the *entire* league-settings save.
+**Migration:** `supabase/migration_push_notifications.sql` — `push_subscriptions`, `auction_notifications`, `leagues.notify_before_minutes`, partial index on `auctions(reveal_time)`. Run it **before** deploying: the league-settings save (`POST /api/admin/save-league`, see **Admin**) sends `notify_before_minutes`, and if the column is missing PostgREST rejects the *entire* save.
 
 ### Auction activation (`lib/auctions.ts`)
 
@@ -341,6 +341,7 @@ Admin API routes under `app/api/admin/`:
 - `add-admin` — add admin by email
 - `delete-team` — delete a team and reset its players
 - `set-team-admin` — grant/revoke admin for a team's user (cannot self-revoke)
+- `save-league` — persist League Settings. **`saveLeague()` in `AdminPanel` must go through this route, never a direct browser `leagues` update.** The direct write was governed by RLS `leagues_admin_write`, which only recognises rows in `admin_users` — so a league *creator* who is admin only via `created_by` had the update silently filtered to 0 rows, and the old client swallowed the result (always showed "נשמרה" + reloaded), so the failed save was invisible. The route verifies admin OR creator (like `queue-auction`), writes with the service-role client (bypasses RLS), whitelists the settings columns (never trusts the body to set `id`/`created_by`/`status`/rank columns), and validates `notify_before_minutes` is an integer 1–60 (matching the DB CHECK) so a bad value can't reject the whole update. Client surfaces any error instead of reporting false success.
 
 The admin UI is at `app/(app)/admin/` (page + AdminPanel client component).
 
