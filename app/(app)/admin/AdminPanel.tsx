@@ -561,14 +561,19 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   async function updateRevealTime() {
     if (!activeAuction || !newRevealTime) return
     setLoading('reveal_time')
-    const { error } = await supabase
-      .from('auctions')
-      .update({ reveal_time: new Date(newRevealTime).toISOString(), updated_at: new Date().toISOString() })
-      .eq('id', activeAuction.id)
-    if (error) setMsg('שגיאה: ' + error.message)
-    else setMsg('זמן הסגירה עודכן!')
-    setLoading('')
-    window.location.reload()
+    const res = await fetch('/api/admin/update-reveal-time', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ auctionId: activeAuction.id, revealTime: newRevealTime }),
+    })
+    if (res.ok) {
+      setMsg('זמן הסגירה עודכן!')
+      window.location.reload()
+    } else {
+      const json = await res.json().catch(() => ({}))
+      setMsg('שגיאה: ' + (json.error || res.status))
+      setLoading('')
+    }
   }
 
   async function deleteLeague() {
