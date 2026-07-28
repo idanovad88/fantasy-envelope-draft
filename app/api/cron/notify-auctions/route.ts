@@ -25,8 +25,9 @@ interface DueAuction {
 
 /**
  * Called every minute by Supabase pg_cron (see supabase/cron_notify_auctions.sql).
- * Sends a Web Push reminder to every team that has not yet bid on an envelope
- * auction that closes within its league's notify_before_minutes.
+ * Sends a Web Push reminder to every manager and assistant manager of an
+ * approved, non-complete team, for any envelope auction that closes within its
+ * league's notify_before_minutes.
  */
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET
@@ -171,3 +172,8 @@ export async function GET(req: Request) {
   // would otherwise fail silently and send nothing, forever.
   return NextResponse.json({ activated, candidates: candidates?.length ?? 0, due: due.length, processed, sent, pruned })
 }
+
+// Supabase pg_cron calls this via net.http_post, so the route must accept POST
+// too — a GET-only handler returns 405 and the job silently never fires. A
+// manual `curl` (GET) and the cron (POST) now hit the same logic.
+export const POST = GET
