@@ -7,20 +7,25 @@ export async function POST(req: NextRequest) {
   const supabase = createAdminClient()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { data: callerAdmin } = await supabase.from('admin_users').select('role').eq('user_id', user.id).maybeSingle()
-  if (!callerAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-
   const { auctionId } = await req.json()
   if (!auctionId) return NextResponse.json({ error: 'Missing auctionId' }, { status: 400 })
 
   const { data: auction, error: fetchErr } = await supabase
     .from('auctions')
-    .select('player_id, nominating_team_id, status, winning_team_id, winning_bid')
+    .select('league_id, player_id, nominating_team_id, status, winning_team_id, winning_bid')
     .eq('id', auctionId)
     .maybeSingle()
 
   if (fetchErr) return NextResponse.json({ error: fetchErr.message }, { status: 500 })
   if (!auction) return NextResponse.json({ error: 'Auction not found' }, { status: 404 })
+
+  // Admin check: row in admin_users OR creator of this auction's league.
+  // League creators may have no admin_users row (they reach the admin panel via
+  // leagues.created_by), so admin_users alone would 403 them out of cancelling.
+  const { data: callerAdmin } = await supabase.from('admin_users').select('role').eq('user_id', user.id).maybeSingle()
+  const { data: league } = await supabase.from('leagues').select('created_by').eq('id', auction.league_id).maybeSingle()
+  const isAdmin = !!callerAdmin || league?.created_by === user.id
+  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   // If already completed and had a winner — refund budget and fix player count
   if (auction.status === 'completed' && auction.winning_team_id && auction.winning_bid) {

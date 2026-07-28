@@ -597,11 +597,12 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     })
     if (res.ok) {
       setMsg('המכרז בוטל והשחקן הוחזר לרשימה')
+      window.location.reload()
     } else {
-      setMsg('שגיאה בביטול')
+      const json = await res.json().catch(() => ({}))
+      setMsg('שגיאה בביטול: ' + (json.error || res.status))
+      setLoading('')
     }
-    setLoading('')
-    window.location.reload()
   }
 
   async function savePickOrder() {
