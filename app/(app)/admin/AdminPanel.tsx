@@ -268,14 +268,19 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   async function addPlayer() {
     if (!league || !newPlayerName.trim()) return
     setLoading('add_player')
-    const { error } = await supabase.from('players').insert({
-      league_id: league.id,
-      name: newPlayerName.trim(),
-      position: newPlayerPos,
-      status: 'available',
-      stats: {},
+    const res = await fetch('/api/admin/add-player', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        league_id: league.id,
+        name: newPlayerName.trim(),
+        position: newPlayerPos,
+      }),
     })
-    if (error) { setMsg('שגיאה: ' + error.message); setLoading(''); return }
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: 'שגיאה' }))
+      setMsg('שגיאה: ' + error); setLoading(''); return
+    }
     setMsg(`${newPlayerName.trim()} נוסף!`)
     setNewPlayerName('')
     setLoading('')
