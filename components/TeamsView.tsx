@@ -21,6 +21,15 @@ export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTea
 
   const visibleTeams = selectedTeamId ? teams.filter(t => t.id === selectedTeamId) : teams
 
+  // Tiebreak priority position — matches the dashboard "סדר פריוריטי" card:
+  // rank by tiebreak_rank order and show the sequential 1-based position, not the raw value.
+  const tiebreakPosition = new Map(
+    teams
+      .filter(t => t.tiebreak_rank !== null)
+      .sort((a, b) => (a.tiebreak_rank ?? 99) - (b.tiebreak_rank ?? 99))
+      .map((t, i) => [t.id, i + 1])
+  )
+
   return (
     <>
       {/* Team selector */}
@@ -79,7 +88,7 @@ export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTea
                   </div>
                   {!isSnake && (
                     <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
-                      פריוריטי: {team.tiebreak_rank ?? (team.is_complete ? 'הסתיים' : '—')}
+                      פריוריטי: {tiebreakPosition.get(team.id) ?? (team.is_complete ? 'הסתיים' : '—')}
                     </p>
                   )}
                 </div>
