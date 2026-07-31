@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
-import { formatDateTime } from '@/lib/utils'
+import { useState, useEffect, useMemo } from 'react'
+import { formatDateTime, REVEAL_WINDOW_MS } from '@/lib/utils'
+import { getSeenRevealId, REVEAL_SEEN_EVENT } from '@/lib/reveal'
 
 type BidWithTeam = {
   id: string
@@ -13,6 +14,7 @@ type BidWithTeam = {
 type AuctionWithBids = {
   id: string
   scheduled_start: string
+  updated_at: string
   winning_bid: number | null
   winning_team_id: string | null
   nominating_team_id: string | null
@@ -26,9 +28,47 @@ type AuctionWithBids = {
 
 export default function AuctionHistory({ auctions }: { auctions: AuctionWithBids[] }) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [seenId, setSeenId] = useState<string | null>(null)
+  const [windowOpen, setWindowOpen] = useState(true)
 
   const toggle = (id: string) =>
     setExpandedId(prev => (prev === id ? null : id))
+
+  // The single most-recently-completed auction is the one the BidRevealOverlay
+  // animates. Its result must not appear here until that reveal has been seen,
+  // otherwise the history spoils the surprise the animation is building.
+  const pendingReveal = useMemo(() => {
+    const completed = auctions.filter(a => a.status === 'completed' && a.updated_at)
+    if (completed.length === 0) return null
+    const latest = completed.reduce((m, a) =>
+      new Date(a.updated_at).getTime() > new Date(m.updated_at).getTime() ? a : m)
+    if (Date.now() - new Date(latest.updated_at).getTime() >= REVEAL_WINDOW_MS) return null
+    return latest
+  }, [auctions])
+
+  // Read the seen-id on mount and stay in sync when the overlay finishes a reveal
+  // in this same tab (custom event — `storage` fires only in other tabs).
+  useEffect(() => {
+    setSeenId(getSeenRevealId())
+    const onSeen = (e: Event) => setSeenId((e as CustomEvent<string>).detail)
+    window.addEventListener(REVEAL_SEEN_EVENT, onSeen)
+    return () => window.removeEventListener(REVEAL_SEEN_EVENT, onSeen)
+  }, [])
+
+  // Fail open: if the overlay never plays (tab was closed, etc.), un-mask once
+  // the reveal window elapses so the result isn't hidden forever.
+  useEffect(() => {
+    if (!pendingReveal) return
+    const remaining = REVEAL_WINDOW_MS - (Date.now() - new Date(pendingReveal.updated_at).getTime())
+    if (remaining <= 0) { setWindowOpen(false); return }
+    setWindowOpen(true)
+    const t = setTimeout(() => setWindowOpen(false), remaining)
+    return () => clearTimeout(t)
+  }, [pendingReveal])
+
+  const maskedId = pendingReveal && windowOpen && seenId !== pendingReveal.id
+    ? pendingReveal.id
+    : null
 
   return (
     <div>
@@ -36,6 +76,25 @@ export default function AuctionHistory({ auctions }: { auctions: AuctionWithBids
       <div className="flex flex-col gap-2">
         {auctions.map(auction => {
           const isExpanded = expandedId === auction.id
+
+          // Currently being revealed by the overlay — hide the result so the
+          // history doesn't spoil it. No expand, no winner, no price, no bids.
+          if (auction.id === maskedId) {
+            return (
+              <div key={auction.id} className="card select-none" style={{ opacity: 0.85 }}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">{auction.player?.name}</p>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
+                      {formatDateTime(auction.scheduled_start)}
+                      {auction.nominating_team && ` · ${auction.nominating_team.name}`}
+                    </p>
+                  </div>
+                  <span className="badge badge-yellow">🔒 בחשיפה…</span>
+                </div>
+              </div>
+            )
+          }
 
           // If nominating team has no bid, synthesize a $1 default entry for display.
           // Match by team_id OR by name (nominating_team_id can be absent from PostgREST * expansion).

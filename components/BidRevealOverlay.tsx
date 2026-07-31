@@ -5,19 +5,8 @@ import { useRouter } from 'next/navigation'
 import { X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { REVEAL_WINDOW_MS } from '@/lib/utils'
+import { hasSeenReveal, markRevealSeen } from '@/lib/reveal'
 import { getMuted, toggleMute, unlockAudio, playDrumroll, playBidReveal, playFanfare } from '@/lib/sounds'
-
-const SEEN_KEY = 'auction-reveal-seen'
-
-// Only the most recently completed auction can ever trigger a reveal, so a single
-// id is enough to remember — the next auction to close overwrites it.
-function hasSeenReveal(auctionId: string): boolean {
-  try { return localStorage.getItem(SEEN_KEY) === auctionId } catch { return false }
-}
-
-function markRevealSeen(auctionId: string): void {
-  try { localStorage.setItem(SEEN_KEY, auctionId) } catch {}
-}
 
 type BidWithTeam = {
   id: string
