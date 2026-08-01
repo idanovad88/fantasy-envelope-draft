@@ -288,9 +288,18 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   }
 
   async function removePlayer(playerId: string, name: string) {
+    if (!league) return
     if (!confirm(`להסיר את ${name} מהרשימה?`)) return
     setLoading('remove_' + playerId)
-    await supabase.from('players').delete().eq('id', playerId)
+    const res = await fetch('/api/admin/delete-player', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ league_id: league.id, player_id: playerId }),
+    })
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: 'שגיאה' }))
+      setMsg('שגיאה: ' + error); setLoading(''); return
+    }
     setMsg(`${name} הוסר`)
     setLoading('')
     window.location.reload()
@@ -302,7 +311,15 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     if (availableCount === 0) { setMsg('אין שחקנים זמינים להסרה'); return }
     if (!confirm(`למחוק את כל ${availableCount} השחקנים הזמינים? לא ניתן לבטל פעולה זו.`)) return
     setLoading('remove_all')
-    await supabase.from('players').delete().eq('league_id', league.id).eq('status', 'available')
+    const res = await fetch('/api/admin/delete-player', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ league_id: league.id, all_available: true }),
+    })
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: 'שגיאה' }))
+      setMsg('שגיאה: ' + error); setLoading(''); return
+    }
     setMsg(`${availableCount} שחקנים הוסרו`)
     setLoading('')
     window.location.reload()
