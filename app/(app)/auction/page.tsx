@@ -46,7 +46,11 @@ export default async function AuctionPage() {
             .select('*, player:players(*), nominating_team:teams!nominating_team_id(name), winning_team:teams!winning_team_id(name), bids(*, team:teams(name))')
             .eq('league_id', league.id)
             .in('status', ['pending', 'active', 'revealed', 'completed'])
-            .order('scheduled_start', { ascending: true })
+            // Newest first so the limit only ever truncates OLD history — pending
+            // (future) and active auctions always sort to the top and are never
+            // dropped. Ascending here silently hid future auctions once a league
+            // passed 50 total auctions. pending/past get re-sorted below for display.
+            .order('scheduled_start', { ascending: false })
             .limit(50)
         : Promise.resolve({ data: [] }),
       myTeam
@@ -85,8 +89,10 @@ export default async function AuctionPage() {
   const myBidMap = Object.fromEntries((myBids || []).map(b => [b.auction_id, b.amount]))
 
   const activeAuction = typedAuctions.find(a => a.status === 'active')
-  // Pending auctions sorted ascending by scheduled_start (closest first)
+  // Pending auctions sorted ascending by scheduled_start (closest first) —
+  // re-sorted here because the query now fetches descending.
   const pendingAuctions = typedAuctions.filter(a => a.status === 'pending')
+    .sort((a, b) => new Date(a.scheduled_start).getTime() - new Date(b.scheduled_start).getTime())
   const pastAuctions = typedAuctions.filter(a => a.status === 'revealed' || a.status === 'completed')
     .sort((a, b) => new Date(b.reveal_time).getTime() - new Date(a.reveal_time).getTime())
 
