@@ -3,7 +3,7 @@
 import React, { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatDateTime, formatTime, getSnakeTeamForPick, isSnakeRoundReversed, getEnvelopeNominationOrder } from '@/lib/utils'
-import type { League, Team, Auction, SnakePick, TradeStatus } from '@/types'
+import type { League, Team, Auction, SnakePick, TradeStatus, RevealMode } from '@/types'
 import ImportPlayers from './ImportPlayers'
 
 type PastAuction = { id: string; scheduled_start: string; winning_bid: number | null; player: { name: string } | null; winning_team: { name: string } | null }
@@ -130,6 +130,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   const [joinCode, setJoinCode] = useState(league?.join_code ?? '')
   const [auctionDurationHours, setAuctionDurationHours] = useState(league?.auction_duration_hours ?? 1.5)
   const [notifyBeforeMinutes, setNotifyBeforeMinutes] = useState(league?.notify_before_minutes ?? 1)
+  const [revealMode, setRevealMode] = useState<RevealMode>(league?.reveal_mode ?? 'random')
   const SLOT_TYPES = ['PG', 'SG', 'G', 'SF', 'PF', 'F', 'C', 'UTIL', 'BENCH'] as const
   const [rosterSlots, setRosterSlots] = useState<Record<string, number>>(
     league?.roster_slots ?? {}
@@ -379,6 +380,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
         snake_round_config: snakeRoundConfig,
       } : {
         notify_before_minutes: notifyBeforeMinutes,
+        reveal_mode: revealMode,
       }),
       updated_at: new Date().toISOString(),
     }
@@ -1678,6 +1680,37 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 />
                 <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
                   ההתראה תישלח לכל מנהלי הקבוצות ועוזריהם. ברירת מחדל: דקה אחת
+                </p>
+              </div>
+            )}
+
+            {!isSnake && (
+              <div>
+                <label className="block text-sm font-medium mb-2">סדר חשיפת הצעות</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    ['random', 'אקראי'],
+                    ['weighted', 'משוקלל לפי גובה ההצעה'],
+                  ] as [RevealMode, string][]).map(([mode, label]) => {
+                    const active = revealMode === mode
+                    return (
+                      <button
+                        key={mode}
+                        type="button"
+                        className="btn text-xs"
+                        style={{
+                          background: active ? 'rgba(99,102,241,0.2)' : 'var(--border)',
+                          color: active ? 'var(--primary)' : 'var(--muted)',
+                        }}
+                        onClick={() => setRevealMode(mode)}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                  במצב המשוקלל הסיכוי של הצעה להיחשף אחרונה גדל ככל שהיא גבוהה יותר (יחסית לריבוע הסכום) — הרבה דרמה, אך לא ודאי.
                 </p>
               </div>
             )}
