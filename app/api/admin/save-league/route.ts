@@ -58,6 +58,13 @@ export async function POST(req: NextRequest) {
     update.notify_before_minutes = n
   }
 
+  if ('reveal_mode' in body) {
+    if (!['random', 'weighted'].includes(body.reveal_mode)) {
+      return NextResponse.json({ error: 'מצב חשיפה לא תקין' }, { status: 400 })
+    }
+    update.reveal_mode = body.reveal_mode
+  }
+
   const { error } = await supabase.from('leagues').update(update).eq('id', leagueId)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

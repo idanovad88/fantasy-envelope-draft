@@ -2,6 +2,7 @@ export type LeagueStatus = 'setup' | 'lottery' | 'active' | 'paused' | 'complete
 export type PlayerStatus = 'available' | 'on_auction' | 'drafted'
 export type AuctionStatus = 'pending' | 'active' | 'revealed' | 'completed'
 export type DraftType = 'envelope' | 'snake'
+export type RevealMode = 'random' | 'weighted'
 
 export interface League {
   id: string
@@ -18,6 +19,7 @@ export interface League {
   reveal_before_minutes: number
   auction_duration_hours: number
   notify_before_minutes: number
+  reveal_mode: RevealMode
   join_code: string | null
   draft_start_time: string | null
   roster_slots: Record<string, number> | null

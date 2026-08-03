@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { REVEAL_WINDOW_MS } from '@/lib/utils'
 import { hasSeenReveal, markRevealSeen } from '@/lib/reveal'
 import { getMuted, toggleMute, unlockAudio, playDrumroll, playBidReveal, playFanfare } from '@/lib/sounds'
+import type { RevealMode } from '@/types'
 
 type BidWithTeam = {
   id: string
@@ -32,6 +33,16 @@ function shuffle<T>(arr: T[]): T[] {
     ;[a[i], a[j]] = [a[j], a[i]]
   }
   return a
+}
+
+// Weighted random order (Efraimidis–Spirakis): each bid gets key = U^(1/amount²);
+// sorting ascending puts the largest key last, so P(revealed last) ∝ amount².
+// High bids tend to reveal near the end — dramatic, but never guaranteed.
+function weightedRevealOrder<T extends { amount: number }>(bids: T[]): T[] {
+  return bids
+    .map(b => ({ b, key: Math.random() ** (1 / (b.amount * b.amount)) }))
+    .sort((x, y) => x.key - y.key)
+    .map(x => x.b)
 }
 
 function spawnConfetti() {
@@ -86,9 +97,10 @@ interface Props {
   recentlyCompleted?: RecentlyCompleted
   myTeamId?: string | null
   varGifUrls?: string[]
+  revealMode?: RevealMode
 }
 
-export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCompleted, myTeamId, varGifUrls }: Props) {
+export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCompleted, myTeamId, varGifUrls, revealMode = 'random' }: Props) {
   const router = useRouter()
   const [phase, setPhase] = useState<Phase>('idle')
   const [chosenVarGif, setChosenVarGif] = useState<string | null>(null)
@@ -197,7 +209,7 @@ export default function BidRevealOverlay({ leagueId, activeAuctionId, recentlyCo
     const maxBidAmount = Math.max(...allBids.map(b => b.amount))
     const isTieBroken = dbTieBroken || allBids.filter(b => b.amount === maxBidAmount).length >= 2
 
-    const shuffled = shuffle(allBids)
+    const shuffled = revealMode === 'weighted' ? weightedRevealOrder(allBids) : shuffle(allBids)
     const winnerBid = shuffled.find(b => b.team_id === winningTeamId) ?? null
     const winnerInfo = winnerBid
       ? {

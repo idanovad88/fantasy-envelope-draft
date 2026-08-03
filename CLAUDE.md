@@ -50,7 +50,7 @@ Mutations go through API routes in `app/api/`. These routes use `createAdminClie
 
 ### Key types (`types/index.ts`)
 
-- **League** — single league with status (`setup | lottery | active | paused | completed`), budget, `players_per_team`, `nomination_interval_hours`, `reveal_before_minutes`, `created_by` (UUID of creator), `roster_slots` (JSONB, optional — see Roster slots below), `draft_type` (`'envelope' | 'snake'`), `pick_timeout_minutes` (nullable), `snake_round_config` (boolean[] | null — per-round reversal; null = standard snake), `notify_before_minutes` (INTEGER NOT NULL DEFAULT 1, CHECK 1–60 — envelope push reminder lead time)
+- **League** — single league with status (`setup | lottery | active | paused | completed`), budget, `players_per_team`, `nomination_interval_hours`, `reveal_before_minutes`, `created_by` (UUID of creator), `roster_slots` (JSONB, optional — see Roster slots below), `draft_type` (`'envelope' | 'snake'`), `pick_timeout_minutes` (nullable), `snake_round_config` (boolean[] | null — per-round reversal; null = standard snake), `notify_before_minutes` (INTEGER NOT NULL DEFAULT 1, CHECK 1–60 — envelope push reminder lead time), `reveal_mode` (TEXT NOT NULL DEFAULT `'random'`, CHECK `'random' | 'weighted'` — envelope bid-reveal ordering; see **Bid reveal ordering** below)
 - **Team** — user's team, tracks `budget_remaining`, `player_count`, `priority_rank` (nomination/pick order), `tiebreak_rank` (tiebreak priority order for envelope only), `is_complete`, `approved`
 - **Player** — status: `available | on_auction | drafted`; `roster_slot` (TEXT, optional — assigned after draft)
 - **Auction** — status: `pending | active | revealed | completed`; has `reveal_time` computed at nomination time (envelope only)
@@ -233,6 +233,15 @@ Leagues can optionally define a roster slot configuration via `roster_slots` JSO
 - After each pick (auction resolve or snake pick), `assign_roster_slot(player_id, team_id, league_id)` (Supabase function) assigns the best available slot: specific position (PG/SG/…) → combo (G/F) → UTIL → BENCH.
 - Team pages display players sorted by slot order; each player shows a blue badge with their slot. If the player's actual position differs from the slot, it appears in grey parentheses.
 - Migration: `supabase/migration_roster_slots.sql` — adds `roster_slots` to `leagues`, `roster_slot` to `players`, creates `assign_roster_slot()`, and updates `resolve_auction()` to call it.
+
+### Bid reveal ordering (envelope only)
+
+The dramatic reveal (`components/BidRevealOverlay.tsx`) shows sealed bids one at a time, then the winner in a separate finale phase. The order the bid tiles animate in is **computed client-side per viewer** (not stored in the DB — order differs between viewers, and always has), and is selected by `leagues.reveal_mode`:
+
+- `'random'` (default) — uniform Fisher-Yates `shuffle`, the original behavior.
+- `'weighted'` — `weightedRevealOrder()`: each bid gets key `Math.random() ** (1 / amount²)`, sorted ascending so the largest key lands last. By Efraimidis–Spirakis, `P(revealed last) ∝ amount²`, so high bids tend to reveal near the end — dramatic but never guaranteed.
+
+The winner finale is unchanged and independent of this order. Set in **Admin → League Settings** ("סדר חשיפת הצעות", envelope only), flows through `saveLeague()` → `/api/admin/save-league` (whitelisted + enum-validated), and is passed to the overlay as `revealMode` from `app/(app)/auction/page.tsx`. Migration: `supabase/migration_reveal_mode.sql` — apply before deploying (a missing column makes PostgREST reject the whole league-settings save, like `notify_before_minutes`).
 
 ### Push notifications (envelope only)
 
