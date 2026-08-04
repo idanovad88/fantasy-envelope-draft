@@ -35,12 +35,14 @@ function shuffle<T>(arr: T[]): T[] {
   return a
 }
 
-// Weighted random order (Efraimidis–Spirakis): each bid gets key = U^(1/amount²);
-// sorting ascending puts the largest key last, so P(revealed last) ∝ amount².
+// Weighted random order (Efraimidis–Spirakis): each bid gets key = U^(1/amount⁴);
+// sorting ascending puts the largest key last, so P(revealed last) ∝ amount⁴.
+// The 4th power (up from amount²) makes the effect strong even when bids are close:
+// e.g. for 15/18/22/25 the top bid reveals last ~50% of the time instead of ~38%.
 // High bids tend to reveal near the end — dramatic, but never guaranteed.
 function weightedRevealOrder<T extends { amount: number }>(bids: T[]): T[] {
   return bids
-    .map(b => ({ b, key: Math.random() ** (1 / (b.amount * b.amount)) }))
+    .map(b => ({ b, key: Math.random() ** (1 / (b.amount ** 4)) }))
     .sort((x, y) => x.key - y.key)
     .map(x => x.b)
 }

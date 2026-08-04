@@ -239,7 +239,7 @@ Leagues can optionally define a roster slot configuration via `roster_slots` JSO
 The dramatic reveal (`components/BidRevealOverlay.tsx`) shows sealed bids one at a time, then the winner in a separate finale phase. The order the bid tiles animate in is **computed client-side per viewer** (not stored in the DB — order differs between viewers, and always has), and is selected by `leagues.reveal_mode`:
 
 - `'random'` (default) — uniform Fisher-Yates `shuffle`, the original behavior.
-- `'weighted'` — `weightedRevealOrder()`: each bid gets key `Math.random() ** (1 / amount²)`, sorted ascending so the largest key lands last. By Efraimidis–Spirakis, `P(revealed last) ∝ amount²`, so high bids tend to reveal near the end — dramatic but never guaranteed.
+- `'weighted'` — `weightedRevealOrder()`: each bid gets key `Math.random() ** (1 / amount⁴)`, sorted ascending so the largest key lands last. By Efraimidis–Spirakis, `P(revealed last) ∝ amount⁴`, so high bids tend to reveal near the end — dramatic but never guaranteed. The 4th power (up from amount²) keeps the effect strong even when bids are close together.
 
 The winner finale is unchanged and independent of this order. Set in **Admin → League Settings** ("סדר חשיפת הצעות", envelope only), flows through `saveLeague()` → `/api/admin/save-league` (whitelisted + enum-validated), and is passed to the overlay as `revealMode` from `app/(app)/auction/page.tsx`. Migration: `supabase/migration_reveal_mode.sql` — apply before deploying (a missing column makes PostgREST reject the whole league-settings save, like `notify_before_minutes`).
 
