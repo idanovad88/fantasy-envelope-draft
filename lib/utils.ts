@@ -135,41 +135,47 @@ export function getFuturePickNumbersForTeam(
   return result
 }
 
-// Envelope nomination order. Only teams that can actually nominate appear: not
-// complete, ranked, and able to afford the $1 auto-bid nominating forces.
+// Envelope nomination order. Every ranked team is listed, including ones that
+// can no longer nominate: a team that filled its roster keeps its priority_rank
+// and rises as the teams above it are demoted. `canNominate` is what marks a
+// team as still in play — false once the roster is full, or once the team
+// cannot afford the $1 auto-bid that nominating forces (getMaxBid already
+// reserves $1 per remaining slot). Callers that hand out an actual turn — the
+// admin nominator dropdown — must filter on it; the dashboard list shows the
+// whole rotation and dims the rest.
 //
 // A team counts as "already nominated" once it holds an auction that is active
 // or merely scheduled (pending) — its priority_rank only rotates when that
 // auction resolves, so until then it must not be shown as next up. The order
-// itself never moves: "next" is simply the first team in priority_rank order
-// that has not nominated yet, so nominating out of turn does not cost the team
-// that was skipped its turn.
+// itself never moves: "next" is simply the first eligible team in priority_rank
+// order that has not nominated yet, so nominating out of turn does not cost the
+// team that was skipped its turn.
 export function getEnvelopeNominationOrder(
   teams: Team[],
   openNominatorIds: Iterable<string | null | undefined>,
   playersPerTeam?: number
-): { team: Team; hasNominated: boolean; isNext: boolean }[] {
+): { team: Team; hasNominated: boolean; isNext: boolean; canNominate: boolean }[] {
   const nominated = new Set<string>()
   for (const id of openNominatorIds) if (id) nominated.add(id)
 
   const ordered = teams
-    .filter(t => {
-      // Out of the rotation for good once the roster is full.
-      if (t.is_complete || t.priority_rank === null) return false
-      // Nominating forces a $1 auto-bid, so a team that cannot afford one is
-      // out too — getMaxBid already reserves $1 per remaining slot.
-      if (playersPerTeam != null &&
-          getMaxBid(t.budget_remaining, t.player_count, playersPerTeam) < 1) return false
-      return true
-    })
+    .filter(t => t.priority_rank !== null)
     .sort((a, b) => (a.priority_rank ?? 99) - (b.priority_rank ?? 99))
 
-  const nextId = ordered.find(t => !nominated.has(t.id))?.id ?? null
+  const canNominate = (t: Team) => {
+    if (t.is_complete) return false
+    if (playersPerTeam != null &&
+        getMaxBid(t.budget_remaining, t.player_count, playersPerTeam) < 1) return false
+    return true
+  }
+
+  const nextId = ordered.find(t => canNominate(t) && !nominated.has(t.id))?.id ?? null
 
   return ordered.map(team => ({
     team,
     hasNominated: nominated.has(team.id),
     isNext: team.id === nextId,
+    canNominate: canNominate(team),
   }))
 }
 

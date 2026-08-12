@@ -13,6 +13,22 @@ import AssistantManager from '@/components/AssistantManager'
 import PushSubscribe from '@/components/PushSubscribe'
 import { activateOverdueSnakeDraft } from '@/lib/activateDraft'
 
+// Subtle horizontal progress row: a thin dark track that blends into the card,
+// with a muted fill showing the portion of the draft/budget already used up.
+// Deliberately understated so it reads as a hint, not a headline.
+function ProgressRow({ label, pct }: { label: string; pct: number }) {
+  const clamped = Math.max(0, Math.min(100, Math.round(pct)))
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-xs flex-shrink-0" style={{ color: 'var(--muted)', width: '3rem' }}>{label}</span>
+      <div className="flex-1 rounded-full overflow-hidden" style={{ height: 6, background: 'var(--background)' }}>
+        <div style={{ height: '100%', width: `${clamped}%`, background: 'var(--muted)', borderRadius: 9999, transition: 'width 0.4s ease' }} />
+      </div>
+      <span className="text-xs font-medium flex-shrink-0 text-left" style={{ color: 'var(--muted)', width: '2.25rem' }}>{clamped}%</span>
+    </div>
+  )
+}
+
 export default async function DashboardPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -87,6 +103,30 @@ export default async function DashboardPage() {
         </div>
 
         <RealtimeRefresher leagueId={typedLeague.id} />
+
+        {/* Draft progress — snake has no budget, only picks made vs remaining */}
+        <div className="card mb-4">
+          <h2 className="font-bold mb-1">מצב הדראפט</h2>
+          <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
+            שחקנים שנבחרו בכל הליגה
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
+              <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>שחקנים שנבחרו</p>
+              <p className="font-bold text-xl">
+                {completedCount}
+                <span className="text-sm font-normal" style={{ color: 'var(--muted)' }}>/{totalPicks}</span>
+              </p>
+            </div>
+            <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
+              <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>שחקנים שנותרו</p>
+              <p className="font-bold text-xl">{Math.max(0, totalPicks - completedCount)}</p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2.5 mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+            <ProgressRow label="דראפט" pct={totalPicks > 0 ? (completedCount / totalPicks) * 100 : 0} />
+          </div>
+        </div>
 
         {/* Countdown before draft starts */}
         {typedLeague.draft_start_time && ['setup', 'lottery'].includes(typedLeague.status) && (
@@ -267,7 +307,9 @@ export default async function DashboardPage() {
     ((openAuctions || []) as { nominating_team_id: string | null }[]).map(a => a.nominating_team_id),
     typedLeague?.players_per_team
   )
-  const allTeamsNominated = nominationOrder.length > 0 && !nominationOrder.some(n => n.isNext)
+  // Completed teams stay in the list but can never be "next", so the waiting
+  // notice has to key off the teams that are still eligible for a turn.
+  const allTeamsNominated = nominationOrder.some(n => n.canNominate) && !nominationOrder.some(n => n.isNext)
 
   const { data: completedAuctions } = league
     ? await supabase
@@ -304,6 +346,18 @@ export default async function DashboardPage() {
     .map(t => ({ team: t, score: prairScore[t.id] ?? 0 }))
     .sort((a, b) => b.score - a.score)
 
+  // League-wide draft progress: players bought/left and budget spent/remaining.
+  // Totals derive from the actual teams so spent + remaining always add up.
+  const perTeamBudget = typedLeague?.budget_per_team ?? 0
+  const totalSlots = typedTeams.length * (typedLeague?.players_per_team ?? 0)
+  const playersBought = typedTeams.reduce((sum, t) => sum + t.player_count, 0)
+  const playersLeft = Math.max(0, totalSlots - playersBought)
+  const totalBudget = typedTeams.length * perTeamBudget
+  const budgetRemaining = typedTeams.reduce((sum, t) => sum + t.budget_remaining, 0)
+  const budgetSpent = Math.max(0, totalBudget - budgetRemaining)
+  const draftPct = totalSlots > 0 ? (playersBought / totalSlots) * 100 : 0
+  const budgetPct = totalBudget > 0 ? (budgetSpent / totalBudget) * 100 : 0
+
   return (
     <div className="max-w-4xl mx-auto">
       <div className="mb-6">
@@ -319,6 +373,40 @@ export default async function DashboardPage() {
           </p>
         )}
       </div>
+
+      {typedLeague && (
+        <div className="card mb-4">
+          <h2 className="font-bold mb-1">מצב הדראפט</h2>
+          <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
+            שחקנים שנקנו ותקציב שנוצל בכל הליגה
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
+              <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>שחקנים שנקנו</p>
+              <p className="font-bold text-xl">
+                {playersBought}
+                <span className="text-sm font-normal" style={{ color: 'var(--muted)' }}>/{totalSlots}</span>
+              </p>
+            </div>
+            <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
+              <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>שחקנים שנותרו</p>
+              <p className="font-bold text-xl">{playersLeft}</p>
+            </div>
+            <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
+              <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>תקציב שבוזבז</p>
+              <p className="font-bold text-xl" style={{ color: 'var(--danger)' }}>${budgetSpent}</p>
+            </div>
+            <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
+              <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>תקציב שנותר</p>
+              <p className="font-bold text-xl" style={{ color: 'var(--success)' }}>${budgetRemaining}</p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2.5 mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+            <ProgressRow label="דראפט" pct={draftPct} />
+            <ProgressRow label="תקציב" pct={budgetPct} />
+          </div>
+        </div>
+      )}
 
       <div className={`grid gap-4 ${typedFeatured && isActive ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2'}`}>
         <div className="card">
@@ -443,19 +531,21 @@ export default async function DashboardPage() {
             <p className="text-sm" style={{ color: 'var(--muted)' }}>הגרלה טרם בוצעה</p>
           ) : (
             <div className="flex flex-col gap-1">
-              {nominationOrder.map(({ team, hasNominated, isNext }, i) => {
+              {nominationOrder.map(({ team, hasNominated, isNext, canNominate }, i) => {
                 const isMe = team.user_id === user?.id
                 return (
                   <div key={team.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm"
                     style={{
                       background: isMe ? 'rgba(99,102,241,0.1)' : isNext ? 'rgba(234,179,8,0.08)' : 'var(--background)',
                       border: isMe ? '1px solid rgba(99,102,241,0.3)' : isNext ? '1px solid rgba(234,179,8,0.25)' : '1px solid transparent',
-                      // Dimmed while its auction is open; no badge — "הבא" alone
-                      // carries the turn.
-                      opacity: hasNominated ? 0.6 : 1,
+                      // Dimmed while its auction is open (no badge — "הבא" alone
+                      // carries the turn), and for a team that keeps its slot in
+                      // the rotation but can no longer take a turn.
+                      opacity: hasNominated || !canNominate ? 0.6 : 1,
                     }}>
                     <span className="font-bold w-5 text-center" style={{ color: isNext ? 'var(--warning)' : 'var(--muted)' }}>{i + 1}</span>
                     <span className="font-medium flex-1">{team.name}</span>
+                    {team.is_complete && <span className="badge badge-gray text-xs">הושלם</span>}
                     {isNext && <span className="badge badge-yellow text-xs">הבא</span>}
                     {isMe && <span className="badge badge-blue text-xs">אתה</span>}
                   </div>
@@ -476,27 +566,36 @@ export default async function DashboardPage() {
           {typedTeams.filter(t => t.tiebreak_rank !== null).length === 0 ? (
             <p className="text-sm" style={{ color: 'var(--muted)' }}>הגרלה טרם בוצעה</p>
           ) : (
-            <div className="flex flex-col gap-1">
-              {typedTeams
+            (() => {
+              const tiebreakOrder = typedTeams
                 .filter(t => t.tiebreak_rank !== null)
                 .sort((a, b) => (a.tiebreak_rank ?? 99) - (b.tiebreak_rank ?? 99))
-                .map((team, i) => {
-                  const isFirst = i === 0
-                  const isMe = team.user_id === user?.id
-                  return (
-                    <div key={team.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm"
-                      style={{
-                        background: isMe ? 'rgba(99,102,241,0.1)' : 'var(--background)',
-                        border: isMe ? '1px solid rgba(99,102,241,0.3)' : '1px solid transparent',
-                      }}>
-                      <span className="font-bold w-5 text-center" style={{ color: isFirst ? 'var(--success)' : 'var(--muted)' }}>{i + 1}</span>
-                      <span className="font-medium flex-1">{team.name}</span>
-                      {team.is_complete && <span className="badge badge-gray text-xs">הושלם</span>}
-                      {isMe && <span className="badge badge-blue text-xs">אתה</span>}
-                    </div>
-                  )
-                })}
-            </div>
+              // A completed team keeps its slot and rises as the teams above it
+              // are demoted, but it can no longer win a player — so the green
+              // "wins equal bids" marker belongs to the first team that still can.
+              const topEligibleId = tiebreakOrder.find(t => !t.is_complete)?.id
+              return (
+                <div className="flex flex-col gap-1">
+                  {tiebreakOrder.map((team, i) => {
+                    const isTopEligible = team.id === topEligibleId
+                    const isMe = team.user_id === user?.id
+                    return (
+                      <div key={team.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm"
+                        style={{
+                          background: isMe ? 'rgba(99,102,241,0.1)' : 'var(--background)',
+                          border: isMe ? '1px solid rgba(99,102,241,0.3)' : '1px solid transparent',
+                          opacity: team.is_complete ? 0.6 : 1,
+                        }}>
+                        <span className="font-bold w-5 text-center" style={{ color: isTopEligible ? 'var(--success)' : 'var(--muted)' }}>{i + 1}</span>
+                        <span className="font-medium flex-1">{team.name}</span>
+                        {team.is_complete && <span className="badge badge-gray text-xs">הושלם</span>}
+                        {isMe && <span className="badge badge-blue text-xs">אתה</span>}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()
           )}
         </div>
       </div>

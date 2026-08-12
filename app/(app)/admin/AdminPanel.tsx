@@ -947,13 +947,19 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 <label className="block text-sm font-medium mb-1.5">קבוצה מעלה (מנומינייטור)</label>
                 <select className="input" value={selectedNominator} onChange={e => setSelectedNominator(e.target.value)}>
                   <option value="">בחר קבוצה...</option>
-                  {/* Only teams eligible to nominate are listed: not complete,
-                      and able to afford the $1 auto-bid. */}
-                  {nominationOrder.map(({ team, isNext }, i) => (
-                    <option key={team.id} value={team.id}>
-                      #{i + 1} {team.name}{isNext ? ' — הבא' : ''}
-                    </option>
-                  ))}
+                  {/* The order lists every ranked team, completed ones included
+                      (they keep their slot and rise). Only teams that can still
+                      take a turn are offered here — not complete, and able to
+                      afford the $1 auto-bid. The number is the position in the
+                      full order, so it matches the dashboard card. */}
+                  {nominationOrder
+                    .map((entry, i) => ({ ...entry, position: i + 1 }))
+                    .filter(({ canNominate }) => canNominate)
+                    .map(({ team, isNext, position }) => (
+                      <option key={team.id} value={team.id}>
+                        #{position} {team.name}{isNext ? ' — הבא' : ''}
+                      </option>
+                    ))}
                 </select>
               </div>
 
