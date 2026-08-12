@@ -26,8 +26,8 @@ interface DueAuction {
 /**
  * Called every minute by Supabase pg_cron (see supabase/cron_notify_auctions.sql).
  * Sends a Web Push reminder to every manager and assistant manager of an
- * approved, non-complete team, for any envelope auction that closes within its
- * league's notify_before_minutes.
+ * approved team, for any envelope auction that closes within its league's
+ * notify_before_minutes.
  */
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET
@@ -96,11 +96,12 @@ export async function GET(req: Request) {
     processed++
 
     // Every manager and assistant manager in the league gets the reminder,
-    // whether or not they have already bid. Completed rosters are excluded —
-    // a full team can no longer bid, so a reminder would just be noise.
+    // whether or not they have already bid, and whether or not their roster is
+    // complete — a finished team still follows the draft, so it is told when an
+    // auction is about to close.
     const { data: teams } = await admin
       .from('teams').select('user_id, assistant_user_id')
-      .eq('league_id', auction.league_id).eq('approved', true).eq('is_complete', false)
+      .eq('league_id', auction.league_id).eq('approved', true)
 
     const userIds = [...new Set(
       (teams ?? [])
