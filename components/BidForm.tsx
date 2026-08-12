@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getMaxBid } from '@/lib/utils'
 import { unlockAudio } from '@/lib/sounds'
@@ -12,6 +13,8 @@ interface BidFormProps {
   league: League
   existingBid?: number
   revealTime: string
+  /** The team nominated this player — its $1 auto-bid cannot be withdrawn. */
+  isNominator?: boolean
   onBidSubmitted?: () => void
 }
 
@@ -33,13 +36,18 @@ function useCountdown(targetDate: string) {
   return cd
 }
 
-export default function BidForm({ auctionId, team, league, existingBid, revealTime, onBidSubmitted }: BidFormProps) {
+export default function BidForm({ auctionId, team, league, existingBid, revealTime, isNominator, onBidSubmitted }: BidFormProps) {
   const [amount, setAmount] = useState(existingBid ?? 1)
   const [loading, setLoading] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [confirmCancel, setConfirmCancel] = useState(false)
   const [message, setMessage] = useState('')
   const supabase = createClient()
+  const router = useRouter()
   const cd = useCountdown(revealTime)
   const expired = !cd
+  // The nominating team's auto-bid is mandatory (enforced again server-side).
+  const canCancel = existingBid !== undefined && !expired && !isNominator
 
   const maxBid = getMaxBid(team.budget_remaining, team.player_count, league.players_per_team)
 
@@ -65,6 +73,29 @@ export default function BidForm({ auctionId, team, league, existingBid, revealTi
       onBidSubmitted?.()
     }
     setLoading(false)
+  }
+
+  async function handleCancel() {
+    if (!confirmCancel) { setConfirmCancel(true); return }
+    setCancelling(true)
+    setMessage('')
+
+    const res = await fetch('/api/cancel-bid', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ auctionId }),
+    })
+    const data = await res.json().catch(() => ({}))
+
+    if (!res.ok) {
+      setMessage('שגיאה: ' + (data?.error ?? 'לא ניתן לבטל את ההצעה'))
+    } else {
+      setMessage('ההצעה בוטלה')
+      setAmount(1)
+      router.refresh()
+    }
+    setConfirmCancel(false)
+    setCancelling(false)
   }
 
   return (
@@ -135,18 +166,34 @@ export default function BidForm({ auctionId, team, league, existingBid, revealTi
 
       {message && (
         <p className="text-sm mt-2"
-          style={{ color: message.startsWith('שגיאה') || message.includes('עבר') ? 'var(--danger)' : 'var(--success)' }}>
+          style={{
+            color: message.startsWith('שגיאה') || message.includes('עבר')
+              ? 'var(--danger)'
+              : message.includes('בוטלה') ? 'var(--warning)' : 'var(--success)'
+          }}>
           {message}
         </p>
       )}
 
-      <button type="submit" className="btn btn-primary w-full mt-3" disabled={loading || expired}>
+      <button type="submit" className="btn btn-primary w-full mt-3" disabled={loading || cancelling || expired}>
         {expired ? 'הזמן עבר' : loading ? 'שומר...' : existingBid !== undefined ? 'עדכן הצעה' : 'הגש הצעה'}
       </button>
+
+      {canCancel && (
+        <button
+          type="button"
+          onClick={handleCancel}
+          className={`btn w-full mt-2 ${confirmCancel ? 'btn-danger' : 'btn-outline'}`}
+          disabled={loading || cancelling}
+        >
+          {cancelling ? 'מבטל...' : confirmCancel ? 'בטוח? לחץ שוב לביטול' : 'בטל הצעה'}
+        </button>
+      )}
 
       {existingBid !== undefined && !expired && (
         <p className="text-xs text-center mt-2" style={{ color: 'var(--muted)' }}>
           הצעה נוכחית: ${existingBid}
+          {isNominator && ' · העלית את השחקן — ההצעה חייבת להישאר'}
         </p>
       )}
     </form>

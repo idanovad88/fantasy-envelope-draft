@@ -261,6 +261,14 @@ Leagues can optionally define a roster slot configuration via `roster_slots` JSO
 - Team pages display players sorted by slot order; each player shows a blue badge with their slot. If the player's actual position differs from the slot, it appears in grey parentheses.
 - Migration: `supabase/migration_roster_slots.sql` — adds `roster_slots` to `leagues`, `roster_slot` to `players`, creates `assign_roster_slot()`, and updates `resolve_auction()` to call it.
 
+### Cancelling a bid (envelope only)
+
+A team can withdraw its sealed bid entirely while the auction is still open — `BidForm` shows a "בטל הצעה" button (two-step: the second click confirms) whenever the team already has a bid and the deadline hasn't passed. Lowering the bid is not a substitute: the minimum is $1, so without this a team that bid the floor is locked in.
+
+- **The nominating team cannot cancel.** Its $1 auto-bid (`trg_auto_bid_nominating_team`) is what nominating *means* — removing it would let a team put a player up and then walk away, potentially leaving the auction with no bids at all. `BidForm` hides the button when `isNominator`, and `POST /api/cancel-bid` returns 403 for it regardless of what the client sends. Both callers (`app/(app)/auction/page.tsx`, `app/(app)/page.tsx`) pass `isNominator={auction.nominating_team_id === myTeam.id}`.
+- **The delete runs through `createAdminClient()`**, not the browser client: `bids` has SELECT/INSERT/UPDATE policies but **no DELETE policy**, and adding one would mean another hand-run migration. `/api/cancel-bid` re-checks in the route everything the `bids_team_update` policy checks — team is the caller's (via `myTeamOr`, so assistants can cancel too), auction is `active`, `reveal_time` still in the future — plus the nominator rule.
+- Nothing downstream needed changing: `resolve_auction()` already handles an auction that ends with zero eligible bids (player returns to the pool, nomination turn still rotates).
+
 ### Bid reveal ordering (envelope only)
 
 The dramatic reveal (`components/BidRevealOverlay.tsx`) shows sealed bids one at a time, then the winner in a separate finale phase. The order the bid tiles animate in is **computed client-side per viewer** (not stored in the DB — order differs between viewers, and always has), and is selected by `leagues.reveal_mode`:
@@ -272,7 +280,7 @@ The winner finale is unchanged and independent of this order. Set in **Admin →
 
 ### Push notifications (envelope only)
 
-Web Push reminder sent `leagues.notify_before_minutes` (default 1) before an auction's `reveal_time`, **to every team manager and assistant manager in the league** — regardless of whether they've already bid. Completed rosters (`is_complete = true`) are excluded, since a full team can no longer bid. Works with the app closed. This is the only scheduled server-side work in the project.
+Web Push reminder sent `leagues.notify_before_minutes` (default 1) before an auction's `reveal_time`, **to every team manager and assistant manager in the league** — regardless of whether they've already bid, and regardless of `is_complete`. A finished roster can no longer bid but still follows the draft, so it is told when an auction is about to close. The only filter on recipients is `approved = true`. Works with the app closed. This is the only scheduled server-side work in the project.
 
 ⚠️ **The schedule lives in the database, not in this repo.** Nothing in the codebase reveals that a cron exists. It is a `pg_cron` job created by hand once from `supabase/cron_notify_auctions.sql`:
 ```sql
@@ -286,7 +294,7 @@ Requires the `pg_cron` and `pg_net` extensions (Supabase Dashboard → Database 
 - `public/sw.js` — service worker: `push` + `notificationclick` (opens `/auction`). Deliberately **no `fetch` handler** (would break cookie-auth SSR). Must stay excluded in the `proxy.ts` matcher.
 - `components/PushSubscribe.tsx` — opt-in button, mounted in the "my team" card of the **envelope** dashboard only. `Notification.requestPermission()` must stay the **first** `await` — iOS drops the user-gesture context otherwise.
 - `POST /api/push/{subscribe,unsubscribe}` → `push_subscriptions` (service-role-only table, RLS with no policies, like `team_invites` — an endpoint is a bearer capability to push to a device and must never be publicly selectable). `subscribe` upserts on `endpoint`, so re-POSTing on every mount is free and self-heals rotated endpoints.
-- `GET /api/cron/notify-auctions` — `runtime = 'nodejs'` (web-push needs Node crypto; edge breaks it). Bearer `CRON_SECRET`. Also activates overdue `pending` auctions first, since nothing else does so on a timer. Recipients = `user_id` + `assistant_user_id` of every approved, non-complete team.
+- `GET /api/cron/notify-auctions` — `runtime = 'nodejs'` (web-push needs Node crypto; edge breaks it). Bearer `CRON_SECRET`. Also activates overdue `pending` auctions first, since nothing else does so on a timer. Recipients = `user_id` + `assistant_user_id` of every approved team (complete rosters included).
 
 **Idempotency:** `auction_notifications` with `UNIQUE (auction_id, kind, reveal_time)`. The cron inserts the claim row **before** sending, so overlapping ticks can't double-send. `reveal_time` is part of the key on purpose: if an admin moves the deadline, that's a new key and a fresh reminder goes out (the `tag` on the notification replaces the stale one in the tray).
 

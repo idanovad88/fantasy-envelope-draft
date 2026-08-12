@@ -442,6 +442,7 @@ export default async function DashboardPage() {
                   league={typedLeague}
                   existingBid={myActiveBid?.amount}
                   revealTime={typedFeatured.reveal_time}
+                  isNominator={typedFeatured.nominating_team_id === typedMyTeam.id}
                 />
               ) : (
                 <Link href="/auction" className="btn btn-outline w-full text-sm">
