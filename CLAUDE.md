@@ -244,6 +244,13 @@ SELECT prosrc FROM pg_proc WHERE proname = 'resolve_auction';
 **DB migrations, in order:**
 1. `supabase/migration_fix_nomination_rotation.sql` — self-contained and idempotent. Creates `demote_nomination_rank()` / `demote_tiebreak_rank()`, repoints `demote_priority()` at the nomination rotation, replaces `resolve_auction()` (correct `MAX` filter, NULL-winner guard, `assign_roster_slot()` preserved, the two rank orders finally independent), and creates the `trg_auto_bid_nominating_team` trigger. Supersedes `migration_auction_priority_tiebreak.sql` and `migration_auto_bid_trigger.sql` — do not run those.
 2. `supabase/migration_completed_teams_keep_rank.sql` — keeps completed teams in both orders (see **Completed teams keep their rank** above). Replaces both demotion helpers, neuters `remove_complete_team_from_priority()`, replaces `resolve_auction()` again, and backfills/renumbers existing envelope leagues. Also idempotent; run after #1.
+3. `supabase/repair_missing_tiebreak_rank.sql` — one-off data repair, already applied. **#2's backfill only restores `priority_rank`**; it assumes `tiebreak_rank` is never NULLed, and in the live league "דראפט המעטפות הרשמי של ישראל" that assumption was wrong — the completed team `אדם` had a NULL `tiebreak_rank`, so #2's renumber (`WHERE tiebreak_rank IS NOT NULL`) skipped it and it stayed missing from "סדר פריוריטי". Its slot was reconstructed from its last `tiebreak_demotion` row in `priority_log` rather than appended at the bottom. **What NULLed it is still unknown** — no code path in the repo does, and the helper is a no-op now, so if another team's `tiebreak_rank` goes NULL after completing, something not yet identified is doing it. Worth checking after each roster completes:
+   ```sql
+   SELECT name, priority_rank, tiebreak_rank FROM teams
+   WHERE is_complete AND approved AND (priority_rank IS NULL OR tiebreak_rank IS NULL);
+   ```
+
+**A gap at the top of either order is normal, not corruption.** The gap-free 1..N renumber in #2 is a one-time cleanup; every demotion afterwards writes `MAX(rank) + 1`, so the league drifts to e.g. 2..13 as soon as the team at rank 1 is demoted. The invariants that actually matter are: no duplicate ranks, and every approved team ranked.
 
 ### Roster slots
 
