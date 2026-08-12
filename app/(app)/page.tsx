@@ -342,8 +342,14 @@ export default async function DashboardPage() {
     }
   }
 
+  // A team that finished its roster with money still in the bank never used that
+  // budget on anyone — it counts as overpayment on everything it did buy.
   const prairRanking = typedTeams
-    .map(t => ({ team: t, score: prairScore[t.id] ?? 0 }))
+    .map(t => {
+      const overpay = prairScore[t.id] ?? 0
+      const leftover = t.is_complete ? Math.max(0, t.budget_remaining) : 0
+      return { team: t, overpay, leftover, score: overpay + leftover }
+    })
     .sort((a, b) => b.score - a.score)
 
   // League-wide draft progress: players bought/left and budget spent/remaining.
@@ -604,13 +610,13 @@ export default async function DashboardPage() {
         <div className="card mt-4">
           <h2 className="font-bold mb-1">פראייר הדראפט 🤦</h2>
           <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
-            סה״כ עודף תשלום מעל ההצעה השנייה בכל מכרז
+            סה״כ עודף תשלום מעל ההצעה השנייה בכל מכרז · קבוצה שסיימה נספר לה גם הכסף שנשאר
           </p>
           {prairRanking.length === 0 ? (
             <p className="text-sm" style={{ color: 'var(--muted)' }}>אין נתונים עדיין</p>
           ) : (
             <div className="flex flex-col gap-1">
-              {prairRanking.map(({ team, score }, i) => {
+              {prairRanking.map(({ team, overpay, leftover, score }, i) => {
                 const isMe = team.user_id === user?.id
                 const isFirst = i === 0
                 return (
@@ -622,7 +628,14 @@ export default async function DashboardPage() {
                     <span className="font-bold w-5 text-center" style={{ color: isFirst ? 'var(--danger)' : 'var(--muted)' }}>
                       {i + 1}
                     </span>
-                    <span className="font-medium flex-1">{team.name}</span>
+                    <span className="font-medium flex-1">
+                      {team.name}
+                      {leftover > 0 && (
+                        <span className="text-xs font-normal mr-1.5" style={{ color: 'var(--muted)' }}>
+                          (${overpay} + ${leftover} יתרה)
+                        </span>
+                      )}
+                    </span>
                     <span className="font-bold" style={{ color: isFirst ? 'var(--danger)' : undefined }}>
                       ${score}
                     </span>
