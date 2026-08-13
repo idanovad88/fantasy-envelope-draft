@@ -40,7 +40,6 @@ export default function BidForm({ auctionId, team, league, existingBid, revealTi
   const [amount, setAmount] = useState(existingBid ?? 1)
   const [loading, setLoading] = useState(false)
   const [cancelling, setCancelling] = useState(false)
-  const [confirmCancel, setConfirmCancel] = useState(false)
   const [message, setMessage] = useState('')
   const supabase = createClient()
   const router = useRouter()
@@ -75,8 +74,9 @@ export default function BidForm({ auctionId, team, league, existingBid, revealTi
     setLoading(false)
   }
 
+  // One click, no confirmation step — the bid can simply be submitted again
+  // while the auction is still open, so a mis-click costs nothing.
   async function handleCancel() {
-    if (!confirmCancel) { setConfirmCancel(true); return }
     setCancelling(true)
     setMessage('')
 
@@ -94,7 +94,6 @@ export default function BidForm({ auctionId, team, league, existingBid, revealTi
       setAmount(1)
       router.refresh()
     }
-    setConfirmCancel(false)
     setCancelling(false)
   }
 
@@ -183,10 +182,11 @@ export default function BidForm({ auctionId, team, league, existingBid, revealTi
         <button
           type="button"
           onClick={handleCancel}
-          className={`btn w-full mt-2 ${confirmCancel ? 'btn-danger' : 'btn-outline'}`}
+          className="btn btn-outline w-full mt-2"
+          style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}
           disabled={loading || cancelling}
         >
-          {cancelling ? 'מבטל...' : confirmCancel ? 'בטוח? לחץ שוב לביטול' : 'בטל הצעה'}
+          {cancelling ? 'מבטל...' : 'בטל הצעה'}
         </button>
       )}
 
