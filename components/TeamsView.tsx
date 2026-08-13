@@ -165,8 +165,13 @@ function EmptySlotRow({ label }: { label: string }) {
 
 function RosterBySlots({ roster, rosterSlots, pickNumbers, isSnake }: { roster: Player[]; rosterSlots: Record<string, number>; pickNumbers: Record<string, number>; isSnake?: boolean }) {
   const slots = SLOT_ORDER.filter(s => (rosterSlots[s] ?? 0) > 0)
-  const assignedIds = new Set(roster.filter(p => p.roster_slot != null).map(p => p.id))
-  const unassigned = roster.filter(p => !assignedIds.has(p.id))
+  // Everything the slot rows below won't draw: no slot assigned, or a slot this
+  // league doesn't have. assign_roster_slot() falls back to BENCH when no
+  // eligible slot is free — even when BENCH capacity is 0 — so a player really
+  // can end up outside the configured slots. Never let a drafted player vanish
+  // from the roster; the team paid for him.
+  const shownSlots = new Set(slots)
+  const unassigned = roster.filter(p => p.roster_slot == null || !shownSlots.has(p.roster_slot))
 
   return (
     <div className="flex flex-col gap-1">
@@ -184,7 +189,12 @@ function RosterBySlots({ roster, rosterSlots, pickNumbers, isSnake }: { roster: 
           </div>
         )
       })}
-      {unassigned.map(p => <PlayerRow key={p.id} player={p} pickNumber={pickNumbers[p.id]} isSnake={isSnake} />)}
+      {unassigned.length > 0 && (
+        <div className="mt-1 pt-1 flex flex-col gap-1" style={{ borderTop: '1px dashed var(--border)' }}>
+          <p className="text-xs" style={{ color: 'var(--muted)' }}>ללא עמדה מתאימה</p>
+          {unassigned.map(p => <PlayerRow key={p.id} player={p} pickNumber={pickNumbers[p.id]} isSnake={isSnake} />)}
+        </div>
+      )}
     </div>
   )
 }
