@@ -99,8 +99,15 @@ export default async function AuctionPage() {
   // re-sorted here because the query now fetches descending.
   const pendingAuctions = typedAuctions.filter(a => a.status === 'pending')
     .sort((a, b) => new Date(a.scheduled_start).getTime() - new Date(b.scheduled_start).getTime())
+  // Ordered by when the auction actually resolved (`updated_at`), not by
+  // `reveal_time`. An admin closing an auction early leaves `reveal_time` in the
+  // past — behind auctions that resolved before it — which buried the newest
+  // results mid-list and made them look missing. For every normal auction the
+  // two timestamps match to the second, so the usual order is unchanged.
+  const resolvedAt = (a: { updated_at: string | null; reveal_time: string }) =>
+    new Date(a.updated_at ?? a.reveal_time).getTime()
   const pastAuctions = typedAuctions.filter(a => a.status === 'revealed' || a.status === 'completed')
-    .sort((a, b) => new Date(b.reveal_time).getTime() - new Date(a.reveal_time).getTime())
+    .sort((a, b) => resolvedAt(b) - resolvedAt(a))
 
   return (
     <div className="max-w-2xl mx-auto">

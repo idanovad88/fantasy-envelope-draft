@@ -320,20 +320,35 @@ export default async function DashboardPage() {
         .not('winning_team_id', 'is', null)
     : { data: [] }
 
+  // Paginated on purpose: PostgREST caps a response at 1000 rows, and this league
+  // is already past 1000 bids. A single fetch silently dropped the tail, so whole
+  // auctions came back with no bids at all, their second-highest bid read as 0,
+  // and the overpayment metric below credited the winner with the full price.
   const completedAuctionIds = (completedAuctions ?? []).map((a: { id: string }) => a.id)
-  const { data: completedBids } = completedAuctionIds.length > 0
-    ? await supabase
-        .from('bids')
-        .select('auction_id, team_id, amount')
-        .in('auction_id', completedAuctionIds)
-    : { data: [] }
+  const PAGE = 1000
+  const completedBids: { auction_id: string; team_id: string; amount: number }[] = []
+  for (let from = 0; completedAuctionIds.length > 0; from += PAGE) {
+    const { data: page } = await supabase
+      .from('bids')
+      .select('auction_id, team_id, amount')
+      .in('auction_id', completedAuctionIds)
+      .range(from, from + PAGE - 1)
+    completedBids.push(...(page ?? []))
+    if (!page || page.length < PAGE) break
+  }
+
+  const bidsByAuction = new Map<string, { team_id: string; amount: number }[]>()
+  for (const b of completedBids) {
+    const list = bidsByAuction.get(b.auction_id)
+    if (list) list.push(b)
+    else bidsByAuction.set(b.auction_id, [b])
+  }
 
   const prairScore: Record<string, number> = {}
   for (const auction of completedAuctions ?? []) {
     const a = auction as { id: string; winning_team_id: string | null; winning_bid: number | null }
     if (!a.winning_team_id || !a.winning_bid) continue
-    const auctionBids = (completedBids ?? []) as { auction_id: string; team_id: string; amount: number }[]
-    const forThisAuction = auctionBids.filter(b => b.auction_id === a.id)
+    const forThisAuction = bidsByAuction.get(a.id) ?? []
     const otherBids = forThisAuction.filter(b => b.team_id !== a.winning_team_id)
     const secondHighest = otherBids.length > 0 ? Math.max(...otherBids.map(b => b.amount)) : 0
     const diff = a.winning_bid - secondHighest
