@@ -2,7 +2,7 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { formatTime, formatDateTime, formatTimeSince, getCurrentSnakePicker, buildPickOverridesMap, getEnvelopeNominationOrder } from '@/lib/utils'
+import { formatTime, formatDateTime, formatTimeSince, getCurrentSnakePicker, buildPickOverridesMap, getEnvelopeNominationOrder, getMaxBid } from '@/lib/utils'
 import { myTeamOr } from '@/lib/team'
 import type { League, Team, Auction, SnakePick } from '@/types'
 import DraftCountdown from '@/components/DraftCountdown'
@@ -373,6 +373,17 @@ export default async function DashboardPage() {
     })
     .sort((a, b) => b.score - a.score)
 
+  // Summary table — one row per approved team, sorted by the money that still
+  // matters: the most it can put on the next player. getMaxBid already reserves
+  // $1 for every slot after this one, so a full roster reads 0.
+  const summaryRows = typedTeams
+    .filter(t => t.approved)
+    .map(t => ({
+      team: t,
+      maxBid: getMaxBid(t.budget_remaining, t.player_count, typedLeague?.players_per_team ?? 0),
+    }))
+    .sort((a, b) => b.maxBid - a.maxBid || b.team.budget_remaining - a.team.budget_remaining)
+
   // League-wide draft progress: players bought/left and budget spent/remaining.
   // Totals derive from the actual teams so spent + remaining always add up.
   const perTeamBudget = typedLeague?.budget_per_team ?? 0
@@ -551,8 +562,61 @@ export default async function DashboardPage() {
 
       {typedLeague && <RealtimeRefresher leagueId={typedLeague.id} />}
 
+      {/* Four cards in one grid so the desktop layout is טבלה מסכמת | סדר פריוריטי
+          over סדר העלאות | פראייר, while the mobile (single column) order stays
+          טבלה מסכמת → סדר העלאות → סדר פריוריטי → פראייר. Hence the md:order-*. */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-        <div className="card">
+        {typedLeague && (
+          <div className="card md:order-1">
+            <h2 className="font-bold mb-1">טבלה מסכמת</h2>
+            <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>תקציב, שחקנים והצעה מקסימלית לכל קבוצה</p>
+            {summaryRows.length === 0 ? (
+              <p className="text-sm" style={{ color: 'var(--muted)' }}>אין קבוצות עדיין</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr style={{ color: 'var(--muted)' }}>
+                      <th className="text-right font-normal text-xs pb-2">קבוצה</th>
+                      <th className="text-center font-normal text-xs pb-2">תקציב</th>
+                      <th className="text-center font-normal text-xs pb-2">שחקנים</th>
+                      <th className="text-center font-normal text-xs pb-2">מקס׳ הצעה</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summaryRows.map(({ team, maxBid }) => {
+                      const isMe = team.user_id === user?.id
+                      return (
+                        <tr key={team.id}
+                          style={{
+                            background: isMe ? 'rgba(99,102,241,0.1)' : undefined,
+                            opacity: team.is_complete ? 0.6 : 1,
+                          }}>
+                          <td className="py-1.5 px-2 rounded-r-lg font-medium">
+                            {team.name}
+                            {isMe && <span className="badge badge-blue text-xs mr-1.5">אתה</span>}
+                          </td>
+                          <td className="py-1.5 px-2 text-center font-bold" style={{ color: 'var(--success)' }}>
+                            ${team.budget_remaining}
+                          </td>
+                          <td className="py-1.5 px-2 text-center">
+                            {team.player_count}
+                            <span style={{ color: 'var(--muted)' }}>/{typedLeague.players_per_team}</span>
+                          </td>
+                          <td className="py-1.5 px-2 text-center font-bold rounded-l-lg">
+                            {maxBid > 0 ? `$${maxBid}` : '—'}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="card md:order-3">
           <h2 className="font-bold mb-1">סדר העלאות</h2>
           <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>מי מעלה שחקן למכרז עכשיו</p>
           {nominationOrder.length === 0 ? (
@@ -588,7 +652,7 @@ export default async function DashboardPage() {
           )}
         </div>
 
-        <div className="card">
+        <div className="card md:order-2">
           <h2 className="font-bold mb-1">סדר פריוריטי</h2>
           <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>מי זוכה בהצעות שוות</p>
           {typedTeams.filter(t => t.tiebreak_rank !== null).length === 0 ? (
@@ -626,10 +690,9 @@ export default async function DashboardPage() {
             })()
           )}
         </div>
-      </div>
 
-      {typedLeague && (
-        <div className="card mt-4">
+        {typedLeague && (
+        <div className="card md:order-4">
           <h2 className="font-bold mb-1">פראייר הדראפט 🤦</h2>
           <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
             סה״כ עודף תשלום מעל ההצעה השנייה בכל מכרז · קבוצה שסיימה נספר לה גם הכסף שנשאר
@@ -669,7 +732,8 @@ export default async function DashboardPage() {
             </div>
           )}
         </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
