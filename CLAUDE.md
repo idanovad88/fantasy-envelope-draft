@@ -354,6 +354,23 @@ node -e "const sharp = require('sharp'); const src = './public/logo.png'; Promis
 - `lib/supabase/server.ts` → `createClient()` for SSR (cookie auth), `createAdminClient()` for API routes (service role, bypasses RLS)
 - `lib/supabase/client.ts` → browser client for Realtime subscriptions only
 
+#### ⚠️ Row limits: the 1000-row cap and hand-written `.limit()`
+
+Two different truncations, both silent — no error, no warning, just a short array. Every query whose row count **grows with the draft** (`auctions`, `bids`, `snake_picks`, `players`) is exposed, and both have already shipped as bugs:
+
+- **PostgREST caps a response at 1000 rows.** The live league passed 1000 `bids` mid-draft, so the dashboard's single-query bid fetch dropped the tail: 13 auctions came back with *no bids at all*, their second-highest bid read as 0, and "פראייר הדראפט" credited the winner with the full price. Fixed by paging with `.range(from, from + 999)` until a short page comes back (`app/(app)/page.tsx`) — copy that loop for any other query that could cross 1000.
+  - **Embedded rows are not capped**: `auctions(..., bids(...))` returns all 1055 bids nested under 118 parents. Only the top-level row count matters.
+- **A hand-written `.limit(50)` on history** hid every auction past the 50th once the league reached 118 (a full draft is `num_teams × players_per_team`, ~156). Those players still showed on team pages, which is how it surfaced. Removed from both the auction page and the admin auction tab. **Don't add a magic limit to anything a user reads as a complete list** — if payload is the concern, narrow the `select()` instead of the row count (dropping `select('*')` for an explicit column list halved that page).
+
+Sanity-check against production before assuming a list is complete:
+```sql
+SELECT count(*) FROM bids b JOIN auctions a ON a.id = b.auction_id WHERE a.league_id = '<id>';
+```
+
+#### Sort history by `updated_at`, not `reveal_time`
+
+An admin closing an auction early leaves `reveal_time` **in the past** — behind auctions that resolved before it (the live draft has three such rows, where `reveal_time < scheduled_start`). Sorting past auctions on `reveal_time` scattered the last three picks to positions 4, 8 and 10, which reads as "the player is missing from history". `updated_at` is when the row actually resolved; for a normal auction the two timestamps match to the second, so it is the safe sort key everywhere.
+
 ### Dashboard metrics
 
 The dashboard (`app/(app)/page.tsx`) branches on `draft_type`:
@@ -361,7 +378,7 @@ The dashboard (`app/(app)/page.tsx`) branches on `draft_type`:
 **Envelope** — renders three sections below the main cards:
 1. **סדר העלאות** — nomination order, sorted by `priority_rank` ASC, excludes completed teams.
 2. **סדר פריוריטי** — tiebreak order, sorted by `tiebreak_rank` ASC, includes all teams.
-3. **פראייר הדראפט** — overpayment metric. For every completed auction, computes `winning_bid − second_highest_bid` (where second highest = max bid from non-winning teams; 0 if no other team bid). Sums these per team and displays all teams sorted descending. Computed in the server component from `auctions` (status=completed) + `bids` tables — no DB function needed. RLS allows all bids to be read once an auction is completed.
+3. **פראייר הדראפט** — overpayment metric. For every completed auction, computes `winning_bid − second_highest_bid` (where second highest = max bid from non-winning teams; 0 if no other team bid). Sums these per team and displays all teams sorted descending. Computed in the server component from `auctions` (status=completed) + `bids` tables — no DB function needed. RLS allows all bids to be read once an auction is completed. **The bid fetch must stay paginated** — see the 1000-row cap above; an auction whose bids go missing silently scores its winner the full price.
 
 **Snake** — shows:
 - Countdown to `draft_start_time` before the draft begins
