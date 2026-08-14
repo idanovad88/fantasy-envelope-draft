@@ -43,15 +43,17 @@ export default async function AuctionPage() {
     await Promise.all([
       league
         ? supabase.from('auctions')
-            .select('*, player:players(*), nominating_team:teams!nominating_team_id(name), winning_team:teams!winning_team_id(name), bids(*, team:teams(name))')
+            // Explicit column list, not `*` — with the whole draft's history now
+            // fetched, the full player/bid rows doubled the payload for fields
+            // nothing on this page renders.
+            .select('id, status, scheduled_start, reveal_time, updated_at, winning_bid, winning_team_id, nominating_team_id, tie_broken_by_priority, player:players(name, position, nba_team), nominating_team:teams!nominating_team_id(name), winning_team:teams!winning_team_id(name), bids(id, team_id, amount, team:teams(name))')
             .eq('league_id', league.id)
             .in('status', ['pending', 'active', 'revealed', 'completed'])
-            // Newest first so the limit only ever truncates OLD history — pending
-            // (future) and active auctions always sort to the top and are never
-            // dropped. Ascending here silently hid future auctions once a league
-            // passed 50 total auctions. pending/past get re-sorted below for display.
+            // No limit: the history must cover the whole draft. A limit of 50 hid
+            // every auction past the 50th once a league grew (12 teams × 13 slots
+            // = 156 auctions), so old picks showed on team pages but were missing
+            // from here. Newest first; pending/past get re-sorted below for display.
             .order('scheduled_start', { ascending: false })
-            .limit(50)
         : Promise.resolve({ data: [] }),
       myTeam
         ? supabase.from('bids').select('*').eq('team_id', myTeam.id)
@@ -80,7 +82,11 @@ export default async function AuctionPage() {
     playerName: (recentCompleted.player as unknown as { name: string } | null)?.name ?? 'שחקן',
   } : undefined
 
-  const typedAuctions = (auctions || []) as (Auction & {
+  // Shaped to the explicit select above rather than to the full `Auction` row.
+  const typedAuctions = (auctions || []) as unknown as (Pick<Auction,
+    'id' | 'status' | 'scheduled_start' | 'reveal_time' | 'updated_at' |
+    'winning_bid' | 'winning_team_id' | 'nominating_team_id' | 'tie_broken_by_priority'
+  > & {
     player: { name: string; position: string | null; nba_team: string | null }
     nominating_team: { name: string } | null
     winning_team: { name: string } | null

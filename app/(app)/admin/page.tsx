@@ -57,7 +57,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       !isSnake ? supabase.from('auctions').select('*, player:players(*), bids(id)').eq('league_id', lid).eq('status', 'active').order('scheduled_start', { ascending: false }).limit(1).maybeSingle() : Promise.resolve({ data: null }),
       !isSnake ? supabase.from('auctions').select('id, scheduled_start, reveal_time, nominating_team_id, player:players(name)').eq('league_id', lid).eq('status', 'pending').order('scheduled_start', { ascending: true }) : Promise.resolve({ data: [] }),
       supabase.from('players').select('id, name, status, ranking, position').eq('league_id', lid).order('ranking', { ascending: true }),
-      !isSnake ? supabase.from('auctions').select('id, scheduled_start, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)').eq('league_id', lid).eq('status', 'completed').order('scheduled_start', { ascending: false }).limit(50) : Promise.resolve({ data: [] }),
+      !isSnake ? supabase.from('auctions').select('id, scheduled_start, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)').eq('league_id', lid).eq('status', 'completed').order('scheduled_start', { ascending: false }) : Promise.resolve({ data: [] }),
       supabase.from('league_creator_whitelist').select('email').order('created_at', { ascending: true }),
       adminDb.from('admin_users').select('user_id').eq('league_id', lid),
       isSnake ? supabase.from('snake_picks').select('*, player:players(name, position), team:teams(name)').eq('league_id', lid).order('overall_pick_number', { ascending: true }) : Promise.resolve({ data: [] }),
