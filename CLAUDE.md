@@ -362,6 +362,25 @@ Two different truncations, both silent — no error, no warning, just a short ar
   - **Embedded rows are not capped**: `auctions(..., bids(...))` returns all 1055 bids nested under 118 parents. Only the top-level row count matters.
 - **A hand-written `.limit(50)` on history** hid every auction past the 50th once the league reached 118 (a full draft is `num_teams × players_per_team`, ~156). Those players still showed on team pages, which is how it surfaced. Removed from both the auction page and the admin auction tab. **Don't add a magic limit to anything a user reads as a complete list** — if payload is the concern, narrow the `select()` instead of the row count (dropping `select('*')` for an explicit column list halved that page).
 
+**Don't filter a large child table with `.in(ids)`.** The id list is serialized into the query string, so it grows with the draft (118 auction UUIDs ≈ 4.4KB) and eventually exceeds the URL/header limit — the same scaling trap one level up. Filter through an embedded `!inner` join instead, which is a constant-size URL and works under RLS with the anon key:
+```ts
+.select('auction_id, team_id, amount, auction:auctions!inner(league_id, status)')
+.eq('auction.league_id', leagueId).eq('auction.status', 'completed')
+```
+
+**Audit (2026-08-14), all tables, live league at 118 auctions / 12 teams:**
+
+| Table | Rows now | Bound | Risk |
+|---|---|---|---|
+| `bids` | **1067** | `teams × auctions` = `teams² × players_per_team` — quadratic | **Over the cap already.** Any league-wide read must page. |
+| `players` | 298 | whatever the admin imports (`nba_players_2025_full.csv` = 294) | Fine unless someone imports a >1000-row pool |
+| `auctions` | 118 | `teams × players_per_team` (~156 here, ~300 for a 20×15 league) | Fine |
+| `snake_picks` | 0 | same as `auctions` | Fine |
+| `priority_log` | 150 | ~2 per auction | Fine, and nothing reads it |
+| `teams`, `leagues`, `admin_users`, `pick_overrides`, `trades`, `trade_assets`, `push_subscriptions`, `league_hidden`, `team_invites`, `league_creator_whitelist` | ≤ 12 | small by nature | Fine |
+
+`bids` is the only table that grows quadratically, so it is the only one that needs paging today — and the first to break again in a bigger league.
+
 Sanity-check against production before assuming a list is complete:
 ```sql
 SELECT count(*) FROM bids b JOIN auctions a ON a.id = b.auction_id WHERE a.league_id = '<id>';

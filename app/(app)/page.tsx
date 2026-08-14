@@ -324,16 +324,22 @@ export default async function DashboardPage() {
   // is already past 1000 bids. A single fetch silently dropped the tail, so whole
   // auctions came back with no bids at all, their second-highest bid read as 0,
   // and the overpayment metric below credited the winner with the full price.
-  const completedAuctionIds = (completedAuctions ?? []).map((a: { id: string }) => a.id)
+  //
+  // Filtered through an !inner join on auctions rather than .in(auction_ids):
+  // the id list grows with the draft (118 UUIDs ≈ 4.4KB of query string today)
+  // and would eventually blow the URL length limit — the same scaling trap one
+  // level up. Bids count is bounded by teams × auctions, so it grows fastest of
+  // any table here; assume it needs paging.
   const PAGE = 1000
   const completedBids: { auction_id: string; team_id: string; amount: number }[] = []
-  for (let from = 0; completedAuctionIds.length > 0; from += PAGE) {
+  for (let from = 0; league; from += PAGE) {
     const { data: page } = await supabase
       .from('bids')
-      .select('auction_id, team_id, amount')
-      .in('auction_id', completedAuctionIds)
+      .select('auction_id, team_id, amount, auction:auctions!inner(league_id, status)')
+      .eq('auction.league_id', league.id)
+      .eq('auction.status', 'completed')
       .range(from, from + PAGE - 1)
-    completedBids.push(...(page ?? []))
+    completedBids.push(...((page ?? []) as unknown as typeof completedBids))
     if (!page || page.length < PAGE) break
   }
 
