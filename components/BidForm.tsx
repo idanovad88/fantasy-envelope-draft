@@ -166,11 +166,6 @@ export default function BidForm({ auctionId, team, league, existingBid, revealTi
           disabled={expired || cannotAfford}
           dir="ltr"
         />
-        {!isNominator && (
-          <p className="text-xs mt-1.5" style={{ color: 'var(--muted)' }}>
-            מינימום $2 — רק הקבוצה שהעלתה את השחקן יכולה לזכות בו ב-$1
-          </p>
-        )}
       </div>
 
       {message && (
