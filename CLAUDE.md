@@ -227,7 +227,7 @@ App-side there is no coupling: every `tiebreak_rank` read sorts or displays `tie
 
 **Minimum bid: $1 for the nominator, $2 for everyone else.** Putting a player up is what buys the right to take him for a dollar; any other team must pay at least $2. Enforced by `trg_enforce_min_bid` (`BEFORE INSERT OR UPDATE ON bids`, `supabase/migration_min_bid_two.sql`) — it rejects `amount = 1` unless `team_id = auctions.nominating_team_id`. **The DB is the real gate**: `BidForm` upserts into `bids` straight from the browser client under RLS, so there is no API route to validate in. `BidForm` mirrors the rule client-side (`minBid = isNominator ? 1 : 2` — input `min`, default value, validation message, and the reset after a cancel all key off it) and disables the form entirely when `getMaxBid(...) < minBid`.
 
-`getMaxBid()` still reserves only **$1** per remaining slot, not $2. That is deliberate: a team is never actually stuck, because it can always nominate a player itself and take him at $1. It does mean a team can end up with a budget that can only be spent through its own nominations.
+**`getMaxBid()` deliberately still reserves only $1 per remaining slot, not $2** — do not "fix" this to match the new floor. A team whose `getMaxBid()` is exactly 1 can no longer bid on anyone else's nomination (`BidForm` locks the form: `cannotAfford = maxBid < minBid`, button reads "אין תקציב ל-$2"), but it can still nominate — `canNominate` only requires `getMaxBid() >= 1` — and take that player at $1. So its remaining budget is spendable exclusively through its own nominations. That is an accepted end state, confirmed by the league owner, not a stuck team.
 
 Existing $1 bids from before the migration are left alone — the trigger only fires on write.
 
