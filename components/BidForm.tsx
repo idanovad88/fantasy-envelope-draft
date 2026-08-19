@@ -37,7 +37,11 @@ function useCountdown(targetDate: string) {
 }
 
 export default function BidForm({ auctionId, team, league, existingBid, revealTime, isNominator, onBidSubmitted }: BidFormProps) {
-  const [amount, setAmount] = useState(existingBid ?? 1)
+  // Only the team that nominated the player may take him for $1 — that is its
+  // mandatory auto-bid. Everyone else pays at least $2. Enforced in the DB too
+  // (trg_enforce_min_bid), since bids are upserted straight from the browser.
+  const minBid = isNominator ? 1 : 2
+  const [amount, setAmount] = useState(existingBid ?? minBid)
   const [loading, setLoading] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [message, setMessage] = useState('')
@@ -49,6 +53,7 @@ export default function BidForm({ auctionId, team, league, existingBid, revealTi
   const canCancel = existingBid !== undefined && !expired && !isNominator
 
   const maxBid = getMaxBid(team.budget_remaining, team.player_count, league.players_per_team)
+  const cannotAfford = maxBid < minBid
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -57,7 +62,7 @@ export default function BidForm({ auctionId, team, league, existingBid, revealTi
     setLoading(true)
     setMessage('')
 
-    if (amount < 1) { setMessage('מינימום $1'); setLoading(false); return }
+    if (amount < minBid) { setMessage(`מינימום $${minBid}`); setLoading(false); return }
     if (amount > maxBid) { setMessage(`הצעה מקסימלית: $${maxBid}`); setLoading(false); return }
 
     const { error } = await supabase.from('bids').upsert(
@@ -91,7 +96,7 @@ export default function BidForm({ auctionId, team, league, existingBid, revealTi
       setMessage('שגיאה: ' + (data?.error ?? 'לא ניתן לבטל את ההצעה'))
     } else {
       setMessage('ההצעה בוטלה')
-      setAmount(1)
+      setAmount(minBid)
       router.refresh()
     }
     setCancelling(false)
@@ -154,13 +159,18 @@ export default function BidForm({ auctionId, team, league, existingBid, revealTi
         <input
           type="number"
           className="input font-bold text-center"
-          min={1}
+          min={minBid}
           max={maxBid}
           value={amount}
           onChange={e => setAmount(Number(e.target.value))}
-          disabled={expired}
+          disabled={expired || cannotAfford}
           dir="ltr"
         />
+        <p className="text-xs mt-1.5" style={{ color: 'var(--muted)' }}>
+          {isNominator
+            ? 'העלית את השחקן — אתה יכול לזכות בו ב-$1'
+            : 'מינימום $2 — רק הקבוצה שהעלתה את השחקן יכולה לזכות בו ב-$1'}
+        </p>
       </div>
 
       {message && (
@@ -174,8 +184,8 @@ export default function BidForm({ auctionId, team, league, existingBid, revealTi
         </p>
       )}
 
-      <button type="submit" className="btn btn-primary w-full mt-3" disabled={loading || cancelling || expired}>
-        {expired ? 'הזמן עבר' : loading ? 'שומר...' : existingBid !== undefined ? 'עדכן הצעה' : 'הגש הצעה'}
+      <button type="submit" className="btn btn-primary w-full mt-3" disabled={loading || cancelling || expired || cannotAfford}>
+        {expired ? 'הזמן עבר' : cannotAfford ? `אין תקציב ל-$${minBid}` : loading ? 'שומר...' : existingBid !== undefined ? 'עדכן הצעה' : 'הגש הצעה'}
       </button>
 
       {canCancel && (

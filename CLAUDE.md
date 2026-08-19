@@ -223,7 +223,13 @@ App-side there is no coupling: every `tiebreak_rank` read sorts or displays `tie
 
 **Auto-bid:** When any auction is created, a DB trigger (`trg_auto_bid_nominating_team`) automatically inserts a $1 bid for the nominating team. This means:
 - If no other team bids, the nominating team wins at $1.
-- If other teams also bid $1, the tiebreak order decides the winner.
+- No other team can bid $1 at all (see below), so a $1 tie is only possible between the nominator and… nobody. A tie now starts at $2.
+
+**Minimum bid: $1 for the nominator, $2 for everyone else.** Putting a player up is what buys the right to take him for a dollar; any other team must pay at least $2. Enforced by `trg_enforce_min_bid` (`BEFORE INSERT OR UPDATE ON bids`, `supabase/migration_min_bid_two.sql`) — it rejects `amount = 1` unless `team_id = auctions.nominating_team_id`. **The DB is the real gate**: `BidForm` upserts into `bids` straight from the browser client under RLS, so there is no API route to validate in. `BidForm` mirrors the rule client-side (`minBid = isNominator ? 1 : 2` — input `min`, default value, validation message, and the reset after a cancel all key off it) and disables the form entirely when `getMaxBid(...) < minBid`.
+
+`getMaxBid()` still reserves only **$1** per remaining slot, not $2. That is deliberate: a team is never actually stuck, because it can always nominate a player itself and take him at $1. It does mean a team can end up with a budget that can only be spent through its own nominations.
+
+Existing $1 bids from before the migration are left alone — the trigger only fires on write.
 
 **DB functions** (all `SECURITY DEFINER`, run in Supabase):
 - `demote_nomination_rank(team_id, league_id)` — moves team to bottom of `priority_rank` (below completed teams too)
