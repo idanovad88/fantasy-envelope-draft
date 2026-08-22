@@ -64,8 +64,10 @@ SELECT cron.schedule(
 
 -- Inspect:   SELECT * FROM cron.job;
 -- Run log:   SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 10;
---            return_message 'SELECT 0' = the guard held and no HTTP call was
---            made; 'SELECT 1' = the route was actually invoked.
+--            return_message '0 rows' = the guard held and no HTTP call was
+--            made; '1 row' = the route was actually invoked. The string is the
+--            row count of the guarded SELECT, so some pg_cron versions word it
+--            'SELECT 0' / 'SELECT 1' instead; production reports '0 rows'.
 -- Reschedule: re-run cron.schedule with the same name ('notify-auctions') to replace it.
 -- Remove:    SELECT cron.unschedule('notify-auctions');
 
