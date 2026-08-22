@@ -46,6 +46,8 @@ All pages under `app/(app)/` are React Server Components that fetch directly fro
 
 Client-side interactivity is handled by small `'use client'` leaf components (`BidForm`, `NominateButton`, `Countdown`, `RealtimeRefresher`). Real-time updates use Supabase Realtime → `router.refresh()` via `RealtimeRefresher`.
 
+`RealtimeRefresher` **debounces that refresh by 500ms** (`REFRESH_DEBOUNCE_MS`), and every subscription shares the one debounced handler. One logical event writes to several of the tables it watches — resolving an auction updates `auctions` and then `teams`; approving a trade touches `trades`, `pick_overrides` and `teams` — so an immediate refresh per write meant several full server re-renders per event, multiplied by every connected client. Keep new subscriptions on the shared handler rather than calling `router.refresh()` directly. `Countdown` refreshes on its own when it hits zero; that one is not debounced and shouldn't be.
+
 Mutations go through API routes in `app/api/`. These routes use `createAdminClient()` (service role key, bypasses RLS) for writes and `createClient()` (anon key, cookie-based auth) for identity checks.
 
 ### Key types (`types/index.ts`)
@@ -286,7 +288,7 @@ The winner finale is unchanged and independent of this order. Set in **Admin →
 
 ### Push notifications (envelope only)
 
-Web Push reminder sent `leagues.notify_before_minutes` (default 1) before an auction's `reveal_time`, **to every team manager and assistant manager in the league** — regardless of whether they've already bid, and regardless of `is_complete`. A finished roster can no longer bid but still follows the draft, so it is told when an auction is about to close. The only filter on recipients is `approved = true`. Works with the app closed. This is the only scheduled server-side work in the project.
+Web Push reminder sent `leagues.notify_before_minutes` (default 1) before an auction's `reveal_time`, **to every team manager and assistant manager in the league** — regardless of whether they've already bid, and regardless of `is_complete`. A finished roster can no longer bid but still follows the draft, so it is told when an auction is about to close. The only filter on recipients is `approved = true`. Works with the app closed. This is the only scheduled work that leaves the database — see **Scheduled jobs** below for the other one, which does not.
 
 ⚠️ **The schedule lives in the database, not in this repo.** Nothing in the codebase reveals that a cron exists. It is a `pg_cron` job created by hand once from `supabase/cron_notify_auctions.sql`:
 ```sql
@@ -295,6 +297,8 @@ SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 10; -- is it r
 SELECT cron.unschedule('notify-auctions');                          -- remove
 ```
 Requires the `pg_cron` and `pg_net` extensions (Supabase Dashboard → Database → Extensions). Vercel Cron was *not* used: the Hobby plan caps cron at once per day. Switching later = add `vercel.json` + `cron.unschedule`; the route itself is unchanged.
+
+⚠️ **The minute tick must stay guarded.** The job fires every minute, but the `net.http_post` sits behind two `EXISTS` clauses so Postgres — where the check is free — decides whether to wake Vercel at all. Unguarded it billed ~43,200 Vercel invocations a month to return `due: 0` on nearly all of them, and on its own came close to exhausting the free tier's 4 hours of Fluid Active CPU. The clauses mirror the route's two jobs exactly: an auction inside its league's notify window with no `auction_notifications` claim for that `reveal_time`, or an overdue `pending` auction in a league with nothing active (that second `NOT EXISTS` matters — without it a live auction wakes the route every minute for an activation that `activateOverduePendingAuctions` refuses to do). **Widening what the route does means widening the guard**, or the new work silently never runs. In `cron.job_run_details`, `return_message` of `SELECT 0` means the guard held and nothing was called; `SELECT 1` means the route was invoked.
 
 **Pieces:**
 - `public/sw.js` — service worker: `push` + `notificationclick` (opens `/auction`). Deliberately **no `fetch` handler** (would break cookie-auth SSR). Must stay excluded in the `proxy.ts` matcher.
@@ -310,9 +314,35 @@ Requires the `pg_cron` and `pg_net` extensions (Supabase Dashboard → Database 
 
 **Migration:** `supabase/migration_push_notifications.sql` — `push_subscriptions`, `auction_notifications`, `leagues.notify_before_minutes`, partial index on `auctions(reveal_time)`. Run it **before** deploying: `saveLeague()` sends `notify_before_minutes`, and if the column is missing PostgREST rejects the *entire* league-settings save.
 
+### Scheduled jobs (pg_cron)
+
+**Two** jobs run every minute, both created by hand, both living only in the database. Nothing in the app imports them and `cron.job` is the only place they exist:
+
+| Job | Runs | Costs Vercel? |
+|---|---|---|
+| `auto-resolve-expired-auctions` | `SELECT auto_resolve_expired_auctions()` — pure SQL | No |
+| `notify-auctions` | `net.http_post` → `/api/cron/notify-auctions` | Yes, and it is guarded |
+
+```sql
+SELECT jobid, jobname, schedule, active, command FROM cron.job ORDER BY jobid;
+```
+
+**`auto-resolve-expired-auctions`** (`supabase/cron_auto_resolve_auctions.sql`) is what actually closes an envelope auction: it loops over `auctions` with `status = 'active' AND reveal_time <= NOW()` and calls `resolve_auction()` on each. **It never activates a `pending` auction** — that is solely `activateOverduePendingAuctions()`, reached through the notify route. The two jobs interlock: the resolver frees the league of its active auction, which opens the notify job's guard, which wakes the route to activate the next one. Up to a minute of lag between the two.
+
+⚠️ **Its failures are invisible.** The `EXCEPTION WHEN OTHERS` around each `resolve_auction()` swallows the error into a `RAISE WARNING`, which lands in the Postgres log — *not* in `cron.job_run_details`, where the job reports `succeeded` regardless. A stuck auction is retried every minute forever and nothing surfaces it. This is the only thing that will tell you:
+
+```sql
+SELECT id, league_id, reveal_time FROM auctions
+WHERE status = 'active' AND reveal_time < now() - interval '5 minutes';
+```
+
+Any row is an auction the resolver has been failing on; the warning text is in Supabase Dashboard → Logs → Postgres.
+
+**`notify-auctions`** is covered under **Push notifications** above — note especially that its schedule is guarded and why.
+
 ### Auction activation (`lib/auctions.ts`)
 
-A queued auction stays `pending` until something notices `scheduled_start` has passed — there is no timer on the DB side. `activateOverduePendingAuctions(leagueId)` is the single implementation, and **every caller must use it** rather than re-rolling the query: the auction page (`app/(app)/auction/page.tsx`, on load), `POST /api/admin/activate-pending-auction`, and the notify cron. The per-league guarded version is the correct one: it refuses to activate a second auction while one is live, because activating a second would run two sealed-bid auctions at once.
+A queued auction stays `pending` until something notices `scheduled_start` has passed — the `auto-resolve-expired-auctions` job **closes** auctions on a timer but never opens one (it filters `status = 'active'`), so activation has no DB-side timer at all. `activateOverduePendingAuctions(leagueId)` is the single implementation, and **every caller must use it** rather than re-rolling the query: the auction page (`app/(app)/auction/page.tsx`, on load), `POST /api/admin/activate-pending-auction`, and the notify cron. The per-league guarded version is the correct one: it refuses to activate a second auction while one is live, because activating a second would run two sealed-bid auctions at once.
 
 `activateAllOverduePendingAuctions()` wraps it for the cron, which has no single league context. Both no-op unless a transition is due, so they're safe to call on every request.
 
@@ -329,10 +359,12 @@ In Next.js 16, the middleware file is **`proxy.ts`** (root of the project), not 
 The middleware refreshes the Supabase session and redirects unauthenticated users to `/login`. The matcher **excludes** static assets so they remain publicly accessible:
 
 ```ts
-matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)']
+matcher: ['/((?!_next/static|_next/image|api/cron|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)']
 ```
 
 **Important:** Any new public routes (PWA assets, open API endpoints, etc.) must be added to this matcher exclusion list, otherwise they will be blocked with a 307 redirect to `/login`. Note `sw\\.js` — the service worker is a `.js` file, and `.js` is *not* covered by the extension group above.
+
+Note `api/cron` in the matcher: the middleware runs `supabase.auth.getUser()` — a network round trip to Supabase — on every request it matches, and the cron carries no session, so every tick paid for an auth check the route then skipped. It is excluded outright *and* still bypassed inside the `proxy` function, so dropping the matcher entry degrades cost, not correctness.
 
 Paths that bypass the auth redirect inside the `proxy` function itself (not the matcher): `/login`, `/api/public/*`, `/assist/*` (logged-out invite pages), and `/api/cron/*` (pg_cron carries no session cookie; those routes authenticate with `CRON_SECRET` instead). Both kinds of exclusion fail *silently* as a 307 to `/login` — assert `401`, not a redirect, when testing.
 
@@ -364,7 +396,7 @@ node -e "const sharp = require('sharp'); const src = './public/logo.png'; Promis
 
 Two different truncations, both silent — no error, no warning, just a short array. Every query whose row count **grows with the draft** (`auctions`, `bids`, `snake_picks`, `players`) is exposed, and both have already shipped as bugs:
 
-- **PostgREST caps a response at 1000 rows.** The live league passed 1000 `bids` mid-draft, so the dashboard's single-query bid fetch dropped the tail: 13 auctions came back with *no bids at all*, their second-highest bid read as 0, and "פראייר הדראפט" credited the winner with the full price. Fixed by paging with `.range(from, from + 999)` until a short page comes back (`app/(app)/page.tsx`) — copy that loop for any other query that could cross 1000.
+- **PostgREST caps a response at 1000 rows.** The live league passed 1000 `bids` mid-draft, so the dashboard's single-query bid fetch dropped the tail: 13 auctions came back with *no bids at all*, their second-highest bid read as 0, and "פראייר הדראפט" credited the winner with the full price. Fixed first by paging with `.range(from, from + 999)` until a short page comes back — copy that loop for any other query that could cross 1000. The dashboard itself no longer pages: that read is now the `league_overpayment` RPC (see **Dashboard metrics**), which sidesteps the cap entirely by aggregating in Postgres. Prefer that shape when the page only needs the aggregate.
   - **Embedded rows are not capped**: `auctions(..., bids(...))` returns all 1055 bids nested under 118 parents. Only the top-level row count matters.
 - **A hand-written `.limit(50)` on history** hid every auction past the 50th once the league reached 118 (a full draft is `num_teams × players_per_team`, ~156). Those players still showed on team pages, which is how it surfaced. Removed from both the auction page and the admin auction tab. **Don't add a magic limit to anything a user reads as a complete list** — if payload is the concern, narrow the `select()` instead of the row count (dropping `select('*')` for an explicit column list halved that page).
 
@@ -403,7 +435,13 @@ The dashboard (`app/(app)/page.tsx`) branches on `draft_type`:
 **Envelope** — renders three sections below the main cards:
 1. **סדר העלאות** — nomination order, sorted by `priority_rank` ASC, excludes completed teams.
 2. **סדר פריוריטי** — tiebreak order, sorted by `tiebreak_rank` ASC, includes all teams.
-3. **פראייר הדראפט** — overpayment metric. For every completed auction, computes `winning_bid − second_highest_bid` (where second highest = max bid from non-winning teams; 0 if no other team bid). Sums these per team and displays all teams sorted descending. Computed in the server component from `auctions` (status=completed) + `bids` tables — no DB function needed. RLS allows all bids to be read once an auction is completed. **The bid fetch must stay paginated** — see the 1000-row cap above; an auction whose bids go missing silently scores its winner the full price.
+3. **פראייר הדראפט** — overpayment metric. For every completed auction, `winning_bid − second_highest_bid` (second highest = max bid from non-winning teams; 0 if no other team bid), summed per winning team, displayed sorted descending. A team that finished its roster also has its unspent budget added.
+
+   **The per-auction sum is a Postgres function, `league_overpayment(p_league_id)`** (`supabase/migration_overpayment_rpc.sql`) — call it, don't re-derive it in the page. It replaced a read of every bid in the league: past 1000 rows in the live league, so it needed paginating around the row cap, and a 1000+ row JSON parse on *every dashboard render for every viewer*. That was the single biggest source of server CPU in the app. The RPC returns one row per winning team.
+
+   It is deliberately **`SECURITY INVOKER`** (the default — no `SECURITY DEFINER`). RLS already lets any member read bids on *completed* auctions, which is exactly what the page did before; making it DEFINER would hand it sealed bids on open auctions too. Leave it invoker.
+
+   The leftover-budget term and the sort stay in the server component, which already has `teams` loaded.
 
 **Snake** — shows:
 - Countdown to `draft_start_time` before the draft begins

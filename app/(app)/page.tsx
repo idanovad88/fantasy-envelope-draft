@@ -311,56 +311,19 @@ export default async function DashboardPage() {
   // notice has to key off the teams that are still eligible for a turn.
   const allTeamsNominated = nominationOrder.some(n => n.canNominate) && !nominationOrder.some(n => n.isNext)
 
-  const { data: completedAuctions } = league
-    ? await supabase
-        .from('auctions')
-        .select('id, winning_team_id, winning_bid')
-        .eq('league_id', league.id)
-        .eq('status', 'completed')
-        .not('winning_team_id', 'is', null)
+  // Overpayment is aggregated in Postgres (league_overpayment, see
+  // supabase/migration_overpayment_rpc.sql) rather than in this render.
+  // It used to fetch every bid of every completed auction — past 1000 rows in
+  // the live league, so it needed paginating around the PostgREST row cap —
+  // and re-derive the second-highest bid in JS, on every dashboard load, for
+  // every viewer. The RPC returns one row per winning team.
+  const { data: overpayRows } = league
+    ? await supabase.rpc('league_overpayment', { p_league_id: league.id })
     : { data: [] }
 
-  // Paginated on purpose: PostgREST caps a response at 1000 rows, and this league
-  // is already past 1000 bids. A single fetch silently dropped the tail, so whole
-  // auctions came back with no bids at all, their second-highest bid read as 0,
-  // and the overpayment metric below credited the winner with the full price.
-  //
-  // Filtered through an !inner join on auctions rather than .in(auction_ids):
-  // the id list grows with the draft (118 UUIDs ≈ 4.4KB of query string today)
-  // and would eventually blow the URL length limit — the same scaling trap one
-  // level up. Bids count is bounded by teams × auctions, so it grows fastest of
-  // any table here; assume it needs paging.
-  const PAGE = 1000
-  const completedBids: { auction_id: string; team_id: string; amount: number }[] = []
-  for (let from = 0; league; from += PAGE) {
-    const { data: page } = await supabase
-      .from('bids')
-      .select('auction_id, team_id, amount, auction:auctions!inner(league_id, status)')
-      .eq('auction.league_id', league.id)
-      .eq('auction.status', 'completed')
-      .range(from, from + PAGE - 1)
-    completedBids.push(...((page ?? []) as unknown as typeof completedBids))
-    if (!page || page.length < PAGE) break
-  }
-
-  const bidsByAuction = new Map<string, { team_id: string; amount: number }[]>()
-  for (const b of completedBids) {
-    const list = bidsByAuction.get(b.auction_id)
-    if (list) list.push(b)
-    else bidsByAuction.set(b.auction_id, [b])
-  }
-
   const prairScore: Record<string, number> = {}
-  for (const auction of completedAuctions ?? []) {
-    const a = auction as { id: string; winning_team_id: string | null; winning_bid: number | null }
-    if (!a.winning_team_id || !a.winning_bid) continue
-    const forThisAuction = bidsByAuction.get(a.id) ?? []
-    const otherBids = forThisAuction.filter(b => b.team_id !== a.winning_team_id)
-    const secondHighest = otherBids.length > 0 ? Math.max(...otherBids.map(b => b.amount)) : 0
-    const diff = a.winning_bid - secondHighest
-    if (diff > 0) {
-      prairScore[a.winning_team_id] = (prairScore[a.winning_team_id] ?? 0) + diff
-    }
+  for (const row of (overpayRows ?? []) as { team_id: string; overpay: number }[]) {
+    prairScore[row.team_id] = row.overpay
   }
 
   // A team that finished its roster with money still in the bank never used that
