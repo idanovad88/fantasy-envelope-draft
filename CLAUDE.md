@@ -46,6 +46,8 @@ All pages under `app/(app)/` are React Server Components that fetch directly fro
 
 Client-side interactivity is handled by small `'use client'` leaf components (`BidForm`, `NominateButton`, `Countdown`, `RealtimeRefresher`). Real-time updates use Supabase Realtime → `router.refresh()` via `RealtimeRefresher`.
 
+`RealtimeRefresher` **debounces that refresh by 500ms** (`REFRESH_DEBOUNCE_MS`), and every subscription shares the one debounced handler. One logical event writes to several of the tables it watches — resolving an auction updates `auctions` and then `teams`; approving a trade touches `trades`, `pick_overrides` and `teams` — so an immediate refresh per write meant several full server re-renders per event, multiplied by every connected client. Keep new subscriptions on the shared handler rather than calling `router.refresh()` directly. `Countdown` refreshes on its own when it hits zero; that one is not debounced and shouldn't be.
+
 Mutations go through API routes in `app/api/`. These routes use `createAdminClient()` (service role key, bypasses RLS) for writes and `createClient()` (anon key, cookie-based auth) for identity checks.
 
 ### Key types (`types/index.ts`)
@@ -296,6 +298,8 @@ SELECT cron.unschedule('notify-auctions');                          -- remove
 ```
 Requires the `pg_cron` and `pg_net` extensions (Supabase Dashboard → Database → Extensions). Vercel Cron was *not* used: the Hobby plan caps cron at once per day. Switching later = add `vercel.json` + `cron.unschedule`; the route itself is unchanged.
 
+⚠️ **The minute tick must stay guarded.** The job fires every minute, but the `net.http_post` sits behind two `EXISTS` clauses so Postgres — where the check is free — decides whether to wake Vercel at all. Unguarded it billed ~43,200 Vercel invocations a month to return `due: 0` on nearly all of them, and on its own came close to exhausting the free tier's 4 hours of Fluid Active CPU. The clauses mirror the route's two jobs exactly: an auction inside its league's notify window with no `auction_notifications` claim for that `reveal_time`, or an overdue `pending` auction in a league with nothing active (that second `NOT EXISTS` matters — without it a live auction wakes the route every minute for an activation that `activateOverduePendingAuctions` refuses to do). **Widening what the route does means widening the guard**, or the new work silently never runs. In `cron.job_run_details`, `return_message` of `SELECT 0` means the guard held and nothing was called; `SELECT 1` means the route was invoked.
+
 **Pieces:**
 - `public/sw.js` — service worker: `push` + `notificationclick` (opens `/auction`). Deliberately **no `fetch` handler** (would break cookie-auth SSR). Must stay excluded in the `proxy.ts` matcher.
 - `components/PushSubscribe.tsx` — opt-in button, mounted in the "my team" card of the **envelope** dashboard only. `Notification.requestPermission()` must stay the **first** `await` — iOS drops the user-gesture context otherwise.
@@ -329,10 +333,12 @@ In Next.js 16, the middleware file is **`proxy.ts`** (root of the project), not 
 The middleware refreshes the Supabase session and redirects unauthenticated users to `/login`. The matcher **excludes** static assets so they remain publicly accessible:
 
 ```ts
-matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)']
+matcher: ['/((?!_next/static|_next/image|api/cron|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)']
 ```
 
 **Important:** Any new public routes (PWA assets, open API endpoints, etc.) must be added to this matcher exclusion list, otherwise they will be blocked with a 307 redirect to `/login`. Note `sw\\.js` — the service worker is a `.js` file, and `.js` is *not* covered by the extension group above.
+
+Note `api/cron` in the matcher: the middleware runs `supabase.auth.getUser()` — a network round trip to Supabase — on every request it matches, and the cron carries no session, so every tick paid for an auth check the route then skipped. It is excluded outright *and* still bypassed inside the `proxy` function, so dropping the matcher entry degrades cost, not correctness.
 
 Paths that bypass the auth redirect inside the `proxy` function itself (not the matcher): `/login`, `/api/public/*`, `/assist/*` (logged-out invite pages), and `/api/cron/*` (pg_cron carries no session cookie; those routes authenticate with `CRON_SECRET` instead). Both kinds of exclusion fail *silently* as a 307 to `/login` — assert `401`, not a redirect, when testing.
 
@@ -364,7 +370,7 @@ node -e "const sharp = require('sharp'); const src = './public/logo.png'; Promis
 
 Two different truncations, both silent — no error, no warning, just a short array. Every query whose row count **grows with the draft** (`auctions`, `bids`, `snake_picks`, `players`) is exposed, and both have already shipped as bugs:
 
-- **PostgREST caps a response at 1000 rows.** The live league passed 1000 `bids` mid-draft, so the dashboard's single-query bid fetch dropped the tail: 13 auctions came back with *no bids at all*, their second-highest bid read as 0, and "פראייר הדראפט" credited the winner with the full price. Fixed by paging with `.range(from, from + 999)` until a short page comes back (`app/(app)/page.tsx`) — copy that loop for any other query that could cross 1000.
+- **PostgREST caps a response at 1000 rows.** The live league passed 1000 `bids` mid-draft, so the dashboard's single-query bid fetch dropped the tail: 13 auctions came back with *no bids at all*, their second-highest bid read as 0, and "פראייר הדראפט" credited the winner with the full price. Fixed first by paging with `.range(from, from + 999)` until a short page comes back — copy that loop for any other query that could cross 1000. The dashboard itself no longer pages: that read is now the `league_overpayment` RPC (see **Dashboard metrics**), which sidesteps the cap entirely by aggregating in Postgres. Prefer that shape when the page only needs the aggregate.
   - **Embedded rows are not capped**: `auctions(..., bids(...))` returns all 1055 bids nested under 118 parents. Only the top-level row count matters.
 - **A hand-written `.limit(50)` on history** hid every auction past the 50th once the league reached 118 (a full draft is `num_teams × players_per_team`, ~156). Those players still showed on team pages, which is how it surfaced. Removed from both the auction page and the admin auction tab. **Don't add a magic limit to anything a user reads as a complete list** — if payload is the concern, narrow the `select()` instead of the row count (dropping `select('*')` for an explicit column list halved that page).
 
@@ -403,7 +409,13 @@ The dashboard (`app/(app)/page.tsx`) branches on `draft_type`:
 **Envelope** — renders three sections below the main cards:
 1. **סדר העלאות** — nomination order, sorted by `priority_rank` ASC, excludes completed teams.
 2. **סדר פריוריטי** — tiebreak order, sorted by `tiebreak_rank` ASC, includes all teams.
-3. **פראייר הדראפט** — overpayment metric. For every completed auction, computes `winning_bid − second_highest_bid` (where second highest = max bid from non-winning teams; 0 if no other team bid). Sums these per team and displays all teams sorted descending. Computed in the server component from `auctions` (status=completed) + `bids` tables — no DB function needed. RLS allows all bids to be read once an auction is completed. **The bid fetch must stay paginated** — see the 1000-row cap above; an auction whose bids go missing silently scores its winner the full price.
+3. **פראייר הדראפט** — overpayment metric. For every completed auction, `winning_bid − second_highest_bid` (second highest = max bid from non-winning teams; 0 if no other team bid), summed per winning team, displayed sorted descending. A team that finished its roster also has its unspent budget added.
+
+   **The per-auction sum is a Postgres function, `league_overpayment(p_league_id)`** (`supabase/migration_overpayment_rpc.sql`) — call it, don't re-derive it in the page. It replaced a read of every bid in the league: past 1000 rows in the live league, so it needed paginating around the row cap, and a 1000+ row JSON parse on *every dashboard render for every viewer*. That was the single biggest source of server CPU in the app. The RPC returns one row per winning team.
+
+   It is deliberately **`SECURITY INVOKER`** (the default — no `SECURITY DEFINER`). RLS already lets any member read bids on *completed* auctions, which is exactly what the page did before; making it DEFINER would hand it sealed bids on open auctions too. Leave it invoker.
+
+   The leftover-budget term and the sort stay in the server component, which already has `teams` loaded.
 
 **Snake** — shows:
 - Countdown to `draft_start_time` before the draft begins

@@ -30,7 +30,9 @@ export async function proxy(request: NextRequest) {
   const isInvitePage = request.nextUrl.pathname.startsWith('/assist')
   // The notify cron is called by Supabase pg_cron, which carries no session
   // cookie. It authenticates itself with CRON_SECRET; without this bypass it
-  // would silently 307 to /login and the job would never run.
+  // would silently 307 to /login and the job would never run. The matcher
+  // below now excludes /api/cron outright, so this is a fallback that keeps
+  // the route working if that exclusion is ever dropped.
   const isCronApi = request.nextUrl.pathname.startsWith('/api/cron')
 
   if (!user && !isAuthPage && !isPublicApi && !isInvitePage && !isCronApi) {
@@ -48,6 +50,9 @@ export async function proxy(request: NextRequest) {
   return supabaseResponse
 }
 
+// `api/cron` is excluded, not just bypassed inside the proxy above: the cron
+// runs on a schedule with no session, so every hit was paying for a full
+// supabase.auth.getUser() round trip before the route skipped auth anyway.
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'],
+  matcher: ['/((?!_next/static|_next/image|api/cron|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'],
 }
