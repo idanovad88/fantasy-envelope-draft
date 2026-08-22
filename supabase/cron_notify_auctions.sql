@@ -38,10 +38,13 @@ SELECT cron.schedule(
           WHERE n.auction_id = a.id AND n.kind = 'pre_reveal' AND n.reveal_time = a.reveal_time
         )
     )
-    -- 2. An overdue pending auction to activate. The NOT EXISTS mirrors the
-    --    "one active auction at a time" guard in activateOverduePendingAuctions:
-    --    without it the route would be woken every minute to do nothing while
-    --    an auction is live.
+    -- 2. An overdue pending auction to activate. This clause cannot be dropped:
+    --    the auto-resolve-expired-auctions job filters status = 'active', so it
+    --    closes auctions but never opens one — waking this route is the only
+    --    thing that flips pending -> active on a timer. The NOT EXISTS mirrors
+    --    the "one active auction at a time" guard in
+    --    activateOverduePendingAuctions: without it the route would be woken
+    --    every minute to do nothing while an auction is live.
     OR EXISTS (
       SELECT 1 FROM auctions a JOIN leagues l ON l.id = a.league_id
       WHERE a.status = 'pending' AND l.draft_type = 'envelope'

@@ -288,7 +288,7 @@ The winner finale is unchanged and independent of this order. Set in **Admin →
 
 ### Push notifications (envelope only)
 
-Web Push reminder sent `leagues.notify_before_minutes` (default 1) before an auction's `reveal_time`, **to every team manager and assistant manager in the league** — regardless of whether they've already bid, and regardless of `is_complete`. A finished roster can no longer bid but still follows the draft, so it is told when an auction is about to close. The only filter on recipients is `approved = true`. Works with the app closed. This is the only scheduled server-side work in the project.
+Web Push reminder sent `leagues.notify_before_minutes` (default 1) before an auction's `reveal_time`, **to every team manager and assistant manager in the league** — regardless of whether they've already bid, and regardless of `is_complete`. A finished roster can no longer bid but still follows the draft, so it is told when an auction is about to close. The only filter on recipients is `approved = true`. Works with the app closed. This is the only scheduled work that leaves the database — see **Scheduled jobs** below for the other one, which does not.
 
 ⚠️ **The schedule lives in the database, not in this repo.** Nothing in the codebase reveals that a cron exists. It is a `pg_cron` job created by hand once from `supabase/cron_notify_auctions.sql`:
 ```sql
@@ -314,9 +314,35 @@ Requires the `pg_cron` and `pg_net` extensions (Supabase Dashboard → Database 
 
 **Migration:** `supabase/migration_push_notifications.sql` — `push_subscriptions`, `auction_notifications`, `leagues.notify_before_minutes`, partial index on `auctions(reveal_time)`. Run it **before** deploying: `saveLeague()` sends `notify_before_minutes`, and if the column is missing PostgREST rejects the *entire* league-settings save.
 
+### Scheduled jobs (pg_cron)
+
+**Two** jobs run every minute, both created by hand, both living only in the database. Nothing in the app imports them and `cron.job` is the only place they exist:
+
+| Job | Runs | Costs Vercel? |
+|---|---|---|
+| `auto-resolve-expired-auctions` | `SELECT auto_resolve_expired_auctions()` — pure SQL | No |
+| `notify-auctions` | `net.http_post` → `/api/cron/notify-auctions` | Yes, and it is guarded |
+
+```sql
+SELECT jobid, jobname, schedule, active, command FROM cron.job ORDER BY jobid;
+```
+
+**`auto-resolve-expired-auctions`** (`supabase/cron_auto_resolve_auctions.sql`) is what actually closes an envelope auction: it loops over `auctions` with `status = 'active' AND reveal_time <= NOW()` and calls `resolve_auction()` on each. **It never activates a `pending` auction** — that is solely `activateOverduePendingAuctions()`, reached through the notify route. The two jobs interlock: the resolver frees the league of its active auction, which opens the notify job's guard, which wakes the route to activate the next one. Up to a minute of lag between the two.
+
+⚠️ **Its failures are invisible.** The `EXCEPTION WHEN OTHERS` around each `resolve_auction()` swallows the error into a `RAISE WARNING`, which lands in the Postgres log — *not* in `cron.job_run_details`, where the job reports `succeeded` regardless. A stuck auction is retried every minute forever and nothing surfaces it. This is the only thing that will tell you:
+
+```sql
+SELECT id, league_id, reveal_time FROM auctions
+WHERE status = 'active' AND reveal_time < now() - interval '5 minutes';
+```
+
+Any row is an auction the resolver has been failing on; the warning text is in Supabase Dashboard → Logs → Postgres.
+
+**`notify-auctions`** is covered under **Push notifications** above — note especially that its schedule is guarded and why.
+
 ### Auction activation (`lib/auctions.ts`)
 
-A queued auction stays `pending` until something notices `scheduled_start` has passed — there is no timer on the DB side. `activateOverduePendingAuctions(leagueId)` is the single implementation, and **every caller must use it** rather than re-rolling the query: the auction page (`app/(app)/auction/page.tsx`, on load), `POST /api/admin/activate-pending-auction`, and the notify cron. The per-league guarded version is the correct one: it refuses to activate a second auction while one is live, because activating a second would run two sealed-bid auctions at once.
+A queued auction stays `pending` until something notices `scheduled_start` has passed — the `auto-resolve-expired-auctions` job **closes** auctions on a timer but never opens one (it filters `status = 'active'`), so activation has no DB-side timer at all. `activateOverduePendingAuctions(leagueId)` is the single implementation, and **every caller must use it** rather than re-rolling the query: the auction page (`app/(app)/auction/page.tsx`, on load), `POST /api/admin/activate-pending-auction`, and the notify cron. The per-league guarded version is the correct one: it refuses to activate a second auction while one is live, because activating a second would run two sealed-bid auctions at once.
 
 `activateAllOverduePendingAuctions()` wraps it for the cron, which has no single league context. Both no-op unless a transition is due, so they're safe to call on every request.
 
