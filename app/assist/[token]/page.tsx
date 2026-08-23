@@ -1,4 +1,5 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { getAuthUser } from '@/lib/supabase/auth'
 import AcceptInvite from '@/components/AcceptInvite'
 
 export const dynamic = 'force-dynamic'
@@ -33,7 +34,7 @@ export default async function AssistInvitePage({ params }: { params: Promise<{ t
   }
 
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--background)' }}>

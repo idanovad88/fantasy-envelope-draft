@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { getAuthUser } from '@/lib/supabase/auth'
 import { cookies } from 'next/headers'
 import { activateOverduePendingAuctions } from '@/lib/auctions'
 import { formatTime, formatDateTime, REVEAL_WINDOW_MS } from '@/lib/utils'
@@ -15,7 +16,7 @@ export const revalidate = 0
 
 export default async function AuctionPage() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   const cookieStore = await cookies()
   const selectedLeagueId = cookieStore.get('selected_league_id')?.value
 

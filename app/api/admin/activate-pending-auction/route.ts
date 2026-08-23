@@ -1,10 +1,11 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { getAuthUser } from '@/lib/supabase/auth'
 import { NextResponse } from 'next/server'
 import { activateOverduePendingAuctions } from '@/lib/auctions'
 
 export async function POST(req: Request) {
   const userClient = await createClient()
-  const { data: { user } } = await userClient.auth.getUser()
+  const user = await getAuthUser(userClient)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const supabase = createAdminClient()

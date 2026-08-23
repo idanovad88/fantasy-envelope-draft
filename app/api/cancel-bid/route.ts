@@ -1,4 +1,5 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { getAuthUser } from '@/lib/supabase/auth'
 import { NextResponse } from 'next/server'
 import { myTeamOr } from '@/lib/team'
 
@@ -10,7 +11,7 @@ import { myTeamOr } from '@/lib/team'
 // passed) plus the nominator rule below.
 export async function POST(req: Request) {
   const userClient = await createClient()
-  const { data: { user } } = await userClient.auth.getUser()
+  const user = await getAuthUser(userClient)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json().catch(() => ({}))

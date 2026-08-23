@@ -17,6 +17,18 @@ export default function LandingPage() {
   const router = useRouter()
 
   useEffect(() => {
+    // The OAuth callback bounces failures back here with ?error=auth. Nothing
+    // used to read it, so a failed sign-in looked exactly like never having
+    // pressed the button — the user just landed back on this screen.
+    // Read it off window.location rather than useSearchParams(): this page is
+    // prerendered as static, and the hook would force it dynamic (or demand a
+    // Suspense boundary) for one query string.
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('error') === 'auth') {
+      const reason = params.get('reason')
+      setError(reason ? `ההתחברות נכשלה: ${reason}` : 'ההתחברות נכשלה. נסה שוב.')
+    }
+
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) router.replace('/leagues')
     })

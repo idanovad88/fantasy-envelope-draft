@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { getAuthUser } from '@/lib/supabase/auth'
 import { cookies } from 'next/headers'
 import PlayerSearch from '@/components/PlayerSearch'
 import SnakePlayerPicker from '@/components/SnakePlayerPicker'
@@ -16,7 +17,7 @@ type PlayerWithTeam = Player & { drafting_team: { id: string; name: string } | n
 
 export default async function PlayersPage() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
 
   const cookieStore = await cookies()
   const selectedLeagueId = cookieStore.get('selected_league_id')?.value

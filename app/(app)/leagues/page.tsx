@@ -1,4 +1,5 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { getAuthUser } from '@/lib/supabase/auth'
 import { myTeamOr } from '@/lib/team'
 import type { League, Team } from '@/types'
 import LeagueSelectButton from '@/components/LeagueSelectButton'
@@ -17,7 +18,7 @@ type LeagueEntry = {
 export default async function LeaguesPage() {
   const supabase = await createClient()
   const admin = createAdminClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) return null
 
   // Fetch all teams for this user (across all leagues) — as owner or assistant manager,

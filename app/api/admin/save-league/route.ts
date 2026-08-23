@@ -1,4 +1,5 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { getAuthUser } from '@/lib/supabase/auth'
 import { NextRequest, NextResponse } from 'next/server'
 
 // League settings are saved through this route rather than a direct
@@ -12,7 +13,7 @@ import { NextRequest, NextResponse } from 'next/server'
 //     the panel can surface it instead of falsely reporting "saved".
 export async function POST(req: NextRequest) {
   const userClient = await createClient()
-  const { data: { user } } = await userClient.auth.getUser()
+  const user = await getAuthUser(userClient)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()

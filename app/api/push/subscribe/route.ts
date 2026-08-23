@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { getAuthUser } from '@/lib/supabase/auth'
 
 // Persist a device's Web Push subscription so the notify cron can reach it.
 // Body is the output of PushSubscription.toJSON().
 export async function POST(req: Request) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) return NextResponse.json({ error: 'לא מחובר' }, { status: 401 })
 
   let body: { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } }

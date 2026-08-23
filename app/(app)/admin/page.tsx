@@ -1,4 +1,5 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { getAuthUser } from '@/lib/supabase/auth'
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import AdminPanel, { type AdminTradeView } from './AdminPanel'
@@ -14,7 +15,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   const initialTab: TabId = validTabs.includes(tabParam as TabId) ? (tabParam as TabId) : 'overview'
 
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) redirect('/login')
 
   const cookieStore = await cookies()

@@ -1,4 +1,5 @@
 import { createServerClient } from '@supabase/ssr'
+import { getAuthUser } from '@/lib/supabase/auth'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function proxy(request: NextRequest) {
@@ -21,7 +22,7 @@ export async function proxy(request: NextRequest) {
     },
   })
 
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
 
   const isAuthPage = request.nextUrl.pathname.startsWith('/login')
   const isPublicApi = request.nextUrl.pathname.startsWith('/api/public')
@@ -51,8 +52,10 @@ export async function proxy(request: NextRequest) {
 }
 
 // `api/cron` is excluded, not just bypassed inside the proxy above: the cron
-// runs on a schedule with no session, so every hit was paying for a full
-// supabase.auth.getUser() round trip before the route skipped auth anyway.
+// runs on a schedule with no session, so every hit was paying for a full auth
+// check before the route skipped auth anyway. (That check is now a local
+// signature verification rather than a round trip — see lib/supabase/auth.ts —
+// but skipping it outright is still free.)
 export const config = {
   matcher: ['/((?!_next/static|_next/image|api/cron|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'],
 }

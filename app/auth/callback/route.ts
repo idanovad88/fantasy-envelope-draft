@@ -17,6 +17,22 @@ export async function GET(request: NextRequest) {
     if (!error) {
       return NextResponse.redirect(`${origin}${next}`)
     }
+    // Carry the reason to the login screen. Without it a failed exchange is
+    // indistinguishable from a user who never signed in, on both sides of the
+    // support conversation.
+    console.error('auth callback: code exchange failed', error.message)
+    return NextResponse.redirect(
+      `${origin}/login?error=auth&reason=${encodeURIComponent(error.message)}`
+    )
+  }
+
+  // No code at all — Google itself refused, and puts the reason in the query.
+  const providerError = searchParams.get('error_description') || searchParams.get('error')
+  if (providerError) {
+    console.error('auth callback: provider returned an error', providerError)
+    return NextResponse.redirect(
+      `${origin}/login?error=auth&reason=${encodeURIComponent(providerError)}`
+    )
   }
 
   return NextResponse.redirect(`${origin}/login?error=auth`)

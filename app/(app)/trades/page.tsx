@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { getAuthUser } from '@/lib/supabase/auth'
 import { cookies } from 'next/headers'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
 import TradeCenter, { type TeamAssets, type TradeView, type AssetLabel } from '@/components/TradeCenter'
@@ -13,7 +14,7 @@ type DraftedPlayer = { id: string; name: string; position: string | null; drafte
 
 export default async function TradesPage() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
 
   const cookieStore = await cookies()
   const selectedLeagueId = cookieStore.get('selected_league_id')?.value
