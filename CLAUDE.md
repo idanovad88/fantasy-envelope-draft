@@ -67,6 +67,32 @@ Mutations go through API routes in `app/api/`. These routes use `createAdminClie
 - Admin status is determined by: row in `admin_users` table OR `leagues.created_by = user.id`.
 - The layout (`app/(app)/layout.tsx`) checks both and passes `isAdmin` and `isSnake` to `<Navbar>`. The Navbar hides the "מכרז" link for snake leagues.
 
+#### Resolving the caller: `getAuthUser()`, never `auth.getUser()`
+
+Server code reads the caller through `getAuthUser(client)` from `lib/supabase/auth.ts`. It returns `{ id, email } | null` — the same shape the call sites used to destructure out of `getUser()` — so the surrounding `if (!user) redirect('/login')` pattern is unchanged.
+
+`auth.getUser()` asks the Auth server to validate the token: a network round trip **per call**, and this app makes two per page load (the proxy, then the page or layout). On 2026-08-23 that hop went erratic and took the site down for every logged-in user. Same page, same code, the only difference being a session cookie:
+
+```
+without a session cookie   0.33s  0.34s  0.41s  0.39s
+with a session cookie      0.4s   75s   4.8s   22.8s  10.2s  142s  22.5s  45.5s  151s
+```
+
+A *deliberately invalid* token was just as slow as a valid one — the cost was the call, not the validation. Supabase REST answered in 0.2s throughout and the database was fine. After the switch, those same pages served in 0.18–0.48s.
+
+`getClaims()` verifies the JWT signature locally against the project's public JWKS. This project signs with **ES256**, so no network call is involved — and it is still cryptographically sound, unlike `getSession()`, which trusts the cookie blindly. Never reach for `getSession()` to make something faster.
+
+Two traps worth keeping in mind:
+
+- **The JWKS cache is per `GoTrueClient` instance**, and this app builds a fresh client per request. `lib/supabase/auth.ts` therefore holds the key set at module scope and passes it into `getClaims(undefined, { keys })`; without that, every request refetches the JWKS and you have swapped one round trip for another. An unrecognised `kid` triggers exactly one refetch before the token is called invalid, so rotating the signing key heals itself.
+- **Legacy HS256 tokens cannot be verified locally.** auth-js falls back to the server for those on its own; they disappear as sessions refresh.
+
+Client components keep `auth.getUser()`: that call goes from the browser straight to Supabase and never touched the degraded path. Sign-in itself also still needs the server — `exchangeCodeForSession` cannot be verified locally.
+
+#### A failed sign-in must say so
+
+`app/auth/callback/route.ts` used to discard the reason an exchange failed, and `/login` never read `?error=auth` at all, so a failed login looked exactly like never having pressed the button — on both sides of the support conversation. The callback now forwards the reason (`?error=auth&reason=…`, also logged to the runtime log), including an error Google itself returns, and the login page renders it. It reads the query off `window.location` rather than `useSearchParams()` so the page stays statically prerendered.
+
 **Test users:** six `team1–6@test.local` users (password `test1234`) exist in the Supabase project. There is **no quick-login UI** — the login page offers only Google OAuth, plus an email/password form behind "הקמת ליגה (מנהלים)" that signs you out unless your email is in `league_creator_whitelist`. To get a session as a test user locally, add that email to `league_creator_whitelist`, sign in through that form, then remove the row (the session survives).
 
 There is no seed script — `scripts/` is empty.
@@ -364,7 +390,7 @@ matcher: ['/((?!_next/static|_next/image|api/cron|favicon.ico|manifest\\.webmani
 
 **Important:** Any new public routes (PWA assets, open API endpoints, etc.) must be added to this matcher exclusion list, otherwise they will be blocked with a 307 redirect to `/login`. Note `sw\\.js` — the service worker is a `.js` file, and `.js` is *not* covered by the extension group above.
 
-Note `api/cron` in the matcher: the middleware runs `supabase.auth.getUser()` — a network round trip to Supabase — on every request it matches, and the cron carries no session, so every tick paid for an auth check the route then skipped. It is excluded outright *and* still bypassed inside the `proxy` function, so dropping the matcher entry degrades cost, not correctness.
+Note `api/cron` in the matcher: the middleware resolves the caller on every request it matches, and the cron carries no session, so every tick paid for an auth check the route then skipped. (That check is now a local signature verification rather than a network round trip — see **Resolving the caller** — but skipping it outright is still free.) It is excluded outright *and* still bypassed inside the `proxy` function, so dropping the matcher entry degrades cost, not correctness.
 
 Paths that bypass the auth redirect inside the `proxy` function itself (not the matcher): `/login`, `/api/public/*`, `/assist/*` (logged-out invite pages), and `/api/cron/*` (pg_cron carries no session cookie; those routes authenticate with `CRON_SECRET` instead). Both kinds of exclusion fail *silently* as a 307 to `/login` — assert `401`, not a redirect, when testing.
 
@@ -448,6 +474,16 @@ The dashboard (`app/(app)/page.tsx`) branches on `draft_type`:
 - "על הדק" card showing current team, overall pick number, and time since last pick once active
 - My team's drafted players
 - Last 5 picks
+
+### Error boundaries
+
+The app shipped for months with no `error.tsx` anywhere, which meant any throw unmounted the React tree and left the user on a **blank white page** — no message, no way back, nothing to report. Three boundaries now cover the tree, all rendering `components/ErrorScreen`:
+
+- `app/(app)/error.tsx` — a throw inside an authenticated page.
+- `app/error.tsx` — a throw inside the `(app)` layout itself (the auth check, the Navbar queries), which bubbles past the boundary above to the parent segment.
+- `app/global-error.tsx` — a throw in the root layout. It replaces the document, so it ships its own `<html>`/`<body>` and inline styles; the app stylesheet is not loaded there.
+
+`ErrorScreen` prints `error.message` and `error.digest`. The digest is the id that appears in the Vercel runtime log, so a screenshot from the league turns into a searchable line of server output. Keep it visible.
 
 ### Styling
 
