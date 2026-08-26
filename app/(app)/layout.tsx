@@ -16,15 +16,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     supabase.from('admin_users').select('role').eq('user_id', user.id).maybeSingle(),
     supabase.from('leagues').select('id').eq('created_by', user.id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
     selectedLeagueId
-      ? supabase.from('leagues').select('draft_type').eq('id', selectedLeagueId).maybeSingle()
+      ? supabase.from('leagues').select('draft_type, name, logo_url').eq('id', selectedLeagueId).maybeSingle()
       : Promise.resolve({ data: null }),
   ])
 
-  const isSnake = (league as { draft_type?: string } | null)?.draft_type === 'snake'
+  const selectedLeague = league as { draft_type?: string; name?: string; logo_url?: string | null } | null
+  const isSnake = selectedLeague?.draft_type === 'snake'
 
   return (
     <div className="flex min-h-screen">
-      <Navbar isAdmin={!!adminRow || !!createdLeague} isSnake={isSnake} />
+      <Navbar
+        isAdmin={!!adminRow || !!createdLeague}
+        isSnake={isSnake}
+        leagueName={selectedLeague?.name}
+        leagueLogo={selectedLeague?.logo_url}
+      />
       <main className="flex-1 p-4 md:p-6 pb-20 md:pb-6 w-full">
         {children}
       </main>

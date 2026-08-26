@@ -4,6 +4,7 @@ import React, { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatDateTime, formatTime, getSnakeTeamForPick, isSnakeRoundReversed, getEnvelopeNominationOrder } from '@/lib/utils'
 import type { League, Team, Auction, SnakePick, TradeStatus, RevealMode } from '@/types'
+import LeagueLogo from '@/components/LeagueLogo'
 import ImportPlayers from './ImportPlayers'
 
 type PastAuction = { id: string; scheduled_start: string; winning_bid: number | null; player: { name: string } | null; winning_team: { name: string } | null }
@@ -88,6 +89,39 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     setUploadingAvatarTeamId(null)
   }
 
+  async function uploadLeagueLogo(file: File) {
+    if (!league) return
+    setLoading('logo')
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('leagueId', league.id)
+    const res = await fetch('/api/admin/upload-league-logo', { method: 'POST', body: formData })
+    const json = await res.json()
+    if (json.error) setMsg('שגיאה בהעלאה: ' + json.error)
+    else {
+      setLogoUrl(json.url)
+      setMsg('לוגו הליגה עודכן!')
+    }
+    setLoading('')
+  }
+
+  async function removeLeagueLogo() {
+    if (!league) return
+    setLoading('logo')
+    const res = await fetch('/api/admin/delete-league-logo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ leagueId: league.id }),
+    })
+    const json = await res.json()
+    if (json.error) setMsg('שגיאה במחיקה: ' + json.error)
+    else {
+      setLogoUrl(null)
+      setMsg('לוגו הליגה הוסר')
+    }
+    setLoading('')
+  }
+
   async function uploadVarGif(file: File) {
     if (!league) return
     setLoading('var_gif')
@@ -124,6 +158,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
 
   // League settings state
   const [leagueName, setLeagueName] = useState(league?.name ?? 'פנטזי דראפט 25-26')
+  const [logoUrl, setLogoUrl] = useState<string | null>(league?.logo_url ?? null)
   const [numTeams, setNumTeams] = useState(league?.num_teams ?? 12)
   const [playersPerTeam, setPlayersPerTeam] = useState(league?.players_per_team ?? 13)
   const [budgetPerTeam, setBudgetPerTeam] = useState(league?.budget_per_team ?? 200)
@@ -1616,6 +1651,46 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
               <label className="block text-sm font-medium mb-1.5">שם הליגה</label>
               <input className="input" value={leagueName} onChange={e => setLeagueName(e.target.value)} />
             </div>
+
+            {/* League logo — needs a saved league to attach the upload to */}
+            {league && (
+            <div>
+              <label className="block text-sm font-medium mb-2">לוגו הליגה</label>
+              <div className="flex items-center gap-3">
+                <LeagueLogo url={logoUrl} name={leagueName || league.name} size={64} />
+                <label style={{ cursor: loading === 'logo' ? 'not-allowed' : 'pointer', display: 'inline-flex' }}>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    disabled={loading === 'logo'}
+                    onChange={e => {
+                      const file = e.target.files?.[0]
+                      if (file) uploadLeagueLogo(file)
+                      e.target.value = ''
+                    }}
+                  />
+                  <span className="btn btn-outline text-sm" style={{ opacity: loading === 'logo' ? 0.5 : 1, pointerEvents: 'none' }}>
+                    {loading === 'logo' ? 'מעלה...' : logoUrl ? '📷 החלף לוגו' : '📷 העלה לוגו'}
+                  </span>
+                </label>
+                {logoUrl && (
+                  <button
+                    type="button"
+                    className="btn btn-outline text-sm"
+                    style={{ color: 'var(--danger)' }}
+                    disabled={loading === 'logo'}
+                    onClick={removeLeagueLogo}
+                  >
+                    הסר
+                  </button>
+                )}
+              </div>
+              <p className="text-xs mt-1.5" style={{ color: 'var(--muted)' }}>
+                מוצג ברשימת הליגות ובראש התפריט. נשמר מיד, ללא צורך בלחיצה על &quot;שמור הגדרות&quot;.
+              </p>
+            </div>
+            )}
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block text-sm font-medium mb-1.5">מספר קבוצות</label>
