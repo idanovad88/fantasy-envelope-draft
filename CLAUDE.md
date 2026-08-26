@@ -475,6 +475,15 @@ The dashboard (`app/(app)/page.tsx`) branches on `draft_type`:
 - My team's drafted players
 - Last 5 picks
 
+### Exporting drafted players (`/api/export-players`)
+
+`GET /api/export-players?format=xlsx|csv` — a flat list of every drafted player with the price it went for, open to **any league member** (not admin-only, unlike `/api/admin/export-teams`, which stays a per-team workbook).
+
+- League comes from the `selected_league_id` cookie with the usual team → admin → creator fallback. The cookie is user-supplied, so membership is re-checked against the resolved league before anything is read; a non-member gets 403.
+- Envelope columns: שחקן / קבוצת NBA / עמדה / עמדה בהרכב / קבוצה / מחיר, sorted by price descending. Snake has no prices, so it exports פיק / סיבוב instead and sorts by `overall_pick_number`.
+- The CSV is written with a UTF-8 BOM — without it Excel renders the Hebrew headers as mojibake.
+- UI: `components/ExportPlayers.tsx`, two plain `<a download>` links (no client JS), mounted in the "נרכשו" card on the envelope players page and in the header of the snake one.
+
 ### Error boundaries
 
 The app shipped for months with no `error.tsx` anywhere, which meant any throw unmounted the React tree and left the user on a **blank white page** — no message, no way back, nothing to report. Three boundaries now cover the tree, all rendering `components/ErrorScreen`:

@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getAuthUser } from '@/lib/supabase/auth'
 import { cookies } from 'next/headers'
 import PlayerSearch from '@/components/PlayerSearch'
+import ExportPlayers from '@/components/ExportPlayers'
 import SnakePlayerPicker from '@/components/SnakePlayerPicker'
 import SnakeDraftBoard from '@/components/SnakeDraftBoard'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
@@ -131,7 +132,10 @@ export default async function PlayersPage() {
 
       {drafted.length > 0 && (
         <div className="card mt-4">
-          <h2 className="font-bold mb-3" style={{ color: 'var(--muted)' }}>נרכשו ({drafted.length})</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-bold" style={{ color: 'var(--muted)' }}>נרכשו ({drafted.length})</h2>
+            <ExportPlayers />
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -236,6 +240,7 @@ async function SnakeDraftPage({
         <div className="flex gap-2 text-sm">
           <span className="badge badge-green">{available.length} זמינים</span>
           <span className="badge badge-gray">{drafted.length} נבחרו</span>
+          {drafted.length > 0 && <ExportPlayers />}
         </div>
       </div>
 
