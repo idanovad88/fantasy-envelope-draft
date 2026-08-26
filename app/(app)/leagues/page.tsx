@@ -109,7 +109,7 @@ export default async function LeaguesPage() {
             <div key={league.id} className="card flex flex-wrap items-center justify-between gap-3">
               {/* basis-56 + flex-wrap: on a phone the buttons drop to their own row
                   instead of squeezing the name down to one word per line */}
-              <div className="flex items-center gap-3 min-w-0 grow basis-56">
+              <div className="flex items-center gap-3 min-w-0 grow basis-48">
               <LeagueLogo url={league.logo_url} name={league.name} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -124,15 +124,16 @@ export default async function LeaguesPage() {
                     {league.draft_type === 'snake' ? 'סנייק' : 'מעטפות'}
                   </span>
                 </div>
+              </div>
+              </div>
+              {/* one group, so the team name always sits on the buttons' row */}
+              <div className="flex items-center gap-3 shrink-0 ms-auto">
                 {myTeam && (
-                  <p className="text-sm mt-0.5" style={{ color: 'var(--muted)' }}>
+                  <p className="text-sm" style={{ color: 'var(--muted)' }}>
                     קבוצה: {myTeam.name}
                     {myTeam.user_id !== user.id && ' (עוזר)'}
                   </p>
                 )}
-              </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0 ms-auto">
                 <LeagueSelectButton leagueId={league.id} />
                 <LeagueHideButton leagueId={league.id} hidden={false} />
               </div>
@@ -150,7 +151,7 @@ export default async function LeaguesPage() {
           <div className="flex flex-col gap-3">
             {hiddenEntries.map(({ league, myTeam, isAdmin }) => (
               <div key={league.id} className="card flex flex-wrap items-center justify-between gap-3" style={{ opacity: 0.6 }}>
-                <div className="flex items-center gap-3 min-w-0 grow basis-56">
+                <div className="flex items-center gap-3 min-w-0 grow basis-48">
                 <LeagueLogo url={league.logo_url} name={league.name} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -165,15 +166,15 @@ export default async function LeaguesPage() {
                       {league.draft_type === 'snake' ? 'סנייק' : 'מעטפות'}
                     </span>
                   </div>
+                </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0 ms-auto">
                   {myTeam && (
-                    <p className="text-sm mt-0.5" style={{ color: 'var(--muted)' }}>
+                    <p className="text-sm" style={{ color: 'var(--muted)' }}>
                       קבוצה: {myTeam.name}
                       {myTeam.user_id !== user.id && ' (עוזר)'}
                     </p>
                   )}
-                </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0 ms-auto">
                   <LeagueSelectButton leagueId={league.id} />
                   <LeagueHideButton leagueId={league.id} hidden={true} />
                 </div>
