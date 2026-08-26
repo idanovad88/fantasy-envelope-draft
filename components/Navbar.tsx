@@ -4,6 +4,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { Home, Users, ShoppingBag, List, Settings, Trophy, ArrowLeftRight } from 'lucide-react'
+import LeagueLogo from './LeagueLogo'
 
 const NAV = [
   { href: '/', label: 'בית', icon: Home },
@@ -25,9 +26,11 @@ function visibleNav(isSnake?: boolean) {
 interface NavbarProps {
   isAdmin?: boolean
   isSnake?: boolean
+  leagueName?: string | null
+  leagueLogo?: string | null
 }
 
-export default function Navbar({ isAdmin, isSnake }: NavbarProps) {
+export default function Navbar({ isAdmin, isSnake, leagueName, leagueLogo }: NavbarProps) {
   const pathname = usePathname()
 
   return (
@@ -35,8 +38,18 @@ export default function Navbar({ isAdmin, isSnake }: NavbarProps) {
       {/* Desktop sidebar */}
       <nav className="hidden md:flex flex-col gap-1 p-4 h-screen sticky top-0 w-56 border-l" style={{ borderColor: 'var(--border)', background: 'var(--card)' }}>
         <div className="flex items-center gap-2 px-3 py-4 mb-4">
-          <Image src="/logo.png" alt="פנטזי דראפט" width={36} height={36} className="rounded-lg" />
-          <span className="font-bold text-lg">פנטזי דראפט</span>
+          {/* Inside a league, its own logo and name identify which league is open. */}
+          {leagueName ? (
+            <>
+              <LeagueLogo url={leagueLogo} name={leagueName} size={36} />
+              <span className="font-bold text-lg truncate">{leagueName}</span>
+            </>
+          ) : (
+            <>
+              <Image src="/logo.png" alt="פנטזי דראפט" width={36} height={36} className="rounded-lg" />
+              <span className="font-bold text-lg">פנטזי דראפט</span>
+            </>
+          )}
         </div>
 
         {visibleNav(isSnake).map(({ href, label, icon: Icon }) => (

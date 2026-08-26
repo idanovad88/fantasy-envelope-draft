@@ -23,6 +23,7 @@ export interface League {
   join_code: string | null
   draft_start_time: string | null
   roster_slots: Record<string, number> | null
+  logo_url: string | null
   var_gif_url: string | null
   var_gif_urls: string[] | null
   pick_timeout_minutes: number | null
