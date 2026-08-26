@@ -106,7 +106,10 @@ export default async function LeaguesPage() {
       ) : (
         <div className="flex flex-col gap-3 mb-6">
           {entries.map(({ league, myTeam, isAdmin }) => (
-            <div key={league.id} className="card flex items-center justify-between gap-4">
+            <div key={league.id} className="card flex flex-wrap items-center justify-between gap-3">
+              {/* basis-56 + flex-wrap: on a phone the buttons drop to their own row
+                  instead of squeezing the name down to one word per line */}
+              <div className="flex items-center gap-3 min-w-0 grow basis-56">
               <LeagueLogo url={league.logo_url} name={league.name} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -128,7 +131,8 @@ export default async function LeaguesPage() {
                   </p>
                 )}
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              </div>
+              <div className="flex items-center gap-2 shrink-0 ms-auto">
                 <LeagueSelectButton leagueId={league.id} />
                 <LeagueHideButton leagueId={league.id} hidden={false} />
               </div>
@@ -145,7 +149,8 @@ export default async function LeaguesPage() {
           </summary>
           <div className="flex flex-col gap-3">
             {hiddenEntries.map(({ league, myTeam, isAdmin }) => (
-              <div key={league.id} className="card flex items-center justify-between gap-4" style={{ opacity: 0.6 }}>
+              <div key={league.id} className="card flex flex-wrap items-center justify-between gap-3" style={{ opacity: 0.6 }}>
+                <div className="flex items-center gap-3 min-w-0 grow basis-56">
                 <LeagueLogo url={league.logo_url} name={league.name} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -167,7 +172,8 @@ export default async function LeaguesPage() {
                     </p>
                   )}
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                </div>
+                <div className="flex items-center gap-2 shrink-0 ms-auto">
                   <LeagueSelectButton leagueId={league.id} />
                   <LeagueHideButton leagueId={league.id} hidden={true} />
                 </div>
