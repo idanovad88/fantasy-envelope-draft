@@ -126,16 +126,19 @@ export default async function LeaguesPage() {
                 </div>
               </div>
               </div>
-              {/* one group, so the team name always sits on the buttons' row */}
-              <div className="flex items-center gap-3 shrink-0 ms-auto">
+              {/* one group so the team name always sits on the buttons' row;
+                  justify-between pins it to the card's edge, buttons to the other */}
+              <div className="flex items-center justify-between gap-3 grow">
                 {myTeam && (
                   <p className="text-sm" style={{ color: 'var(--muted)' }}>
                     קבוצה: {myTeam.name}
                     {myTeam.user_id !== user.id && ' (עוזר)'}
                   </p>
                 )}
-                <LeagueSelectButton leagueId={league.id} />
-                <LeagueHideButton leagueId={league.id} hidden={false} />
+                <div className="flex items-center gap-2 shrink-0">
+                  <LeagueSelectButton leagueId={league.id} />
+                  <LeagueHideButton leagueId={league.id} hidden={false} />
+                </div>
               </div>
             </div>
           ))}
@@ -168,15 +171,17 @@ export default async function LeaguesPage() {
                   </div>
                 </div>
                 </div>
-                <div className="flex items-center gap-3 shrink-0 ms-auto">
+                <div className="flex items-center justify-between gap-3 grow">
                   {myTeam && (
                     <p className="text-sm" style={{ color: 'var(--muted)' }}>
                       קבוצה: {myTeam.name}
                       {myTeam.user_id !== user.id && ' (עוזר)'}
                     </p>
                   )}
-                  <LeagueSelectButton leagueId={league.id} />
-                  <LeagueHideButton leagueId={league.id} hidden={true} />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <LeagueSelectButton leagueId={league.id} />
+                    <LeagueHideButton leagueId={league.id} hidden={true} />
+                  </div>
                 </div>
               </div>
             ))}
