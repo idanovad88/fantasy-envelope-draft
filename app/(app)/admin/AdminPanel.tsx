@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { formatDateTime, formatTime, getSnakeTeamForPick, isSnakeRoundReversed, getEnvelopeNominationOrder } from '@/lib/utils'
 import type { League, Team, Auction, SnakePick, TradeStatus, RevealMode } from '@/types'
 import LeagueLogo from '@/components/LeagueLogo'
+import { downscaleImage } from '@/lib/image'
 import ImportPlayers from './ImportPlayers'
 
 type PastAuction = { id: string; scheduled_start: string; winning_bid: number | null; player: { name: string } | null; winning_team: { name: string } | null }
@@ -93,7 +94,9 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     if (!league) return
     setLoading('logo')
     const formData = new FormData()
-    formData.append('file', file)
+    // Shrink before upload — the logo renders at 44–64px, and the phone pays for
+    // every byte past that on each page load.
+    formData.append('file', await downscaleImage(file))
     formData.append('leagueId', league.id)
     const res = await fetch('/api/admin/upload-league-logo', { method: 'POST', body: formData })
     const json = await res.json()

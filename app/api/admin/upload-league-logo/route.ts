@@ -30,7 +30,9 @@ export async function POST(req: Request) {
   const path = `league-logos/${leagueId}`
   const { error: uploadError } = await admin.storage
     .from('draft-media')
-    .upload(path, buffer, { contentType: file.type, upsert: true })
+    // A year of caching is safe: the path is stable, so a replaced logo is only
+    // ever seen through the fresh ?t= below.
+    .upload(path, buffer, { contentType: file.type, upsert: true, cacheControl: '31536000' })
 
   if (uploadError) return NextResponse.json({ error: uploadError.message }, { status: 500 })
 
