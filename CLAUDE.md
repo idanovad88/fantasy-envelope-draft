@@ -253,11 +253,20 @@ App-side there is no coupling: every `tiebreak_rank` read sorts or displays `tie
 - If no other team bids, the nominating team wins at $1.
 - No other team can bid $1 at all (see below), so a $1 tie is only possible between the nominator and… nobody. A tie now starts at $2.
 
-**Minimum bid: $1 for the nominator, $2 for everyone else.** Putting a player up is what buys the right to take him for a dollar; any other team must pay at least $2. Enforced by `trg_enforce_min_bid` (`BEFORE INSERT OR UPDATE ON bids`, `supabase/migration_min_bid_two.sql`) — it rejects `amount = 1` unless `team_id = auctions.nominating_team_id`. **The DB is the real gate**: `BidForm` upserts into `bids` straight from the browser client under RLS, so there is no API route to validate in. `BidForm` mirrors the rule client-side (`minBid = isNominator ? 1 : 2` — input `min`, default value, validation message, and the reset after a cancel all key off it) and disables the form entirely when `getMaxBid(...) < minBid`.
+**Minimum bid: $1 for the nominator, $2 for everyone else.** Putting a player up is what buys the right to take him for a dollar; any other team must pay at least $2. Enforced by `trg_enforce_min_bid` (`BEFORE INSERT OR UPDATE ON bids`, now `supabase/migration_enforce_bid_limits.sql`) — it rejects `amount = 1` unless `team_id = auctions.nominating_team_id`. **The DB is the real gate**: `BidForm` upserts into `bids` straight from the browser client under RLS, so there is no API route to validate in. `BidForm` mirrors the rule client-side (`minBid = isNominator ? 1 : 2` — input `min`, default value, validation message, and the reset after a cancel all key off it) and disables the form entirely when `getMaxBid(...) < minBid`.
 
 **`getMaxBid()` deliberately still reserves only $1 per remaining slot, not $2** — do not "fix" this to match the new floor. A team whose `getMaxBid()` is exactly 1 can no longer bid on anyone else's nomination (`BidForm` locks the form: `cannotAfford = maxBid < minBid`, button reads "אין תקציב ל-$2"), but it can still nominate — `canNominate` only requires `getMaxBid() >= 1` — and take that player at $1. So its remaining budget is spendable exclusively through its own nominations. That is an accepted end state, confirmed by the league owner, not a stuck team.
 
 Existing $1 bids from before the migration are left alone — the trigger only fires on write.
+
+**`trg_enforce_min_bid` is the only gate on a bid, and it enforces three rules, not one.** `migration_enforce_bid_limits.sql` added the two that had lived only in `BidForm`'s JavaScript. Both were exploitable with a single request to PostgREST — the browser writes `bids` directly under RLS, so anyone holding a session token can skip the UI entirely, and there is no API route in the path to validate in:
+
+1. **Deadline.** The `bids` RLS policies gate on `auctions.status = 'active'`, which says nothing about `reveal_time`. An auction stays `active` until the every-minute `auto-resolve-expired-auctions` tick resolves it, so for up to a minute past the deadline a scripted bid was still accepted while every real user's form already read "המועד להגשת הצעות עבר". The trigger now rejects `NOW() >= reveal_time`. **There is no grace period** — a submit that arrives late because of latency is refused, the same boundary the countdown already draws.
+2. **Budget ceiling.** `getMaxBid()` is client-side JS, nothing in the DB compared a bid to the team's budget, and `resolve_auction()` just takes `MAX(amount)`. One request could bid any number, win, and drive `budget_remaining` negative. The trigger recomputes the ceiling in SQL — **keep that formula identical to `getMaxBid()` in `lib/utils.ts`**; they are two copies of one rule.
+
+**The nominator's mandatory $1 auto-bid is exempt from all three — on `INSERT` only.** `trg_auto_bid_nominating_team` inserts it as part of creating the auction, so a rejection there would fail the whole `auctions` insert; eligibility to nominate is checked upstream by `canNominate()` and `/api/admin/queue-auction`, and `getMaxBid()` already reserves that dollar. The exemption deliberately excludes `UPDATE`: with it, a nominator that had raised its bid to $50 could drop back to $1 after the deadline — a post-deadline retreat, exactly what rule 1 exists to prevent.
+
+Not closed: `bids_team_update` still omits the `is_complete` check that `bids_team_insert` has, so a completed team can update an old bid. Harmless today — `resolve_auction()` filters completed teams out of both the `MAX` and the winner selection.
 
 **DB functions** (all `SECURITY DEFINER`, run in Supabase):
 - `demote_nomination_rank(team_id, league_id)` — moves team to bottom of `priority_rank` (below completed teams too)
@@ -283,6 +292,8 @@ SELECT prosrc FROM pg_proc WHERE proname = 'resolve_auction';
    SELECT name, priority_rank, tiebreak_rank FROM teams
    WHERE is_complete AND approved AND (priority_rank IS NULL OR tiebreak_rank IS NULL);
    ```
+
+4. `supabase/migration_enforce_bid_limits.sql` — replaces `enforce_min_bid()` with the three-rule version above (deadline + budget ceiling + the existing minimum) and re-creates `trg_enforce_min_bid`. Applied 2026-08-28; the live function before it was the `migration_min_bid_two.sql` body, minimum only. Idempotent, and it never re-checks existing rows — bids written before it stay as they are.
 
 **A gap at the top of either order is normal, not corruption.** The gap-free 1..N renumber in #2 is a one-time cleanup; every demotion afterwards writes `MAX(rank) + 1`, so the league drifts to e.g. 2..13 as soon as the team at rank 1 is demoted. The invariants that actually matter are: no duplicate ranks, and every approved team ranked.
 
