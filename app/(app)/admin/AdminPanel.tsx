@@ -60,9 +60,11 @@ interface Props {
   trades?: AdminTradeView[]
   openAuctions?: AdminOpenAuction[]
   openHistory?: AdminOpenHistory[]
+  /** Open draft only: why the clocks are stopped, if they are. */
+  openFrozenReason?: 'paused' | 'night' | null
 }
 
-export default function AdminPanel({ initialTab = 'overview', league, teams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators, adminUserIds, currentUserId, snakePicks = [], trades = [], openAuctions = [], openHistory = [] }: Props) {
+export default function AdminPanel({ initialTab = 'overview', league, teams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators, adminUserIds, currentUserId, snakePicks = [], trades = [], openAuctions = [], openHistory = [], openFrozenReason = null }: Props) {
   const supabase = createClient()
   const isSnake = league?.draft_type === 'snake'
   const isOpen = league?.draft_type === 'open'
@@ -1561,6 +1563,22 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
 
         return (
           <div className="flex flex-col gap-4">
+            {/* The deadlines below keep counting on screen while the clocks are
+                actually stopped, so say so here too — the player-facing board
+                already does. */}
+            {openFrozenReason && (
+              <div className="card" style={{ borderColor: 'var(--warning)' }}>
+                <p className="font-bold" style={{ color: 'var(--warning)' }}>
+                  {openFrozenReason === 'paused' ? '⏸ הדראפט מושהה' : '🌙 מחוץ לשעות הפעילות'}
+                </p>
+                <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
+                  {openFrozenReason === 'paused'
+                    ? 'השעונים עצורים ואי-אפשר להציע. הזמן שנותר לכל מכרז יישמר לחידוש.'
+                    : `שעות הפעילות ${String(league.draft_start_hour).padStart(2, '0')}:00–${String(league.draft_end_hour).padStart(2, '0')}:00. השעונים עצורים; מועדי הסגירה שלמטה יידחו קדימה בבוקר.`}
+                </p>
+              </div>
+            )}
+
             {/* Open auctions */}
             <div className="card">
               <h2 className="font-bold mb-1">מכרזים פתוחים ({openAuctions.length}/{league.open_board_size})</h2>

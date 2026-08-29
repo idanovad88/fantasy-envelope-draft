@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import AdminPanel, { type AdminTradeView, type AdminOpenAuction, type AdminOpenHistory } from './AdminPanel'
 import type { League, Team, Auction, SnakePick, Trade, TradeAsset } from '@/types'
-import { describePick } from '@/lib/utils'
+import { describePick, isWithinDraftHours } from '@/lib/utils'
 import { settleOpenDraft } from '@/lib/openDraft'
 
 export const dynamic = 'force-dynamic'
@@ -41,6 +41,19 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
 
   // Keep the open board's clocks honest before rendering the admin view.
   if (lid && isOpen) await settleOpenDraft(lid)
+
+  // Whether the open draft's clocks are stopped, computed here rather than in
+  // the panel: AdminPanel is a client component, so deciding "is it night" from
+  // the browser clock during render would risk disagreeing with the server HTML.
+  const openFrozenReason: 'paused' | 'night' | null =
+    !isOpen || !league
+      ? null
+      : league.status === 'paused'
+        ? 'paused'
+        : league.status === 'active' &&
+            !isWithinDraftHours(league.draft_start_hour, league.draft_end_hour)
+          ? 'night'
+          : null
 
   // Auto-activate any pending auction whose scheduled_start has passed (envelope only)
   if (lid && isEnvelope) {
@@ -116,6 +129,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         currentUserId={user.id}
         snakePicks={(snakePicks || []) as unknown as (SnakePick & { player: { name: string; position: string | null } | null; team: { name: string } | null })[]}
         trades={tradeViews}
+        openFrozenReason={openFrozenReason}
         openAuctions={(openAuctions || []) as unknown as AdminOpenAuction[]}
         openHistory={(openHistory || []) as unknown as AdminOpenHistory[]}
       />
