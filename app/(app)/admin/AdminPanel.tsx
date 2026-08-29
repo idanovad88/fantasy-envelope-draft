@@ -2264,8 +2264,11 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
               </div>
             )}
 
-            {/* VAR GIFs upload — envelope only */}
-            {!isSnake && (
+            {/* VAR GIFs upload — envelope only. The VAR clip plays when an
+                auction is decided on the priority tiebreak, and an open outcry
+                auction cannot tie: every bid must beat the standing one, so
+                tiebreak_rank is not part of that format at all. */}
+            {isEnvelope && (
             <div>
               <label className="block text-sm font-medium mb-2">גיפים ל-VAR (מוצגים כשמכרז נחשף בפריוריטי)</label>
               {localVarGifUrls.length > 0 && (
