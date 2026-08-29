@@ -36,9 +36,10 @@ Dev only (`.env.local` only, never in production):
 
 ## Architecture
 
-Fantasy NBA draft app supporting two draft types:
+Fantasy NBA draft app supporting three draft types:
 - **מעטפות (Envelope)** — players nominate players for blind auction; teams submit sealed bids revealed on a timer.
 - **סנייק (Snake)** — teams pick players in turn order with snake reversal between rounds; no budget or bidding.
+- **מכרז פתוח (Open outcry)** — several players on the board at once, public ascending bids, a team drops out with a final PASS. See **Open outcry draft** below.
 
 ### Data flow
 
@@ -193,6 +194,49 @@ The API route `POST /api/snake-pick` validates it is the team's turn, inserts in
 **Admin can pick on behalf of any team** by passing `team_id` in the request body — validated server-side that the team is actually on the clock.
 
 **DB migration:** `supabase/migration_snake_draft.sql` — adds `draft_type`, `pick_timeout_minutes`, `snake_round_config` to `leagues`; creates `snake_picks` table with RLS.
+
+### Open outcry draft (`draft_type = 'open'`)
+
+`open_board_size` players sit on the board at once. Bids are **public and ascending**; a team that is finished with a player marks **PASS**, which is **final for that auction** — there is no way back in, and that is what guarantees an auction terminates. An auction closes when every approved team except the current leader has passed, or when its deadline expires, whichever is first. **A team that is currently the highest bidder may not PASS** (putting a player up, or outbidding everyone, is a commitment — a leader walking away could leave the auction with nobody in it).
+
+**Own tables, deliberately.** `bids` has `UNIQUE(auction_id, team_id)` — one row per team per auction, right for a sealed envelope, useless as an ascending ledger. Worse, the live `auto-resolve-expired-auctions` cron loops `auctions WHERE status='active' AND reveal_time <= NOW()` and runs `resolve_auction()`; an open auction sharing that table would be closed by envelope rules, in production. So: `open_auctions` / `open_bids` (append-only ledger) / `open_passes`. `players`, `teams`, `assign_roster_slot()`, `refresh_team_stats()` and `demote_nomination_rank()` are still shared.
+
+**All mutation logic is in Postgres**, not split between TS and SQL. `open_auctions`/`open_bids`/`open_passes` have **only** `FOR SELECT USING (true)` and no write policy (the `snake_picks` / `trades` pattern), so the browser cannot write to them through PostgREST at all. API routes under `app/api/open/` and `app/api/admin/open/` resolve *who is calling* (via `lib/openAuth.ts` → `myTeamOr`, so assistant managers count) and then call an RPC. The functions `RAISE EXCEPTION` with the Hebrew text the UI shows.
+
+⚠️ **The mutating `open_*` functions are `SECURITY DEFINER`, so EXECUTE must be revoked from `anon` and `authenticated` BY NAME — `REVOKE ... FROM PUBLIC` is not enough.** Supabase ships an `ALTER DEFAULT PRIVILEGES ... GRANT EXECUTE ON FUNCTIONS TO anon, authenticated` for the `public` schema, so every new function gets a *direct* grant to both roles on top of the PUBLIC one; revoking only PUBLIC leaves them fully callable. This shipped broken and was caught by calling the RPCs with the anon key — `open_place_bid`, `open_pass`, `open_set_pause` and the rest all executed without a session, which would have let anyone bid as another team or pause a draft. Fixed by `supabase/migration_open_auction_grants_fix.sql`. The check, any time a new `open_*` function is added:
+
+```sql
+SELECT p.proname, array_to_string(p.proacl, ', ') AS grants
+FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public' AND p.proname LIKE 'open\_%' ORDER BY p.proname;
+```
+
+Only `postgres` and `service_role` may appear for a mutating one. The read-only helpers (`open_is_running`, `open_team_max_bid`, `open_team_open_slots`, `open_within_hours`, `open_last_hours_boundary`) stay public — they read nothing that is not already public through the SELECT policies. `pg_cron` is unaffected: the job runs as the function owner.
+
+**The bid ceiling is `getMaxBid()` with shifted arguments**, not a new rule:
+
+```
+getMaxBid(budget_remaining − sumLeading, player_count + leadingCount, players_per_team)
+```
+
+where `sumLeading`/`leadingCount` cover only the auctions the team **currently leads** — being outbid frees the money at once, because a losing bid can never become a purchase. `budget_remaining` already excludes players actually won, so nothing is double-counted. A team also cannot lead more auctions than it has free roster slots. Authoritative copy: `open_team_max_bid()`; `getOpenMaxBid()` in `lib/utils.ts` is display-only and the DB rejects it if they disagree.
+
+**Turn order.** `priority_rank`, and `demote_nomination_rank()` runs **at nomination time, not at close** — several auctions run at once and finish out of order, so rotating on close would make the order depend on which happened to end first. With `K = open_board_size − openCount`, the first `K` eligible teams may nominate now (`getOpenNominationOrder()`, and the same test in `open_nominate()`). The nominator is forced into a $1 opening bid and becomes the first leader. **`tiebreak_rank` is unused** — an ascending auction cannot tie, so the admin lottery tab shows only the nomination order.
+
+**The clock.** One deadline per auction, reset by every new bid (`open_pass_timeout_minutes`, default 120). Stopping it — admin PAUSE, or being outside `draft_start_hour`–`draft_end_hour` (Israel time; these two columns existed unused on `leagues` from the original schema) — stamps `leagues.open_frozen_since`; resuming shifts every open deadline forward by the elapsed gap, so nobody loses part of their window. `open_set_pause()` stamps in the same transaction as the status flip rather than leaving it to the tick, which would leak up to a minute onto every auction. At the night boundary the tick stamps **the boundary itself**, not `now()`, for the same reason.
+
+**Auto-PASS.** After every bid and pass, `open_settle_auction()` inserts a pass row for any non-leader that cannot legally raise (`complete` / `roster_full` / `no_budget`) before checking whether anyone is left. Without it a broke team would stall every auction until its deadline. Accepted consequence: a team auto-passed for budget that later has money freed elsewhere does not come back — consistent with PASS being final.
+
+**Realtime:** only `open_auctions` is published. `open_bids`/`open_passes` have no `league_id` and so could not be filtered per league; instead `open_pass()` bumps `open_auctions.updated_at`, so one filtered subscription in `RealtimeRefresher` covers nominations (INSERT), bids, passes and closes (UPDATE).
+
+**Row limits:** `open_bids` is a ledger and grows past the 1000-row cap mid-draft. The board reads it **only for currently-open auctions**; every history view reads `winning_team_id`/`winning_bid` off the auction row and never touches the ledger league-wide.
+
+**Scheduled job:** `open-draft-tick`, every minute, pure SQL (`SELECT open_draft_tick_all()`) — no Vercel invocation, so unlike `notify-auctions` it needs no guard. `settleOpenDraft()` in `lib/openDraft.ts` calls the same per-league function on page load so the UI is never a minute stale. **Its failures are invisible in `cron.job_run_details`**, exactly like `auto_resolve_expired_auctions` — the diagnostic query is in `supabase/cron_open_draft_tick.sql`.
+
+**DB migrations, in order:**
+1. `supabase/migration_open_auction_draft.sql` — tables, functions, RLS, grants. Run **before** deploying: `save-league` sends the new columns and PostgREST rejects the whole update if they are missing.
+2. `supabase/cron_open_draft_tick.sql` — the every-minute job.
+3. `supabase/migration_open_auction_grants_fix.sql` — the `anon`/`authenticated` revoke above. Folded into #1 as well, so a fresh install needs only #1 and #2; this file exists for the database where #1 already ran with the incomplete revoke. Applied 2026-08-29.
 
 ### Trade system (snake only)
 
@@ -353,12 +397,13 @@ Requires the `pg_cron` and `pg_net` extensions (Supabase Dashboard → Database 
 
 ### Scheduled jobs (pg_cron)
 
-**Two** jobs run every minute, both created by hand, both living only in the database. Nothing in the app imports them and `cron.job` is the only place they exist:
+**Three** jobs run every minute, all created by hand, all living only in the database. Nothing in the app imports them and `cron.job` is the only place they exist:
 
 | Job | Runs | Costs Vercel? |
 |---|---|---|
 | `auto-resolve-expired-auctions` | `SELECT auto_resolve_expired_auctions()` — pure SQL | No |
 | `notify-auctions` | `net.http_post` → `/api/cron/notify-auctions` | Yes, and it is guarded |
+| `open-draft-tick` | `SELECT open_draft_tick_all()` — pure SQL | No |
 
 ```sql
 SELECT jobid, jobname, schedule, active, command FROM cron.job ORDER BY jobid;
@@ -376,6 +421,8 @@ WHERE status = 'active' AND reveal_time < now() - interval '5 minutes';
 Any row is an auction the resolver has been failing on; the warning text is in Supabase Dashboard → Logs → Postgres.
 
 **`notify-auctions`** is covered under **Push notifications** above — note especially that its schedule is guarded and why.
+
+**`open-draft-tick`** (`supabase/cron_open_draft_tick.sql`) drives the open outcry board: freeze/thaw around pauses and night hours, then close any auction past its deadline. Pure SQL, so no guard is needed. Its per-league failures are swallowed into `RAISE WARNING` the same way — the query that finds a stuck auction is in that file.
 
 ### Auction activation (`lib/auctions.ts`)
 
@@ -534,4 +581,4 @@ After creation the creator is upserted into `admin_users` with the new `league_i
 ### New components (snake draft)
 
 - `components/SnakeDraftBoard.tsx` — rounds × teams grid showing pick assignments, current pick highlighted, round direction arrows (→/←)
-- `components/SnakePlayerPicker.tsx` — searchable player table with "בחר" button per row; calls `POST /api/snake-pick`
+- `components/PlayerPicker.tsx` — searchable player table with an action button per row. Shared by snake ("בחר" → `POST /api/snake-pick`) and the open board ("העלה" → `POST /api/open/nominate`); both post the same `{ league_id, player_id, team_id? }` body, so `endpoint`/`actionLabel` are the only difference. Was `SnakePlayerPicker`.

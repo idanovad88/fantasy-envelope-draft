@@ -1,7 +1,7 @@
 export type LeagueStatus = 'setup' | 'lottery' | 'active' | 'paused' | 'completed'
 export type PlayerStatus = 'available' | 'on_auction' | 'drafted'
 export type AuctionStatus = 'pending' | 'active' | 'revealed' | 'completed'
-export type DraftType = 'envelope' | 'snake'
+export type DraftType = 'envelope' | 'snake' | 'open'
 export type RevealMode = 'random' | 'weighted'
 
 export interface League {
@@ -28,6 +28,10 @@ export interface League {
   var_gif_urls: string[] | null
   pick_timeout_minutes: number | null
   snake_round_config: boolean[] | null
+  // open-outcry draft only
+  open_board_size: number
+  open_pass_timeout_minutes: number
+  open_frozen_since: string | null
   created_by: string
   created_at: string
   updated_at: string
@@ -119,6 +123,62 @@ export interface Bid {
   amount: number
   created_at: string
   updated_at: string
+  // joined
+  team?: Team
+}
+
+// ── Open outcry draft ────────────────────────────────────────────────────────
+
+export type OpenAuctionStatus = 'open' | 'completed' | 'cancelled'
+export type OpenCloseReason = 'all_passed' | 'timeout' | 'admin' | 'cancelled'
+export type OpenPassReason =
+  | 'manual'
+  | 'admin'
+  | 'timeout'
+  | 'no_budget'
+  | 'roster_full'
+  | 'complete'
+
+export interface OpenAuction {
+  id: string
+  league_id: string
+  player_id: string
+  nominating_team_id: string
+  status: OpenAuctionStatus
+  current_price: number
+  leader_team_id: string | null
+  deadline_at: string
+  winning_team_id: string | null
+  winning_bid: number | null
+  closed_reason: OpenCloseReason | null
+  created_at: string
+  updated_at: string
+  // joined
+  player?: Player
+  nominating_team?: Team
+  leader_team?: Team
+  winning_team?: Team
+  bids?: OpenBid[]
+  passes?: OpenPass[]
+}
+
+export interface OpenBid {
+  id: string
+  open_auction_id: string
+  team_id: string
+  amount: number
+  is_auto: boolean
+  created_at: string
+  // joined
+  team?: Team
+}
+
+export interface OpenPass {
+  id: string
+  open_auction_id: string
+  team_id: string
+  reason: OpenPassReason
+  created_at: string
   // joined
   team?: Team
 }

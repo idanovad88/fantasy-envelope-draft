@@ -66,6 +66,37 @@ export async function POST(req: NextRequest) {
     update.reveal_mode = body.reveal_mode
   }
 
+  // Open outcry draft. Each range matches its DB CHECK — a value the constraint
+  // would reject rolls back the whole settings save, the silent failure this
+  // route exists to prevent.
+  if ('open_board_size' in body) {
+    const n = Number(body.open_board_size)
+    if (!Number.isInteger(n) || n < 1 || n > 30) {
+      return NextResponse.json({ error: 'מספר השחקנים על הלוח חייב להיות בין 1 ל-30' }, { status: 400 })
+    }
+    update.open_board_size = n
+  }
+
+  if ('open_pass_timeout_minutes' in body) {
+    const n = Number(body.open_pass_timeout_minutes)
+    if (!Number.isInteger(n) || n < 5 || n > 2880) {
+      return NextResponse.json({ error: 'זמן ההמתנה למכרז חייב להיות בין 5 ל-2880 דקות' }, { status: 400 })
+    }
+    update.open_pass_timeout_minutes = n
+  }
+
+  // Active hours. These two columns have lived on `leagues` unused since the
+  // original schema; the open draft is what finally reads them.
+  for (const key of ['draft_start_hour', 'draft_end_hour'] as const) {
+    if (key in body) {
+      const n = Number(body[key])
+      if (!Number.isInteger(n) || n < 0 || n > 23) {
+        return NextResponse.json({ error: 'שעות הפעילות חייבות להיות בין 0 ל-23' }, { status: 400 })
+      }
+      update[key] = n
+    }
+  }
+
   const { error } = await supabase.from('leagues').update(update).eq('id', leagueId)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

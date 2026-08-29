@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { formatDateTime, formatTime, getSnakeTeamForPick, isSnakeRoundReversed, getEnvelopeNominationOrder } from '@/lib/utils'
+import { formatDateTime, formatTime, getSnakeTeamForPick, isSnakeRoundReversed, getEnvelopeNominationOrder, getOpenNominationOrder } from '@/lib/utils'
 import type { League, Team, Auction, SnakePick, TradeStatus, RevealMode } from '@/types'
 import LeagueLogo from '@/components/LeagueLogo'
 import { downscaleImage } from '@/lib/image'
@@ -23,7 +23,27 @@ export type AdminTradeView = {
   targetGives: { type: 'pick' | 'player'; label: string }[]
 }
 
-type AdminTab = 'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league' | 'draft' | 'trades'
+type AdminTab = 'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league' | 'draft' | 'trades' | 'board'
+
+export type AdminOpenAuction = {
+  id: string
+  current_price: number
+  leader_team_id: string | null
+  deadline_at: string
+  player: { name: string } | null
+  nominating_team: { name: string } | null
+  leader_team: { name: string } | null
+  passes: { team_id: string }[]
+}
+
+export type AdminOpenHistory = {
+  id: string
+  status: 'completed' | 'cancelled'
+  updated_at: string
+  winning_bid: number | null
+  player: { name: string } | null
+  winning_team: { name: string } | null
+}
 
 interface Props {
   initialTab?: AdminTab
@@ -38,11 +58,18 @@ interface Props {
   currentUserId: string
   snakePicks?: SnakePickFull[]
   trades?: AdminTradeView[]
+  openAuctions?: AdminOpenAuction[]
+  openHistory?: AdminOpenHistory[]
 }
 
-export default function AdminPanel({ initialTab = 'overview', league, teams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators, adminUserIds, currentUserId, snakePicks = [], trades = [] }: Props) {
+export default function AdminPanel({ initialTab = 'overview', league, teams, activeAuction, scheduledAuctions, players, pastAuctions, leagueCreators, adminUserIds, currentUserId, snakePicks = [], trades = [], openAuctions = [], openHistory = [] }: Props) {
   const supabase = createClient()
   const isSnake = league?.draft_type === 'snake'
+  const isOpen = league?.draft_type === 'open'
+  // Envelope-only settings and the tiebreak lottery must key off this, not off
+  // `!isSnake` — an open-outcry league is neither, and has no tiebreak at all
+  // (an ascending auction cannot end in a tie).
+  const isEnvelope = !isSnake && !isOpen
   // Reset draft is creator-only (route re-checks server-side; this gates the UI).
   const isCreator = !!league && league.created_by === currentUserId
   // In snake mode the pick-order lottery may run only once. Once any approved
@@ -53,9 +80,20 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   // nomination/priority lotteries are locked — re-rolling order mid-draft would
   // corrupt an in-progress draft.
   const draftStarted = ['active', 'paused', 'completed'].includes(league?.status ?? '')
-  const [tab, setTab] = useState<AdminTab>(
-    isSnake && initialTab === 'auction' ? 'overview' : initialTab
-  )
+  // ?tab=auction is the envelope tab id; snake has no equivalent and the open
+  // board's is called `board`. Anything else this format does not have falls
+  // back to overview rather than rendering a page with no body at all — every
+  // tab panel is guarded by its own format check, so ?tab=draft on an envelope
+  // league used to show tabs above empty space.
+  const [tab, setTab] = useState<AdminTab>(() => {
+    if (initialTab === 'auction') return isSnake ? 'overview' : isOpen ? 'board' : 'auction'
+    const available: AdminTab[] = isSnake
+      ? ['overview', 'draft', 'trades', 'players', 'teams', 'lottery', 'league']
+      : isOpen
+        ? ['overview', 'board', 'players', 'teams', 'lottery', 'league']
+        : ['overview', 'auction', 'players', 'teams', 'lottery', 'league']
+    return available.includes(initialTab) ? initialTab : 'overview'
+  })
   const [loading, setLoading] = useState('')
   const [msg, setMsg] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -169,6 +207,15 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   const [auctionDurationHours, setAuctionDurationHours] = useState(league?.auction_duration_hours ?? 1.5)
   const [notifyBeforeMinutes, setNotifyBeforeMinutes] = useState(league?.notify_before_minutes ?? 1)
   const [revealMode, setRevealMode] = useState<RevealMode>(league?.reveal_mode ?? 'random')
+  // Open outcry. draft_start_hour / draft_end_hour have been on `leagues` since
+  // the original schema and were never read by anything until this format.
+  const [openBoardSize, setOpenBoardSize] = useState(league?.open_board_size ?? 4)
+  const [openPassTimeoutMinutes, setOpenPassTimeoutMinutes] = useState(league?.open_pass_timeout_minutes ?? 120)
+  const [draftStartHour, setDraftStartHour] = useState(league?.draft_start_hour ?? 8)
+  const [draftEndHour, setDraftEndHour] = useState(league?.draft_end_hour ?? 22)
+  const [openNominateTeamId, setOpenNominateTeamId] = useState('')
+  const [openNominatePlayerId, setOpenNominatePlayerId] = useState('')
+  const [openPassTeamByAuction, setOpenPassTeamByAuction] = useState<Record<string, string>>({})
   const SLOT_TYPES = ['PG', 'SG', 'G', 'SF', 'PF', 'F', 'C', 'UTIL', 'BENCH'] as const
   const [rosterSlots, setRosterSlots] = useState<Record<string, number>>(
     league?.roster_slots ?? {}
@@ -416,6 +463,11 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
       ...(isSnake ? {
         pick_timeout_minutes: isNaN(timeout) || pickTimeoutMinutes === '' ? null : timeout,
         snake_round_config: snakeRoundConfig,
+      } : isOpen ? {
+        open_board_size: openBoardSize,
+        open_pass_timeout_minutes: openPassTimeoutMinutes,
+        draft_start_hour: draftStartHour,
+        draft_end_hour: draftEndHour,
       } : {
         notify_before_minutes: notifyBeforeMinutes,
         reveal_mode: revealMode,
@@ -454,9 +506,48 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   async function setLeagueStatus(status: string) {
     if (!league) return
     setLoading('status_' + status)
+
+    // Pausing an open draft is not just a status flip: it stops the clocks, and
+    // resuming has to push every open deadline forward by the elapsed gap.
+    // open_set_pause() does both in one transaction. Leaving it to the plain
+    // update below would let the every-minute tick stamp the freeze instead,
+    // leaking up to a minute of clock onto every auction on the board.
+    if (isOpen && (status === 'paused' || (status === 'active' && league.status === 'paused'))) {
+      const res = await fetch('/api/admin/open/set-pause', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ league_id: league.id, paused: status === 'paused' }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { setMsg('שגיאה: ' + (data.error ?? '')); setLoading(''); return }
+      setMsg(status === 'paused' ? 'הדראפט הושהה — השעונים עצורים' : 'הדראפט חודש')
+      setLoading('')
+      window.location.reload()
+      return
+    }
+
     await supabase.from('leagues').update({ status, updated_at: new Date().toISOString() }).eq('id', league.id)
     setMsg(`סטטוס עודכן ל: ${status}`)
     setLoading('')
+    window.location.reload()
+  }
+
+  // ── Open outcry board actions ──────────────────────────────────────────────
+  async function openBoardAction(
+    path: string,
+    body: object,
+    key: string,
+    confirmText?: string
+  ) {
+    if (confirmText && !confirm(confirmText)) return
+    setLoading(key)
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) { setMsg('שגיאה: ' + (data.error ?? 'הפעולה נכשלה')); setLoading(''); return }
     window.location.reload()
   }
 
@@ -729,14 +820,23 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
         { id: 'lottery', label: 'הגרלה' },
         { id: 'league', label: 'הגדרות' },
       ]
-    : [
-        { id: 'overview', label: 'סקירה' },
-        { id: 'auction', label: 'מכרז' },
-        { id: 'players', label: 'שחקנים' },
-        { id: 'teams', label: 'קבוצות' },
-        { id: 'lottery', label: 'הגרלה' },
-        { id: 'league', label: 'הגדרות' },
-      ]
+    : isOpen
+      ? [
+          { id: 'overview', label: 'סקירה' },
+          { id: 'board', label: 'הלוח' },
+          { id: 'players', label: 'שחקנים' },
+          { id: 'teams', label: 'קבוצות' },
+          { id: 'lottery', label: 'הגרלה' },
+          { id: 'league', label: 'הגדרות' },
+        ]
+      : [
+          { id: 'overview', label: 'סקירה' },
+          { id: 'auction', label: 'מכרז' },
+          { id: 'players', label: 'שחקנים' },
+          { id: 'teams', label: 'קבוצות' },
+          { id: 'lottery', label: 'הגרלה' },
+          { id: 'league', label: 'הגדרות' },
+        ]
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -1437,6 +1537,199 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
         </div>
       )}
 
+      {/* OPEN OUTCRY BOARD */}
+      {tab === 'board' && isOpen && league && (() => {
+        // Same eligibility rule the DB enforces in open_nominate(): the first
+        // (board_size − open) teams in priority_rank order that are not complete
+        // and can still cover the $1 auto-bid.
+        const leadingByTeam = new Map<string, { sum: number; count: number }>()
+        for (const a of openAuctions) {
+          if (!a.leader_team_id) continue
+          const cur = leadingByTeam.get(a.leader_team_id) ?? { sum: 0, count: 0 }
+          leadingByTeam.set(a.leader_team_id, { sum: cur.sum + a.current_price, count: cur.count + 1 })
+        }
+        const order = getOpenNominationOrder(
+          teams.filter(t => t.approved),
+          openAuctions.length,
+          league.open_board_size,
+          league.players_per_team,
+          leadingByTeam
+        )
+        const eligible = order.filter(o => o.canNominateNow)
+        const availablePlayers = players.filter(p => p.status === 'available')
+        const teamName = (id: string) => teams.find(t => t.id === id)?.name ?? '—'
+
+        return (
+          <div className="flex flex-col gap-4">
+            {/* Open auctions */}
+            <div className="card">
+              <h2 className="font-bold mb-1">מכרזים פתוחים ({openAuctions.length}/{league.open_board_size})</h2>
+              <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
+                סגירה מוקדמת מעניקה את השחקן למוביל הנוכחי. ביטול מחזיר אותו לבריכה ומוחק את כל ההצעות וה-PASS — זו הדרך היחידה לתקן PASS שגוי.
+              </p>
+              {openAuctions.length === 0 ? (
+                <p className="text-sm" style={{ color: 'var(--muted)' }}>אין מכרזים פתוחים</p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {openAuctions.map(a => {
+                    const passedIds = new Set(a.passes.map(p => p.team_id))
+                    const canPass = teams.filter(
+                      t => t.approved && t.id !== a.leader_team_id && !passedIds.has(t.id)
+                    )
+                    return (
+                      <div key={a.id} className="p-3 rounded-lg" style={{ background: 'var(--background)' }}>
+                        <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                          <div>
+                            <p className="font-bold">{a.player?.name ?? '—'}</p>
+                            <p className="text-xs" style={{ color: 'var(--muted)' }}>
+                              ${a.current_price} · מוביל: {a.leader_team?.name ?? '—'} · העלה: {a.nominating_team?.name ?? '—'}
+                            </p>
+                            <p className="text-xs" style={{ color: 'var(--muted)' }}>
+                              סגירה: {formatDateTime(a.deadline_at)} · {a.passes.length} פאסים
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              className="btn btn-primary"
+                              style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                              disabled={!!loading}
+                              onClick={() => openBoardAction(
+                                '/api/admin/open/close-auction',
+                                { auction_id: a.id },
+                                'open_close_' + a.id,
+                                `לסגור עכשיו? ${a.player?.name} יעבור ל${a.leader_team?.name ?? '—'} תמורת $${a.current_price}.`
+                              )}
+                            >
+                              סגור עכשיו
+                            </button>
+                            <button
+                              className="btn btn-danger"
+                              style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                              disabled={!!loading}
+                              onClick={() => openBoardAction(
+                                '/api/admin/open/cancel-auction',
+                                { auction_id: a.id },
+                                'open_cancel_' + a.id,
+                                `לבטל את המכרז על ${a.player?.name}? כל ההצעות וה-PASS יימחקו והשחקן יחזור לבריכה.`
+                              )}
+                            >
+                              בטל
+                            </button>
+                          </div>
+                        </div>
+                        {canPass.length > 0 && (
+                          <div className="flex gap-2 items-center">
+                            <select
+                              className="input flex-1"
+                              style={{ padding: '4px 8px', fontSize: '0.8rem' }}
+                              value={openPassTeamByAuction[a.id] ?? ''}
+                              onChange={e => setOpenPassTeamByAuction(prev => ({ ...prev, [a.id]: e.target.value }))}
+                            >
+                              <option value="">סמן PASS עבור קבוצה...</option>
+                              {canPass.map(t => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                              ))}
+                            </select>
+                            <button
+                              className="btn"
+                              style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                              disabled={!!loading || !openPassTeamByAuction[a.id]}
+                              onClick={() => openBoardAction(
+                                '/api/open/pass',
+                                { auction_id: a.id, team_id: openPassTeamByAuction[a.id] },
+                                'open_pass_' + a.id,
+                                `לסמן PASS עבור ${teamName(openPassTeamByAuction[a.id])}? הפעולה סופית.`
+                              )}
+                            >
+                              PASS
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Nominate on behalf */}
+            <div className="card">
+              <h2 className="font-bold mb-1">העלה שחקן בשם קבוצה</h2>
+              <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
+                רק קבוצות שתורן להעלות כרגע מופיעות ברשימה. ההעלאה מזכה אותן בהצעת פתיחה של $1 ומעבירה אותן לתחתית סדר ההעלאות.
+              </p>
+              {openAuctions.length >= league.open_board_size ? (
+                <p className="text-sm" style={{ color: 'var(--muted)' }}>הלוח מלא — אין מקום לשחקן נוסף</p>
+              ) : eligible.length === 0 ? (
+                <p className="text-sm" style={{ color: 'var(--muted)' }}>אין קבוצה שתורה להעלות כרגע</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <select
+                    className="input"
+                    value={openNominateTeamId}
+                    onChange={e => setOpenNominateTeamId(e.target.value)}
+                  >
+                    <option value="">בחר קבוצה...</option>
+                    {eligible.map(o => (
+                      <option key={o.team.id} value={o.team.id}>
+                        #{o.position} {o.team.name} (${o.team.budget_remaining})
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="input"
+                    value={openNominatePlayerId}
+                    onChange={e => setOpenNominatePlayerId(e.target.value)}
+                  >
+                    <option value="">בחר שחקן...</option>
+                    {availablePlayers.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}{p.position ? ` (${p.position})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="btn btn-primary"
+                    disabled={!!loading || !openNominateTeamId || !openNominatePlayerId}
+                    onClick={() => openBoardAction(
+                      '/api/open/nominate',
+                      { league_id: league.id, player_id: openNominatePlayerId, team_id: openNominateTeamId },
+                      'open_nominate'
+                    )}
+                  >
+                    {loading === 'open_nominate' ? 'מעלה...' : 'העלה למכרז'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* History */}
+            <div className="card">
+              <h2 className="font-bold mb-3">היסטוריה ({openHistory.length})</h2>
+              {openHistory.length === 0 ? (
+                <p className="text-sm" style={{ color: 'var(--muted)' }}>עדיין לא נסגרו מכרזים</p>
+              ) : (
+                <div className="flex flex-col">
+                  {openHistory.map(h => (
+                    <div key={h.id} className="flex justify-between items-center gap-2 py-2 border-b text-sm" style={{ borderColor: 'var(--border)' }}>
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">{h.player?.name ?? '—'}</p>
+                        <p className="text-xs" style={{ color: 'var(--muted)' }}>
+                          {h.status === 'cancelled' ? 'בוטל' : h.winning_team?.name ?? '—'} · {formatDateTime(h.updated_at)}
+                        </p>
+                      </div>
+                      {h.status === 'completed' && (
+                        <span className="font-bold" style={{ color: 'var(--success)' }}>${h.winning_bid ?? 0}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* LOTTERY */}
       {tab === 'lottery' && (
         <div className="flex flex-col gap-4">
@@ -1531,8 +1824,9 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
             )}
           </div>
 
-          {/* Tiebreak priority lottery — envelope only */}
-          {!isSnake && (
+          {/* Tiebreak priority lottery — envelope only. An open outcry auction
+              cannot tie: every bid must beat the standing one. */}
+          {isEnvelope && (
             <div className="card">
               <h2 className="font-bold mb-1">🏆 הגרלת סדר פריוריטי</h2>
               <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
@@ -1619,24 +1913,24 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
             <div className="card" style={{ border: '1px solid var(--success)' }}>
               <h2 className="font-bold mb-1">הפעל ליגה</h2>
               <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
-                {isSnake
-                  ? 'לאחר ביצוע הגרלת הסדר ניתן להפעיל את הדראפט.'
-                  : 'לאחר ביצוע שתי ההגרלות ניתן להפעיל את הדראפט.'}
+                {isEnvelope
+                  ? 'לאחר ביצוע שתי ההגרלות ניתן להפעיל את הדראפט.'
+                  : 'לאחר ביצוע הגרלת הסדר ניתן להפעיל את הדראפט.'}
               </p>
-              {!isSnake && (!teams.some(t => t.priority_rank) || !teams.some(t => t.tiebreak_rank)) && (
+              {isEnvelope && (!teams.some(t => t.priority_rank) || !teams.some(t => t.tiebreak_rank)) && (
                 <p className="text-sm mb-3" style={{ color: 'var(--warning)' }}>
                   ⚠️ יש להגריל את שני הסדרים לפני ההפעלה
                 </p>
               )}
-              {isSnake && !teams.some(t => t.priority_rank) && (
+              {!isEnvelope && !teams.some(t => t.priority_rank) && (
                 <p className="text-sm mb-3" style={{ color: 'var(--warning)' }}>
-                  ⚠️ יש להגריל את סדר הדראפט לפני ההפעלה
+                  ⚠️ יש להגריל את סדר {isSnake ? 'הדראפט' : 'ההעלאות'} לפני ההפעלה
                 </p>
               )}
               <button
                 className="btn btn-success w-full"
                 onClick={() => setLeagueStatus('active')}
-                disabled={!!loading || (isSnake ? !teams.some(t => t.priority_rank) : (!teams.some(t => t.priority_rank) || !teams.some(t => t.tiebreak_rank)))}
+                disabled={!!loading || (isEnvelope ? (!teams.some(t => t.priority_rank) || !teams.some(t => t.tiebreak_rank)) : !teams.some(t => t.priority_rank))}
               >
                 {loading === 'status_active' ? 'מפעיל...' : '▶ הפעל דראפט'}
               </button>
@@ -1731,7 +2025,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
               )}
             </div>
 
-            {!isSnake && (
+            {isEnvelope && (
               <div>
                 <label className="block text-sm font-medium mb-1.5">משך מכרז (שעות)</label>
                 <input
@@ -1750,7 +2044,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
               </div>
             )}
 
-            {!isSnake && (
+            {isEnvelope && (
               <div>
                 <label className="block text-sm font-medium mb-1.5">התראה לפני חשיפה (דקות)</label>
                 <input
@@ -1768,7 +2062,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
               </div>
             )}
 
-            {!isSnake && (
+            {isEnvelope && (
               <div>
                 <label className="block text-sm font-medium mb-2">סדר חשיפת הצעות</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -1797,6 +2091,70 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                   במצב המשוקלל הסיכוי של הצעה להיחשף אחרונה גדל בחדות ככל שהיא גבוהה יותר (יחסית לסכום בחזקת 4) — הרבה דרמה, אך לא ודאי.
                 </p>
               </div>
+            )}
+
+            {isOpen && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">שחקנים על הלוח במקביל</label>
+                  <input
+                    type="number"
+                    className="input text-center"
+                    value={openBoardSize}
+                    onChange={e => setOpenBoardSize(Number(e.target.value))}
+                    min={1}
+                    max={30}
+                    dir="ltr"
+                  />
+                  <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                    כמה מכרזים רצים בו-זמנית. כשמכרז נסגר, הקבוצה הבאה בתור מעלה שחקן במקומו.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">זמן המתנה למכרז (דקות)</label>
+                  <input
+                    type="number"
+                    className="input text-center"
+                    value={openPassTimeoutMinutes}
+                    onChange={e => setOpenPassTimeoutMinutes(Number(e.target.value))}
+                    min={5}
+                    max={2880}
+                    dir="ltr"
+                  />
+                  <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                    כל הצעה חדשה מאפסת את השעון. בתום הזמן כל מי שלא הגיב מסומן PASS והמוביל זוכה. ברירת מחדל: 120 דקות
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">שעות פעילות</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      className="input text-center"
+                      value={draftStartHour}
+                      onChange={e => setDraftStartHour(Number(e.target.value))}
+                      min={0}
+                      max={23}
+                      dir="ltr"
+                    />
+                    <span style={{ color: 'var(--muted)' }}>עד</span>
+                    <input
+                      type="number"
+                      className="input text-center"
+                      value={draftEndHour}
+                      onChange={e => setDraftEndHour(Number(e.target.value))}
+                      min={0}
+                      max={23}
+                      dir="ltr"
+                    />
+                  </div>
+                  <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                    מחוץ לשעות האלה השעונים עצורים ואי-אפשר להציע — הזמן שנותר לכל מכרז נשמר לבוקר. שעון ישראל. ערכים זהים = פעילות מסביב לשעון.
+                  </p>
+                </div>
+              </>
             )}
 
             {isSnake && (

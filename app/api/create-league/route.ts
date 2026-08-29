@@ -33,12 +33,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'ליגה בשם זה כבר קיימת — בחר שם אחר' }, { status: 400 })
   }
 
+  // Explicit list, not a two-way ternary: the old form silently turned any
+  // unrecognised value into 'envelope', which hides a typo instead of failing.
+  const DRAFT_TYPES = ['envelope', 'snake', 'open']
+  if (draftType != null && !DRAFT_TYPES.includes(draftType)) {
+    return NextResponse.json({ error: 'סוג דראפט לא תקין' }, { status: 400 })
+  }
+
   const { data: league, error: leagueErr } = await admin
     .from('leagues')
     .insert({
       name: leagueName.trim(),
       join_code: joinCode?.trim().toUpperCase() || null,
-      draft_type: draftType === 'snake' ? 'snake' : 'envelope',
+      draft_type: draftType ?? 'envelope',
       created_by: user.id,
       ...(numTeams != null && { num_teams: numTeams }),
       ...(playersPerTeam != null && { players_per_team: playersPerTeam }),

@@ -2,14 +2,23 @@ import { createClient } from '@/lib/supabase/server'
 import { getAuthUser } from '@/lib/supabase/auth'
 import { cookies } from 'next/headers'
 import { activateOverduePendingAuctions } from '@/lib/auctions'
-import { formatTime, formatDateTime, REVEAL_WINDOW_MS } from '@/lib/utils'
+import { settleOpenDraft } from '@/lib/openDraft'
+import {
+  formatTime,
+  formatDateTime,
+  formatCurrency,
+  getOpenMaxBid,
+  isWithinDraftHours,
+  REVEAL_WINDOW_MS,
+} from '@/lib/utils'
 import BidForm from '@/components/BidForm'
 import Countdown from '@/components/Countdown'
 import AuctionHistory from '@/components/AuctionHistory'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
 import BidRevealOverlay from '@/components/BidRevealOverlay'
+import OpenAuctionBoard from '@/components/OpenAuctionBoard'
 import { myTeamOr } from '@/lib/team'
-import type { Auction, Team, League } from '@/types'
+import type { Auction, Team, League, OpenPassReason, OpenCloseReason } from '@/types'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -34,6 +43,12 @@ export default async function AuctionPage() {
   const { data: league } = leagueId
     ? await supabase.from('leagues').select('*').eq('id', leagueId).maybeSingle()
     : { data: null }
+
+  // The open board is a different page entirely — several auctions at once,
+  // public bids, no reveal. Branch before any of the envelope fetching below.
+  if ((league as League | null)?.draft_type === 'open') {
+    return <OpenBoardPage league={league as League} myTeam={myTeam as Team | null} />
+  }
 
   // Auto-activate any pending auction whose scheduled_start has passed
   if (leagueId) {
@@ -197,6 +212,200 @@ export default async function AuctionPage() {
           }
         />
       )}
+    </div>
+  )
+}
+
+// ── Open outcry board ────────────────────────────────────────────────────────
+// A second server component in the same file, the same shape players/page.tsx
+// already uses for its snake branch.
+
+type OpenRow = {
+  id: string
+  current_price: number
+  leader_team_id: string | null
+  deadline_at: string
+  player: { name: string; position: string | null; nba_team: string | null } | null
+  nominating_team: { name: string } | null
+  leader_team: { name: string } | null
+  bids: { id: string; team_id: string; amount: number; is_auto: boolean; created_at: string; team: { name: string } | null }[]
+  passes: { team_id: string; reason: OpenPassReason; team: { name: string } | null }[]
+}
+
+type OpenHistoryRow = {
+  id: string
+  status: 'completed' | 'cancelled'
+  updated_at: string
+  winning_bid: number | null
+  closed_reason: OpenCloseReason | null
+  player: { name: string } | null
+  nominating_team: { name: string } | null
+  winning_team: { name: string } | null
+}
+
+async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team | null }) {
+  const supabase = await createClient()
+
+  // Freeze/thaw the clocks and close anything already out of time, so the board
+  // never renders an auction that visibly expired a minute ago while the cron
+  // catches up.
+  await settleOpenDraft(league.id)
+
+  const [{ data: openRows }, { data: historyRows }, { data: teams }] = await Promise.all([
+    supabase
+      .from('open_auctions')
+      .select(
+        'id, current_price, leader_team_id, deadline_at, player:players(name, position, nba_team), nominating_team:teams!nominating_team_id(name), leader_team:teams!leader_team_id(name), bids:open_bids(id, team_id, amount, is_auto, created_at, team:teams(name)), passes:open_passes(team_id, reason, team:teams(name))'
+      )
+      .eq('league_id', league.id)
+      .eq('status', 'open')
+      .order('created_at', { ascending: true }),
+    // History deliberately never touches open_bids: the ledger grows with the
+    // whole draft (roughly teams × players_per_team × raises) and a league-wide
+    // read of it would cross PostgREST's 1000-row cap. Everything shown here is
+    // already denormalised onto the auction row.
+    supabase
+      .from('open_auctions')
+      .select(
+        'id, status, updated_at, winning_bid, closed_reason, player:players(name), nominating_team:teams!nominating_team_id(name), winning_team:teams!winning_team_id(name)'
+      )
+      .eq('league_id', league.id)
+      .in('status', ['completed', 'cancelled'])
+      // No limit — this must be the complete history. Sorted by updated_at
+      // rather than deadline_at: an admin closing early leaves the deadline in
+      // the past, behind auctions that actually finished before it.
+      .order('updated_at', { ascending: false }),
+    supabase.from('teams').select('*').eq('league_id', league.id).eq('approved', true),
+  ])
+
+  const board = (openRows ?? []) as unknown as OpenRow[]
+  const history = (historyRows ?? []) as unknown as OpenHistoryRow[]
+  const approvedTeams = (teams ?? []) as Team[]
+
+  // What this team currently has committed, across the whole board. Only
+  // auctions it *leads* tie money up — a bid that has been outbid can never
+  // turn into a purchase, so it is released at once.
+  const myLeading = myTeam ? board.filter(a => a.leader_team_id === myTeam.id) : []
+  const myMaxBid = myTeam
+    ? getOpenMaxBid(
+        myTeam.budget_remaining,
+        myTeam.player_count,
+        league.players_per_team,
+        myLeading.reduce((sum, a) => sum + a.current_price, 0),
+        myLeading.length
+      )
+    : 0
+
+  const notStarted = league.status === 'setup' || league.status === 'lottery'
+  const frozenReason: 'paused' | 'night' | null =
+    league.status === 'paused'
+      ? 'paused'
+      : league.status === 'active' &&
+          !isWithinDraftHours(league.draft_start_hour, league.draft_end_hour)
+        ? 'night'
+        : null
+
+  return (
+    <div className="max-w-2xl mx-auto">
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-6">
+        <h1 className="text-2xl font-bold">לוח המכרזים</h1>
+        <span className="text-sm" style={{ color: 'var(--muted)' }}>
+          {board.length}/{league.open_board_size} שחקנים על הלוח
+        </span>
+      </div>
+
+      {notStarted && (
+        <div className="card mb-4 text-center py-6" style={{ color: 'var(--muted)' }}>
+          <p className="font-bold">הדראפט טרם החל</p>
+          <p className="text-sm mt-1">המנהל יפתח אותו לאחר הגרלת סדר ההעלאות</p>
+        </div>
+      )}
+
+      {frozenReason && (
+        <div className="card mb-4 text-center py-4" style={{ borderColor: 'var(--warning)' }}>
+          <p className="font-bold" style={{ color: 'var(--warning)' }}>
+            {frozenReason === 'paused' ? '⏸ הדראפט מושהה' : '🌙 מחוץ לשעות הפעילות'}
+          </p>
+          <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
+            {frozenReason === 'paused'
+              ? 'השעונים עצורים. הזמן שנותר לכל מכרז יישמר.'
+              : `המכרזים יתחדשו ב-${String(league.draft_start_hour).padStart(2, '0')}:00. הזמן שנותר לכל מכרז יישמר.`}
+          </p>
+        </div>
+      )}
+
+      <OpenAuctionBoard
+        auctions={board.map(a => ({
+          id: a.id,
+          playerName: a.player?.name ?? 'שחקן',
+          playerPosition: a.player?.position ?? null,
+          playerTeam: a.player?.nba_team ?? null,
+          nominatorName: a.nominating_team?.name ?? null,
+          currentPrice: a.current_price,
+          leaderTeamId: a.leader_team_id,
+          leaderName: a.leader_team?.name ?? null,
+          deadlineAt: a.deadline_at,
+          bids: [...a.bids]
+            .sort((x, y) => new Date(y.created_at).getTime() - new Date(x.created_at).getTime())
+            .map(b => ({
+              id: b.id,
+              teamId: b.team_id,
+              teamName: b.team?.name ?? '—',
+              amount: b.amount,
+              isAuto: b.is_auto,
+              createdAt: b.created_at,
+            })),
+          passes: a.passes.map(p => ({
+            teamId: p.team_id,
+            teamName: p.team?.name ?? '—',
+            reason: p.reason,
+          })),
+        }))}
+        myTeamId={myTeam?.id ?? null}
+        myMaxBid={myMaxBid}
+        approvedTeamCount={approvedTeams.length}
+        frozenReason={frozenReason}
+      />
+
+      {history.length > 0 && (
+        <div className="card">
+          <h2 className="font-bold mb-3">היסטוריה ({history.length})</h2>
+          <div className="flex flex-col">
+            {history.map(h => (
+              <div
+                key={h.id}
+                className="flex justify-between items-center gap-2 py-2 border-b text-sm"
+                style={{ borderColor: 'var(--border)' }}
+              >
+                <div className="min-w-0">
+                  <p className="font-medium truncate">{h.player?.name ?? 'שחקן'}</p>
+                  <p className="text-xs" style={{ color: 'var(--muted)' }}>
+                    {h.status === 'cancelled'
+                      ? 'בוטל — השחקן חזר לבריכה'
+                      : `${h.winning_team?.name ?? '—'} · ${
+                          h.closed_reason === 'timeout'
+                            ? 'נסגר בזמן'
+                            : h.closed_reason === 'admin'
+                              ? 'נסגר ע"י המנהל'
+                              : 'כולם פאסו'
+                        }`}
+                  </p>
+                </div>
+                <div className="text-left shrink-0">
+                  {h.status === 'completed' && (
+                    <p className="font-bold" style={{ color: 'var(--success)' }}>
+                      {formatCurrency(h.winning_bid ?? 0)}
+                    </p>
+                  )}
+                  <p className="text-xs" style={{ color: 'var(--muted)' }}>{formatDateTime(h.updated_at)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <RealtimeRefresher leagueId={league.id} openBoard />
     </div>
   )
 }

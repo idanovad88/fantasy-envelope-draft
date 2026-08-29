@@ -1,8 +1,21 @@
 import { type ClassValue, clsx } from 'clsx'
-import type { Team } from '@/types'
+import type { DraftType, Team } from '@/types'
 
 export function cn(...inputs: ClassValue[]) {
   return inputs.filter(Boolean).join(' ')
+}
+
+// One place for the Hebrew name of each format. The league list used to inline
+// a two-way ternary in two spots, which would have quietly labelled a third
+// type "מעטפות".
+export const DRAFT_TYPE_LABELS: Record<DraftType, string> = {
+  envelope: 'מעטפות',
+  snake: 'סנייק',
+  open: 'מכרז פתוח',
+}
+
+export function draftTypeLabel(type: DraftType | string | null | undefined) {
+  return DRAFT_TYPE_LABELS[type as DraftType] ?? DRAFT_TYPE_LABELS.envelope
 }
 
 // How long after an auction closes a page load still replays the bid reveal.
@@ -177,6 +190,86 @@ export function getEnvelopeNominationOrder(
     isNext: team.id === nextId,
     canNominate: canNominate(team),
   }))
+}
+
+// ── Open outcry draft ────────────────────────────────────────────────────────
+//
+// Everything below is for DISPLAY only. The authoritative copies live in
+// supabase/migration_open_auction_draft.sql, and every write goes through those
+// functions — if these disagree the DB simply rejects the write. That is the
+// opposite arrangement to getMaxBid()/enforce_min_bid(), where two copies of one
+// rule have to be kept in step by hand.
+
+// Ceiling for a NEW bid on an auction this team is not already leading.
+//
+// Not a new rule — it is getMaxBid() with shifted arguments: the auctions a team
+// currently leads are treated as players it already owns. Only *leading* bids
+// tie money up; being outbid frees it at once, because a losing bid can never
+// turn into a purchase. `budgetRemaining` already excludes players actually won,
+// so nothing is counted twice.
+export function getOpenMaxBid(
+  budgetRemaining: number,
+  playerCount: number,
+  playersPerTeam: number,
+  sumLeading: number,
+  leadingCount: number
+) {
+  const slotsLeft = playersPerTeam - playerCount - leadingCount
+  if (slotsLeft <= 0) return 0
+  return getMaxBid(budgetRemaining - sumLeading, playerCount + leadingCount, playersPerTeam)
+}
+
+// Nomination order for the open board. Simpler than the envelope version: the
+// turn rotates the instant a player goes up (demote_nomination_rank runs inside
+// open_nominate), so there is no "has nominated" state to track — a team that
+// just nominated is already at the bottom of priority_rank.
+//
+// With K = boardSize - boardOpenCount slots free on the board, the first K
+// eligible teams may nominate right now. `canNominate` matches the envelope
+// rule exactly: not complete, and able to afford the $1 auto-bid that
+// nominating forces.
+export function getOpenNominationOrder(
+  teams: Team[],
+  boardOpenCount: number,
+  boardSize: number,
+  playersPerTeam: number,
+  leadingByTeam?: Map<string, { sum: number; count: number }>
+): { team: Team; canNominate: boolean; canNominateNow: boolean; position: number }[] {
+  const ordered = teams
+    .filter(t => t.priority_rank !== null)
+    .sort((a, b) => (a.priority_rank ?? 99) - (b.priority_rank ?? 99))
+
+  const canNominate = (t: Team) => {
+    if (t.is_complete) return false
+    const led = leadingByTeam?.get(t.id) ?? { sum: 0, count: 0 }
+    return getOpenMaxBid(t.budget_remaining, t.player_count, playersPerTeam, led.sum, led.count) >= 1
+  }
+
+  const slotsFree = Math.max(0, boardSize - boardOpenCount)
+  let handedOut = 0
+
+  return ordered.map((team, i) => {
+    const eligible = canNominate(team)
+    const now = eligible && handedOut < slotsFree
+    if (now) handedOut++
+    return { team, canNominate: eligible, canNominateNow: now, position: i + 1 }
+  })
+}
+
+// Mirror of open_within_hours() in SQL — used for the "night hours" banner.
+// startHour === endHour means the draft never sleeps.
+export function isWithinDraftHours(startHour: number, endHour: number, now: Date = new Date()) {
+  if (startHour == null || endHour == null || startHour === endHour) return true
+  const hour = Number(
+    new Intl.DateTimeFormat('en-GB', {
+      hour: '2-digit',
+      hour12: false,
+      timeZone: 'Asia/Jerusalem',
+    }).format(now)
+  )
+  if (startHour < endHour) return hour >= startHour && hour < endHour
+  // window wraps midnight, e.g. 20 → 6
+  return hour >= startHour || hour < endHour
 }
 
 // Round/pick-in-round breakdown for a given overall pick number (display helper).

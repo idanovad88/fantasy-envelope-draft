@@ -14,11 +14,28 @@ type Player = {
 interface Props {
   players: Player[]
   leagueId: string
+  /** Whether the action button is shown at all — i.e. it is this user's turn. */
   canPick: boolean
+  /** Admin acting for another team. Passed straight through as `team_id`. */
   pickingTeamId?: string
+  /**
+   * Both draft actions post the same `{ league_id, player_id, team_id? }` body,
+   * so the two formats differ only in where it goes and what the button says.
+   */
+  endpoint?: string
+  actionLabel?: string
+  title?: string
 }
 
-export default function SnakePlayerPicker({ players, leagueId, canPick, pickingTeamId }: Props) {
+export default function PlayerPicker({
+  players,
+  leagueId,
+  canPick,
+  pickingTeamId,
+  endpoint = '/api/snake-pick',
+  actionLabel = 'בחר',
+  title = 'שחקנים זמינים',
+}: Props) {
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState('')
@@ -31,7 +48,7 @@ export default function SnakePlayerPicker({ players, leagueId, canPick, pickingT
   async function handlePick(playerId: string) {
     setLoading(playerId)
     setError('')
-    const res = await fetch('/api/snake-pick', {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -43,7 +60,7 @@ export default function SnakePlayerPicker({ players, leagueId, canPick, pickingT
     const data = await res.json()
     setLoading(null)
     if (!res.ok) {
-      setError(data.error ?? 'שגיאה בבחירה')
+      setError(data.error ?? 'הפעולה נכשלה')
       return
     }
     router.refresh()
@@ -52,7 +69,7 @@ export default function SnakePlayerPicker({ players, leagueId, canPick, pickingT
   return (
     <div className="card">
       <div className="flex items-center justify-between mb-1 gap-3">
-        <h2 className="font-bold whitespace-nowrap">שחקנים זמינים ({players.length})</h2>
+        <h2 className="font-bold whitespace-nowrap">{title} ({players.length})</h2>
         <input
           className="input text-sm flex-1 max-w-48"
           placeholder="חיפוש שחקן..."
@@ -103,7 +120,7 @@ export default function SnakePlayerPicker({ players, leagueId, canPick, pickingT
                         disabled={loading === p.id}
                         onClick={() => handlePick(p.id)}
                       >
-                        {loading === p.id ? '...' : 'בחר'}
+                        {loading === p.id ? '...' : actionLabel}
                       </button>
                     </td>
                   )}

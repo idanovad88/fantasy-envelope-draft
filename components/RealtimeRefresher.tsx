@@ -12,7 +12,21 @@ import { createClient } from '@/lib/supabase/client'
 // of latency nobody notices and cuts the server work by the size of the burst.
 const REFRESH_DEBOUNCE_MS = 500
 
-export default function RealtimeRefresher({ leagueId }: { leagueId: string }) {
+export default function RealtimeRefresher({
+  leagueId,
+  openBoard = false,
+}: {
+  leagueId: string
+  /**
+   * Watch the open-outcry board too. Off by default so envelope and snake
+   * leagues subscribe to exactly what they did before: all postgres_changes
+   * bindings on a channel are sent in one join, so a binding the server rejects
+   * (a table that does not exist yet, or one the role cannot read) fails the
+   * whole channel — and would take live updates down for the other two formats
+   * along with it.
+   */
+  openBoard?: boolean
+}) {
   const router = useRouter()
 
   useEffect(() => {
@@ -27,7 +41,7 @@ export default function RealtimeRefresher({ leagueId }: { leagueId: string }) {
       }, REFRESH_DEBOUNCE_MS)
     }
 
-    const channel = supabase
+    let channel = supabase
       .channel('realtime-' + leagueId)
       .on('postgres_changes', {
         event: 'UPDATE', schema: 'public', table: 'auctions', filter: `league_id=eq.${leagueId}`,
@@ -48,13 +62,24 @@ export default function RealtimeRefresher({ leagueId }: { leagueId: string }) {
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'pick_overrides', filter: `league_id=eq.${leagueId}`,
       }, refresh)
-      .subscribe()
+    // Open outcry board. INSERT is a nomination, UPDATE is a bid, a pass or a
+    // close — open_pass() bumps updated_at precisely so that one subscription
+    // here covers all of them, which is what makes the price move live on every
+    // manager's screen. open_bids/open_passes are not watched directly: neither
+    // carries a league_id, so they could not be filtered per league.
+    if (openBoard) {
+      channel = channel.on('postgres_changes', {
+        event: '*', schema: 'public', table: 'open_auctions', filter: `league_id=eq.${leagueId}`,
+      }, refresh)
+    }
+
+    channel.subscribe()
 
     return () => {
       if (timer) clearTimeout(timer)
       supabase.removeChannel(channel)
     }
-  }, [leagueId, router])
+  }, [leagueId, openBoard, router])
 
   return null
 }

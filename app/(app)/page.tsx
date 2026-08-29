@@ -3,7 +3,18 @@ import { getAuthUser } from '@/lib/supabase/auth'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { formatTime, formatDateTime, formatTimeSince, getCurrentSnakePicker, buildPickOverridesMap, getEnvelopeNominationOrder, getMaxBid } from '@/lib/utils'
+import {
+  formatTime,
+  formatDateTime,
+  formatTimeSince,
+  getCurrentSnakePicker,
+  buildPickOverridesMap,
+  getEnvelopeNominationOrder,
+  getMaxBid,
+  getOpenMaxBid,
+  getOpenNominationOrder,
+  isWithinDraftHours,
+} from '@/lib/utils'
 import { myTeamOr } from '@/lib/team'
 import type { League, Team, Auction, SnakePick } from '@/types'
 import DraftCountdown from '@/components/DraftCountdown'
@@ -13,6 +24,7 @@ import JoinLeagueForm from '@/components/JoinLeagueForm'
 import AssistantManager from '@/components/AssistantManager'
 import PushSubscribe from '@/components/PushSubscribe'
 import { activateOverdueSnakeDraft } from '@/lib/activateDraft'
+import { settleOpenDraft } from '@/lib/openDraft'
 
 // Subtle horizontal progress row: a thin dark track that blends into the card,
 // with a muted fill showing the portion of the draft/budget already used up.
@@ -264,6 +276,248 @@ export default async function DashboardPage() {
           </div>
           <span className="text-xl" style={{ color: 'var(--primary)' }} aria-hidden>←</span>
         </Link>
+      </div>
+    )
+  }
+
+  // ── OPEN OUTCRY DASHBOARD ────────────────────────────────────────────────────
+  if (typedLeague?.draft_type === 'open') {
+    await settleOpenDraft(selectedLeagueId)
+
+    const [{ data: teams }, { data: openRows }, { data: recentRows }] = await Promise.all([
+      supabase.from('teams').select('*').eq('league_id', selectedLeagueId).eq('approved', true)
+        .not('priority_rank', 'is', null).order('priority_rank', { ascending: true }),
+      supabase.from('open_auctions')
+        .select('id, current_price, leader_team_id, deadline_at, player:players(name), leader_team:teams!leader_team_id(name)')
+        .eq('league_id', selectedLeagueId).eq('status', 'open')
+        .order('created_at', { ascending: true }),
+      // Winners only, straight off the auction row — the bid ledger is never
+      // read league-wide (it would cross the 1000-row cap mid-draft).
+      supabase.from('open_auctions')
+        .select('id, updated_at, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)')
+        .eq('league_id', selectedLeagueId).eq('status', 'completed')
+        .order('updated_at', { ascending: false }).limit(6),
+    ])
+
+    const typedTeams = (teams || []) as Team[]
+    const board = (openRows ?? []) as unknown as {
+      id: string
+      current_price: number
+      leader_team_id: string | null
+      deadline_at: string
+      player: { name: string } | null
+      leader_team: { name: string } | null
+    }[]
+    const recent = (recentRows ?? []) as unknown as {
+      id: string
+      winning_bid: number | null
+      player: { name: string } | null
+      winning_team: { name: string } | null
+    }[]
+
+    const leadingByTeam = new Map<string, { sum: number; count: number }>()
+    for (const a of board) {
+      if (!a.leader_team_id) continue
+      const cur = leadingByTeam.get(a.leader_team_id) ?? { sum: 0, count: 0 }
+      leadingByTeam.set(a.leader_team_id, { sum: cur.sum + a.current_price, count: cur.count + 1 })
+    }
+
+    const order = getOpenNominationOrder(
+      typedTeams, board.length, typedLeague.open_board_size, typedLeague.players_per_team, leadingByTeam
+    )
+
+    const running = typedLeague.status === 'active' &&
+      isWithinDraftHours(typedLeague.draft_start_hour, typedLeague.draft_end_hour)
+    const myLeading = typedMyTeam ? leadingByTeam.get(typedMyTeam.id) ?? { sum: 0, count: 0 } : { sum: 0, count: 0 }
+    const myMaxBid = typedMyTeam
+      ? getOpenMaxBid(typedMyTeam.budget_remaining, typedMyTeam.player_count, typedLeague.players_per_team, myLeading.sum, myLeading.count)
+      : 0
+    const myTurn = !!typedMyTeam && !!order.find(o => o.team.id === typedMyTeam.id)?.canNominateNow
+
+    const totalPicks = typedLeague.num_teams * typedLeague.players_per_team
+    const draftedCount = typedTeams.reduce((s, t) => s + t.player_count, 0)
+
+    return (
+      <div className="max-w-4xl mx-auto">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold mb-1">{typedLeague.name}</h1>
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>
+            מכרז פתוח · {typedTeams.length}/{typedLeague.num_teams} קבוצות
+            {typedTeams.filter(t => t.is_complete).length > 0 &&
+              ` · ${typedTeams.filter(t => t.is_complete).length} השלימו`}
+          </p>
+        </div>
+
+        <RealtimeRefresher leagueId={typedLeague.id} openBoard />
+
+        {typedLeague.draft_start_time && ['setup', 'lottery'].includes(typedLeague.status) && (
+          <DraftCountdown targetDate={typedLeague.draft_start_time} />
+        )}
+
+        {!running && typedLeague.status !== 'completed' && (
+          <div className="card mb-4" style={{ borderColor: 'var(--warning)' }}>
+            <p className="font-bold" style={{ color: 'var(--warning)' }}>
+              {typedLeague.status === 'paused'
+                ? '⏸ הדראפט מושהה'
+                : typedLeague.status === 'active'
+                  ? '🌙 מחוץ לשעות הפעילות'
+                  : 'הדראפט טרם החל'}
+            </p>
+            {typedLeague.status === 'active' && (
+              <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
+                המכרזים יתחדשו ב-{String(typedLeague.draft_start_hour).padStart(2, '0')}:00 · השעונים עצורים
+              </p>
+            )}
+          </div>
+        )}
+
+        {typedLeague.status === 'completed' && (
+          <div className="card mb-4" style={{ borderColor: 'var(--success)', borderWidth: 2 }}>
+            <p className="font-bold" style={{ color: 'var(--success)' }}>הדראפט הסתיים!</p>
+          </div>
+        )}
+
+        {/* Board summary */}
+        <div className="card mb-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+            <h2 className="font-bold">הלוח ({board.length}/{typedLeague.open_board_size})</h2>
+            <Link href="/auction" className="btn btn-primary text-sm">לוח המכרזים</Link>
+          </div>
+          {board.length === 0 ? (
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>אין שחקנים על הלוח כרגע</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {board.map(a => (
+                <div key={a.id} className="flex items-center gap-2 text-sm">
+                  <span className="font-medium flex-1 truncate" dir="ltr">{a.player?.name ?? '—'}</span>
+                  <span className="font-bold" style={{ color: 'var(--warning)' }}>${a.current_price}</span>
+                  <span
+                    className="truncate"
+                    style={{
+                      color: a.leader_team_id === typedMyTeam?.id ? 'var(--success)' : 'var(--muted)',
+                      maxWidth: '8rem',
+                    }}
+                  >
+                    {a.leader_team_id === typedMyTeam?.id ? 'אתה מוביל' : a.leader_team?.name ?? '—'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex flex-col gap-2.5 mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+            <ProgressRow label="דראפט" pct={totalPicks > 0 ? (draftedCount / totalPicks) * 100 : 0} />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* My team */}
+          <div className="card">
+            <h2 className="font-bold mb-3">הקבוצה שלי</h2>
+            {typedMyTeam ? (
+              <div>
+                <p className="font-bold text-xl mb-1">{typedMyTeam.name}</p>
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
+                    <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>שחקנים</p>
+                    <p className="font-bold text-lg">
+                      {typedMyTeam.player_count}/{typedLeague.players_per_team}
+                      {myLeading.count > 0 && (
+                        <span className="text-sm font-normal" style={{ color: 'var(--warning)' }}> +{myLeading.count}</span>
+                      )}
+                    </p>
+                  </div>
+                  <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
+                    <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>תקציב</p>
+                    <p className="font-bold text-lg" style={{ color: 'var(--success)' }}>
+                      ${typedMyTeam.budget_remaining}
+                    </p>
+                  </div>
+                </div>
+                {/* The two numbers that actually govern a bid: what is already
+                    committed to auctions this team leads, and what is left. */}
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
+                    <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>מחויב במכרזים</p>
+                    <p className="font-bold text-lg" style={{ color: 'var(--warning)' }}>${myLeading.sum}</p>
+                  </div>
+                  <div className="text-center p-3 rounded-lg" style={{ background: 'var(--background)' }}>
+                    <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>הצעה מקסימלית</p>
+                    <p className="font-bold text-lg">${Math.max(myMaxBid, 0)}</p>
+                  </div>
+                </div>
+                <Link href="/teams" className="btn btn-outline w-full mt-3 text-sm">צפה בקבוצה</Link>
+                {(isTeamOwner || isTeamAssistant) && (
+                  <AssistantManager
+                    teamId={typedMyTeam.id}
+                    hasAssistant={!!typedMyTeam.assistant_user_id}
+                    assistantEmail={assistantEmail}
+                    role={isTeamOwner ? 'owner' : 'assistant'}
+                  />
+                )}
+              </div>
+            ) : createdLeague ? (
+              <div>
+                <p className="font-bold text-xl mb-1">מנהל הליגה</p>
+                <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>{createdLeague.name}</p>
+                <Link href="/admin" className="btn btn-primary w-full mt-3 text-sm">פאנל ניהול</Link>
+              </div>
+            ) : (
+              <div className="py-2">
+                <p className="font-medium mb-4">ברוך הבא! הצטרף לליגה קיימת:</p>
+                <JoinLeagueForm />
+              </div>
+            )}
+          </div>
+
+          {/* Recent wins */}
+          <div className="card">
+            <h2 className="font-bold mb-3">נסגרו לאחרונה</h2>
+            {recent.length === 0 ? (
+              <p className="text-sm" style={{ color: 'var(--muted)' }}>עדיין לא נסגרו מכרזים</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {recent.map(r => (
+                  <div key={r.id} className="flex items-center gap-2 text-sm">
+                    <span className="font-medium flex-1 truncate" dir="ltr">{r.player?.name ?? '—'}</span>
+                    <span className="font-bold" style={{ color: 'var(--danger)' }}>${r.winning_bid ?? 0}</span>
+                    <span className="truncate" style={{ color: 'var(--muted)', maxWidth: '7rem' }}>
+                      {r.winning_team?.name ?? '—'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Nomination order. The turn rotates the moment a player goes up, so
+            the teams marked here are exactly the ones who may nominate now. */}
+        <div className="card mt-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
+            <h2 className="font-bold">סדר העלאות</h2>
+            {myTurn && <Link href="/players" className="btn btn-primary text-sm">העלה שחקן</Link>}
+          </div>
+          <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
+            {typedLeague.open_board_size - board.length > 0
+              ? `${typedLeague.open_board_size - board.length} מקומות פנויים על הלוח`
+              : 'הלוח מלא — ההעלאה הבאה תיפתח כשמכרז ייסגר'}
+          </p>
+          <div className="flex flex-col gap-2">
+            {order.map(({ team, canNominate, canNominateNow, position }) => (
+              <div
+                key={team.id}
+                className="flex items-center gap-2 text-sm"
+                style={{ opacity: canNominate ? 1 : 0.45 }}
+              >
+                <span className="badge badge-gray text-xs w-6 text-center flex-shrink-0">{position}</span>
+                <span className="font-medium flex-1 truncate">{team.name}</span>
+                {team.is_complete && <span className="badge badge-gray text-xs">הושלם</span>}
+                {canNominateNow && <span className="badge badge-green text-xs">תורו</span>}
+                <span style={{ color: 'var(--muted)' }}>${team.budget_remaining}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     )
   }

@@ -3,6 +3,7 @@ import { getAuthUser } from '@/lib/supabase/auth'
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import Navbar from '@/components/Navbar'
+import type { DraftType } from '@/types'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -20,14 +21,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       : Promise.resolve({ data: null }),
   ])
 
-  const selectedLeague = league as { draft_type?: string; name?: string; logo_url?: string | null } | null
-  const isSnake = selectedLeague?.draft_type === 'snake'
+  const selectedLeague = league as { draft_type?: DraftType; name?: string; logo_url?: string | null } | null
 
   return (
     <div className="flex min-h-screen">
       <Navbar
         isAdmin={!!adminRow || !!createdLeague}
-        isSnake={isSnake}
+        draftType={selectedLeague?.draft_type}
         leagueName={selectedLeague?.name}
         leagueLogo={selectedLeague?.logo_url}
       />

@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { Home, Users, ShoppingBag, List, Settings, Trophy, ArrowLeftRight } from 'lucide-react'
 import LeagueLogo from './LeagueLogo'
+import type { DraftType } from '@/types'
 
 const NAV = [
   { href: '/', label: 'בית', icon: Home },
@@ -15,8 +16,10 @@ const NAV = [
   { href: '/leagues', label: 'הליגות שלי', icon: Trophy },
 ]
 
-// /auction is auction-only; /trades is snake-only.
-function visibleNav(isSnake?: boolean) {
+// /auction belongs to both bidding formats — sealed envelopes and the open
+// board — and means nothing in a snake draft. /trades is snake-only.
+function visibleNav(draftType?: DraftType) {
+  const isSnake = draftType === 'snake'
   return NAV.filter(n =>
     !(isSnake && n.href === '/auction') &&
     !(!isSnake && n.href === '/trades')
@@ -25,12 +28,12 @@ function visibleNav(isSnake?: boolean) {
 
 interface NavbarProps {
   isAdmin?: boolean
-  isSnake?: boolean
+  draftType?: DraftType
   leagueName?: string | null
   leagueLogo?: string | null
 }
 
-export default function Navbar({ isAdmin, isSnake, leagueName, leagueLogo }: NavbarProps) {
+export default function Navbar({ isAdmin, draftType, leagueName, leagueLogo }: NavbarProps) {
   const pathname = usePathname()
 
   return (
@@ -52,7 +55,7 @@ export default function Navbar({ isAdmin, isSnake, leagueName, leagueLogo }: Nav
           )}
         </div>
 
-        {visibleNav(isSnake).map(({ href, label, icon: Icon }) => (
+        {visibleNav(draftType).map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}
@@ -87,7 +90,7 @@ export default function Navbar({ isAdmin, isSnake, leagueName, leagueLogo }: Nav
 
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 flex border-t" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
-        {visibleNav(isSnake).map(({ href, label, icon: Icon }) => (
+        {visibleNav(draftType).map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}

@@ -33,6 +33,12 @@ export async function POST(req: Request) {
     await admin.from('snake_picks').delete().eq('league_id', leagueId)
   }
 
+  // Open outcry: the board (bids and passes cascade off it).
+  const isOpen = league.draft_type === 'open'
+  if (isOpen) {
+    await admin.from('open_auctions').delete().eq('league_id', leagueId)
+  }
+
   // Return every player to the available pool.
   const { error: playersErr } = await admin.from('players')
     .update({ status: 'available', drafted_by_team_id: null, draft_price: null, roster_slot: null })
@@ -52,9 +58,13 @@ export async function POST(req: Request) {
     .eq('league_id', leagueId)
   if (teamsErr) return NextResponse.json({ error: 'שגיאה באיפוס קבוצות: ' + teamsErr.message }, { status: 500 })
 
-  // Back to pre-draft; lottery must be re-run.
+  // Back to pre-draft; lottery must be re-run. `open_frozen_since` is cleared
+  // only for an open league — a stale freeze stamp would shift the next draft's
+  // deadlines the moment it starts. Kept out of the envelope/snake update on
+  // purpose: naming a column those formats never use would make this route fail
+  // outright on a database where migration_open_auction_draft.sql has not run.
   const { error: leagueErr } = await admin.from('leagues')
-    .update({ status: 'setup', updated_at: now })
+    .update({ status: 'setup', ...(isOpen && { open_frozen_since: null }), updated_at: now })
     .eq('id', leagueId)
   if (leagueErr) return NextResponse.json({ error: 'שגיאה בעדכון סטטוס ליגה: ' + leagueErr.message }, { status: 500 })
 

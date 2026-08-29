@@ -1,6 +1,7 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { getAuthUser } from '@/lib/supabase/auth'
 import { myTeamOr } from '@/lib/team'
+import { draftTypeLabel } from '@/lib/utils'
 import type { League, Team } from '@/types'
 import LeagueSelectButton from '@/components/LeagueSelectButton'
 import LeagueHideButton from '@/components/LeagueHideButton'
@@ -121,7 +122,7 @@ export default async function LeaguesPage() {
                     {statusLabel[league.status] ?? league.status}
                   </span>
                   <span className="badge badge-blue text-xs">
-                    {league.draft_type === 'snake' ? 'סנייק' : 'מעטפות'}
+                    {draftTypeLabel(league.draft_type)}
                   </span>
                 </div>
               </div>
@@ -166,7 +167,7 @@ export default async function LeaguesPage() {
                       {statusLabel[league.status] ?? league.status}
                     </span>
                     <span className="badge badge-blue text-xs">
-                      {league.draft_type === 'snake' ? 'סנייק' : 'מעטפות'}
+                      {draftTypeLabel(league.draft_type)}
                     </span>
                   </div>
                 </div>

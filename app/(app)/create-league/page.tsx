@@ -4,6 +4,25 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import type { DraftType } from '@/types'
+import { DRAFT_TYPE_LABELS } from '@/lib/utils'
+
+const DRAFT_TYPE_OPTIONS: { value: DraftType; label: string; hint: string }[] = [
+  {
+    value: 'envelope',
+    label: DRAFT_TYPE_LABELS.envelope,
+    hint: 'שחקן אחד בכל פעם, הצעות סגורות שנחשפות בשעה שנקבעה מראש',
+  },
+  {
+    value: 'snake',
+    label: DRAFT_TYPE_LABELS.snake,
+    hint: 'כל קבוצה בוחרת שחקן בתורה, הסדר מתהפך בין סיבובים',
+  },
+  {
+    value: 'open',
+    label: DRAFT_TYPE_LABELS.open,
+    hint: 'כמה שחקנים על הלוח במקביל, הצעות גלויות. מכרז נסגר כשכל השאר מסמנים PASS',
+  },
+]
 
 export default function CreateLeaguePage() {
   const [authorized, setAuthorized] = useState<boolean | null>(null)
@@ -116,35 +135,26 @@ export default function CreateLeaguePage() {
 
         <div className="border-t pt-4" style={{ borderColor: 'var(--border)' }}>
           <p className="text-sm font-medium mb-3">סוג דראפט</p>
-          <div className="flex gap-3">
-            <button
-              type="button"
-              className="flex-1 py-2 rounded-lg text-sm font-medium border transition-colors"
-              style={{
-                background: draftType === 'envelope' ? 'var(--primary)' : 'transparent',
-                color: draftType === 'envelope' ? 'white' : 'var(--muted)',
-                borderColor: draftType === 'envelope' ? 'var(--primary)' : 'var(--border)',
-              }}
-              onClick={() => setDraftType('envelope')}
-            >
-              מעטפות
-            </button>
-            <button
-              type="button"
-              className="flex-1 py-2 rounded-lg text-sm font-medium border transition-colors"
-              style={{
-                background: draftType === 'snake' ? 'var(--primary)' : 'transparent',
-                color: draftType === 'snake' ? 'white' : 'var(--muted)',
-                borderColor: draftType === 'snake' ? 'var(--primary)' : 'var(--border)',
-              }}
-              onClick={() => setDraftType('snake')}
-            >
-              סנייק
-            </button>
+          <div className="flex flex-wrap gap-3">
+            {DRAFT_TYPE_OPTIONS.map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                className="flex-1 min-w-[30%] py-2 rounded-lg text-sm font-medium border transition-colors"
+                style={{
+                  background: draftType === value ? 'var(--primary)' : 'transparent',
+                  color: draftType === value ? 'white' : 'var(--muted)',
+                  borderColor: draftType === value ? 'var(--primary)' : 'var(--border)',
+                }}
+                onClick={() => setDraftType(value)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          {draftType === 'snake' && (
-            <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>כל קבוצה בוחרת שחקן בתורה, הסדר מתהפך בין סיבובים</p>
-          )}
+          <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>
+            {DRAFT_TYPE_OPTIONS.find(o => o.value === draftType)?.hint}
+          </p>
         </div>
 
         <div className="border-t pt-4" style={{ borderColor: 'var(--border)' }}>
@@ -176,7 +186,8 @@ export default function CreateLeaguePage() {
                 dir="ltr"
               />
             </div>
-            {draftType === 'envelope' && (
+            {/* Both bidding formats need a budget; only snake has no money. */}
+            {draftType !== 'snake' && (
               <>
                 <div>
                   <label className="block text-sm mb-1.5" style={{ color: 'var(--muted)' }}>תקציב לקבוצה ($)</label>

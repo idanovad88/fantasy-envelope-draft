@@ -1,13 +1,16 @@
 import { createAdminClient } from '@/lib/supabase/server'
 
 /**
- * Idempotent server-side auto-start for snake drafts.
+ * Idempotent server-side auto-start for snake and open-outcry drafts.
  *
- * When a snake league's `draft_start_time` has passed and the draft-order
- * lottery has been run, flips `status` from setup/lottery → active so that
- * any page load (including the DraftCountdown refresh when it hits zero)
- * starts the draft automatically. Without this, a snake league stays stuck
- * in `setup` forever — nothing else transitions it to `active`.
+ * When the league's `draft_start_time` has passed and the order lottery has
+ * been run, flips `status` from setup/lottery → active so that any page load
+ * (including the DraftCountdown refresh when it hits zero) starts the draft
+ * automatically. Without this, such a league stays stuck in `setup` forever —
+ * nothing else transitions it to `active`.
+ *
+ * Envelope leagues are excluded: they are started by the admin and their
+ * auctions carry their own schedule.
  *
  * Mirrors the per-auction auto-activation in app/(app)/auction/page.tsx.
  * Safe to call on every request: it no-ops unless the transition is due.
@@ -22,7 +25,7 @@ export async function activateOverdueSnakeDraft(leagueId: string): Promise<void>
     .maybeSingle()
 
   if (!league) return
-  if (league.draft_type !== 'snake') return
+  if (!['snake', 'open'].includes(league.draft_type)) return
   if (!['setup', 'lottery'].includes(league.status)) return
   if (!league.draft_start_time) return
   if (new Date(league.draft_start_time).getTime() > Date.now()) return

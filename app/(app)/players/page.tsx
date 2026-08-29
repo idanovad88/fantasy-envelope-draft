@@ -2,13 +2,21 @@ import { createClient } from '@/lib/supabase/server'
 import { getAuthUser } from '@/lib/supabase/auth'
 import { cookies } from 'next/headers'
 import PlayerSearch from '@/components/PlayerSearch'
-import SnakePlayerPicker from '@/components/SnakePlayerPicker'
+import PlayerPicker from '@/components/PlayerPicker'
 import SnakeDraftBoard from '@/components/SnakeDraftBoard'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
 import type { Player, League, Team, SnakePick } from '@/types'
-import { formatTime, formatTimeSince, getCurrentSnakePicker, buildPickOverridesMap } from '@/lib/utils'
+import {
+  formatTime,
+  formatTimeSince,
+  getCurrentSnakePicker,
+  buildPickOverridesMap,
+  getOpenNominationOrder,
+  isWithinDraftHours,
+} from '@/lib/utils'
 import { myTeamOr } from '@/lib/team'
 import { activateOverdueSnakeDraft } from '@/lib/activateDraft'
+import { settleOpenDraft } from '@/lib/openDraft'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -45,6 +53,11 @@ export default async function PlayersPage() {
   // ── SNAKE DRAFT ──────────────────────────────────────────────────────────────
   if (typedLeague?.draft_type === 'snake') {
     return <SnakeDraftPage league={typedLeague} myTeam={myTeam as Team | null} />
+  }
+
+  // ── OPEN OUTCRY DRAFT ────────────────────────────────────────────────────────
+  if (typedLeague?.draft_type === 'open') {
+    return <OpenDraftPlayersPage league={typedLeague} myTeam={myTeam as Team | null} />
   }
 
   // ── ENVELOPE DRAFT (unchanged) ───────────────────────────────────────────────
@@ -290,7 +303,7 @@ async function SnakeDraftPage({
       {/* Player picker */}
       {league.status === 'active' && !isDraftComplete && (
         <div className="mb-4">
-          <SnakePlayerPicker
+          <PlayerPicker
             players={available.map(p => ({ id: p.id, name: p.name, position: p.position, nba_team: p.nba_team, ranking: p.ranking }))}
             leagueId={league.id}
             canPick={canPick}
@@ -312,6 +325,171 @@ async function SnakeDraftPage({
             myTeamId={myTeam?.id ?? null}
             overrides={overridesObj}
           />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Open outcry players page (server component) ──────────────────────────────
+
+async function OpenDraftPlayersPage({
+  league,
+  myTeam,
+}: {
+  league: League
+  myTeam: Team | null
+}) {
+  const supabase = await createClient()
+
+  await settleOpenDraft(league.id)
+
+  const [{ data: players }, { data: teams }, { data: openRows }] = await Promise.all([
+    supabase.from('players')
+      .select('*, drafting_team:teams!drafted_by_team_id(id, name)')
+      .eq('league_id', league.id)
+      .order('ranking', { ascending: true, nullsFirst: false }),
+    supabase.from('teams')
+      .select('*')
+      .eq('league_id', league.id)
+      .eq('approved', true)
+      .not('priority_rank', 'is', null)
+      .order('priority_rank', { ascending: true }),
+    supabase.from('open_auctions')
+      .select('id, current_price, leader_team_id, player:players(name, position, nba_team)')
+      .eq('league_id', league.id)
+      .eq('status', 'open')
+      .order('created_at', { ascending: true }),
+  ])
+
+  const typedPlayers = (players || []) as PlayerWithTeam[]
+  const typedTeams = (teams || []) as Team[]
+  const board = (openRows ?? []) as unknown as {
+    id: string
+    current_price: number
+    leader_team_id: string | null
+    player: { name: string; position: string | null; nba_team: string | null } | null
+  }[]
+
+  const available = typedPlayers.filter(p => p.status === 'available')
+  const drafted = typedPlayers.filter(p => p.status === 'drafted')
+
+  // Money a team has tied up in auctions it is currently leading — the same
+  // input the nomination eligibility check uses in SQL.
+  const leadingByTeam = new Map<string, { sum: number; count: number }>()
+  for (const a of board) {
+    if (!a.leader_team_id) continue
+    const cur = leadingByTeam.get(a.leader_team_id) ?? { sum: 0, count: 0 }
+    leadingByTeam.set(a.leader_team_id, {
+      sum: cur.sum + a.current_price,
+      count: cur.count + 1,
+    })
+  }
+
+  const order = getOpenNominationOrder(
+    typedTeams,
+    board.length,
+    league.open_board_size,
+    league.players_per_team,
+    leadingByTeam
+  )
+
+  const running =
+    league.status === 'active' &&
+    isWithinDraftHours(league.draft_start_hour, league.draft_end_hour)
+  const myTurn = !!myTeam && !!order.find(o => o.team.id === myTeam.id)?.canNominateNow
+  const canNominate = running && myTurn
+
+  const upNext = order.filter(o => o.canNominateNow)
+
+  return (
+    <div className="max-w-4xl mx-auto">
+      <RealtimeRefresher leagueId={league.id} openBoard />
+
+      <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
+        <h1 className="text-2xl font-bold">שחקנים</h1>
+        <div className="flex gap-2 text-sm">
+          <span className="badge badge-green">{available.length} זמינים</span>
+          {board.length > 0 && <span className="badge badge-yellow">{board.length} במכרז</span>}
+          <span className="badge badge-gray">{drafted.length} נרכשו</span>
+        </div>
+      </div>
+
+      {/* Whose turn it is to put a player up */}
+      <div className="card mb-4" style={canNominate ? { borderColor: 'var(--primary)', borderWidth: 2 } : undefined}>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-xs font-medium mb-1" style={{ color: 'var(--muted)' }}>
+              {board.length}/{league.open_board_size} שחקנים על הלוח
+            </p>
+            <p className="font-bold">
+              {!running
+                ? league.status === 'paused'
+                  ? 'הדראפט מושהה'
+                  : league.status === 'active'
+                    ? 'מחוץ לשעות הפעילות'
+                    : 'הדראפט טרם החל'
+                : canNominate
+                  ? 'תורך להעלות שחקן!'
+                  : upNext.length > 0
+                    ? `תור: ${upNext.map(o => o.team.name).join(', ')}`
+                    : 'הלוח מלא — אין העלאות כרגע'}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* On the board now */}
+      {board.map(a => (
+        <div key={a.id} className="card mb-3" style={{ borderColor: 'var(--warning)', borderWidth: 2 }}>
+          <span className="badge badge-yellow mb-2">במכרז עכשיו · ${a.current_price}</span>
+          <p className="font-bold text-xl">{a.player?.name}</p>
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>
+            {[a.player?.position, a.player?.nba_team].filter(Boolean).join(' · ')}
+          </p>
+        </div>
+      ))}
+
+      <PlayerPicker
+        players={available.map(p => ({ id: p.id, name: p.name, position: p.position, nba_team: p.nba_team, ranking: p.ranking }))}
+        leagueId={league.id}
+        canPick={canNominate}
+        endpoint="/api/open/nominate"
+        actionLabel="העלה"
+      />
+
+      {drafted.length > 0 && (
+        <div className="card mt-4">
+          <h2 className="font-bold mb-3" style={{ color: 'var(--muted)' }}>נרכשו ({drafted.length})</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
+                  <th className="text-right pb-2">שחקן</th>
+                  <th className="text-right pb-2 w-14">מחיר</th>
+                  <th className="text-right pb-2">קבוצה</th>
+                </tr>
+              </thead>
+              <tbody>
+                {drafted.map(p => (
+                  <tr key={p.id} className="border-t" style={{ borderColor: 'var(--border)', opacity: 0.65 }}>
+                    <td className="py-2">
+                      <div className="flex items-center gap-2">
+                        {p.position && (
+                          <span className="badge badge-gray text-xs w-8 text-center flex-shrink-0">{p.position}</span>
+                        )}
+                        <span className="font-medium" dir="ltr">{p.name}</span>
+                      </div>
+                    </td>
+                    <td className="py-2 font-bold" style={{ color: 'var(--danger)' }}>${p.draft_price}</td>
+                    <td className="py-2 font-medium" style={{ color: 'var(--success)' }}>
+                      {p.drafting_team?.name ?? '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

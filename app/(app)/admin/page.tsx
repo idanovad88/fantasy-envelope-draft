@@ -2,15 +2,16 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { getAuthUser } from '@/lib/supabase/auth'
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
-import AdminPanel, { type AdminTradeView } from './AdminPanel'
+import AdminPanel, { type AdminTradeView, type AdminOpenAuction, type AdminOpenHistory } from './AdminPanel'
 import type { League, Team, Auction, SnakePick, Trade, TradeAsset } from '@/types'
 import { describePick } from '@/lib/utils'
+import { settleOpenDraft } from '@/lib/openDraft'
 
 export const dynamic = 'force-dynamic'
 
 export default async function AdminPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const { tab: tabParam } = await searchParams
-  const validTabs = ['overview', 'teams', 'auction', 'players', 'lottery', 'league', 'draft', 'trades'] as const
+  const validTabs = ['overview', 'teams', 'auction', 'players', 'lottery', 'league', 'draft', 'trades', 'board'] as const
   type TabId = typeof validTabs[number]
   const initialTab: TabId = validTabs.includes(tabParam as TabId) ? (tabParam as TabId) : 'overview'
 
@@ -35,9 +36,14 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   const { data: league } = await supabase.from('leagues').select('*').eq('id', leagueId).maybeSingle()
   const lid = league?.id
   const isSnake = league?.draft_type === 'snake'
+  const isOpen = league?.draft_type === 'open'
+  const isEnvelope = !isSnake && !isOpen
+
+  // Keep the open board's clocks honest before rendering the admin view.
+  if (lid && isOpen) await settleOpenDraft(lid)
 
   // Auto-activate any pending auction whose scheduled_start has passed (envelope only)
-  if (lid && !isSnake) {
+  if (lid && isEnvelope) {
     const nowIso = new Date().toISOString()
     const [{ data: alreadyActive }, { data: overdue }] = await Promise.all([
       adminDb.from('auctions').select('id').eq('league_id', lid).eq('status', 'active').maybeSingle(),
@@ -52,17 +58,21 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
     }
   }
 
-  const [{ data: teams }, { data: activeAuction }, { data: scheduledAuctions }, { data: players }, { data: pastAuctions }, { data: leagueCreators }, { data: leagueAdminUsers }, { data: snakePicks }, { data: tradeRows }] =
+  const [{ data: teams }, { data: activeAuction }, { data: scheduledAuctions }, { data: players }, { data: pastAuctions }, { data: leagueCreators }, { data: leagueAdminUsers }, { data: snakePicks }, { data: tradeRows }, { data: openAuctions }, { data: openHistory }] =
     await Promise.all([
       supabase.from('teams').select('*').eq('league_id', lid).order('priority_rank', { ascending: true, nullsFirst: false }),
-      !isSnake ? supabase.from('auctions').select('*, player:players(*), bids(id)').eq('league_id', lid).eq('status', 'active').order('scheduled_start', { ascending: false }).limit(1).maybeSingle() : Promise.resolve({ data: null }),
-      !isSnake ? supabase.from('auctions').select('id, scheduled_start, reveal_time, nominating_team_id, player:players(name)').eq('league_id', lid).eq('status', 'pending').order('scheduled_start', { ascending: true }) : Promise.resolve({ data: [] }),
+      isEnvelope ? supabase.from('auctions').select('*, player:players(*), bids(id)').eq('league_id', lid).eq('status', 'active').order('scheduled_start', { ascending: false }).limit(1).maybeSingle() : Promise.resolve({ data: null }),
+      isEnvelope ? supabase.from('auctions').select('id, scheduled_start, reveal_time, nominating_team_id, player:players(name)').eq('league_id', lid).eq('status', 'pending').order('scheduled_start', { ascending: true }) : Promise.resolve({ data: [] }),
       supabase.from('players').select('id, name, status, ranking, position').eq('league_id', lid).order('ranking', { ascending: true }),
-      !isSnake ? supabase.from('auctions').select('id, scheduled_start, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)').eq('league_id', lid).eq('status', 'completed').order('scheduled_start', { ascending: false }) : Promise.resolve({ data: [] }),
+      isEnvelope ? supabase.from('auctions').select('id, scheduled_start, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)').eq('league_id', lid).eq('status', 'completed').order('scheduled_start', { ascending: false }) : Promise.resolve({ data: [] }),
       supabase.from('league_creator_whitelist').select('email').order('created_at', { ascending: true }),
       adminDb.from('admin_users').select('user_id').eq('league_id', lid),
       isSnake ? supabase.from('snake_picks').select('*, player:players(name, position), team:teams(name)').eq('league_id', lid).order('overall_pick_number', { ascending: true }) : Promise.resolve({ data: [] }),
       isSnake ? supabase.from('trades').select('*, assets:trade_assets(*)').eq('league_id', lid).order('created_at', { ascending: false }) : Promise.resolve({ data: [] }),
+      isOpen ? supabase.from('open_auctions').select('id, current_price, leader_team_id, deadline_at, player:players(name), nominating_team:teams!nominating_team_id(name), leader_team:teams!leader_team_id(name), passes:open_passes(team_id)').eq('league_id', lid).eq('status', 'open').order('created_at', { ascending: true }) : Promise.resolve({ data: [] }),
+      // Sorted by updated_at, not deadline_at: an admin closing early leaves the
+      // deadline in the past, behind auctions that actually finished before it.
+      isOpen ? supabase.from('open_auctions').select('id, status, updated_at, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)').eq('league_id', lid).in('status', ['completed', 'cancelled']).order('updated_at', { ascending: false }) : Promise.resolve({ data: [] }),
     ])
 
   // Build admin trade views (resolve team + player names and pick labels).
@@ -106,6 +116,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         currentUserId={user.id}
         snakePicks={(snakePicks || []) as unknown as (SnakePick & { player: { name: string; position: string | null } | null; team: { name: string } | null })[]}
         trades={tradeViews}
+        openAuctions={(openAuctions || []) as unknown as AdminOpenAuction[]}
+        openHistory={(openHistory || []) as unknown as AdminOpenHistory[]}
       />
     </>
   )
