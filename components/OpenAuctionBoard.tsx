@@ -56,6 +56,13 @@ interface Props {
   hardMaxBid: number
   /** Total of the bids this team currently leads, for the explanation text. */
   committed: number
+  /**
+   * Roster slots left once the auctions this team leads are counted as won.
+   * At zero the block is the roster, not the money — leading three auctions on
+   * a three-slot roster costs $3 and still blocks everything, so the two need
+   * different wording.
+   */
+  slotsLeft: number
   approvedTeamCount: number
   frozenReason: 'paused' | 'night' | null
 }
@@ -75,6 +82,7 @@ export default function OpenAuctionBoard({
   myMaxBid,
   hardMaxBid,
   committed,
+  slotsLeft,
   approvedTeamCount,
   frozenReason,
 }: Props) {
@@ -102,6 +110,7 @@ export default function OpenAuctionBoard({
           myMaxBid={myMaxBid}
           hardMaxBid={hardMaxBid}
           committed={committed}
+          slotsLeft={slotsLeft}
           approvedTeamCount={approvedTeamCount}
           frozenReason={frozenReason}
         />
@@ -116,6 +125,7 @@ function OpenAuctionCard({
   myMaxBid,
   hardMaxBid,
   committed,
+  slotsLeft,
   approvedTeamCount,
   frozenReason,
 }: {
@@ -124,6 +134,7 @@ function OpenAuctionCard({
   myMaxBid: number
   hardMaxBid: number
   committed: number
+  slotsLeft: number
   approvedTeamCount: number
   frozenReason: 'paused' | 'night' | null
 }) {
@@ -149,6 +160,10 @@ function OpenAuctionCard({
   // still in this auction — no automatic PASS is written for this case — and
   // the moment it is outbid elsewhere it can bid here.
   const blockedByCommitment = cannotAfford && hardMaxBid >= minBid
+  // Which commitment is actually in the way. Leading as many auctions as you
+  // have slots blocks you no matter how much cash is left, so saying "your
+  // money is tied up" there would name the wrong reason.
+  const slotBlocked = blockedByCommitment && slotsLeft <= 0
 
   // An equal bid never wins anything — the standing leader keeps the player —
   // so it is rejected rather than silently accepted. open_place_bid() enforces
@@ -262,8 +277,10 @@ function OpenAuctionCard({
           >
             {busy === 'bid'
               ? 'שולח...'
-              : blockedByCommitment
-                ? 'הכסף תפוס'
+              : slotBlocked
+                ? 'אין משבצת פנויה'
+                : blockedByCommitment
+                  ? 'הכסף תפוס'
                 : cannotAfford
                   ? `אין תקציב ל-${minBid}`
                   : 'הצע'}
@@ -281,7 +298,12 @@ function OpenAuctionCard({
       )}
 
       {!myPass && myTeamId && !iLead && !frozenReason && (
-        blockedByCommitment ? (
+        slotBlocked ? (
+          <p className="text-xs mt-2" style={{ color: 'var(--warning)' }}>
+            כל משבצות הסגל שלך כבר מחויבות למכרזים שאתה מוביל בהם. אתה עדיין בפנים —
+            ברגע שיעקפו אותך באחד מהם תוכל להציע כאן.
+          </p>
+        ) : blockedByCommitment ? (
           <p className="text-xs mt-2" style={{ color: 'var(--warning)' }}>
             הכסף שלך תפוס במכרזים שאתה מוביל בהם ({formatCurrency(committed)}). אתה עדיין בפנים —
             ברגע שיעקפו אותך שם תוכל להציע כאן.

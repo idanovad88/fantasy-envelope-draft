@@ -303,6 +303,12 @@ async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team 
   const myHardMaxBid = myTeam
     ? getOpenHardMaxBid(myTeam.budget_remaining, myTeam.player_count, league.players_per_team)
     : 0
+  // Slots left once the auctions this team leads are counted as won. At zero it
+  // is the roster blocking a bid, not the budget — leading three auctions on a
+  // three-slot roster can cost $3 and still block everything.
+  const mySlotsLeft = myTeam
+    ? league.players_per_team - myTeam.player_count - myLeading.length
+    : 0
 
   const notStarted = league.status === 'setup' || league.status === 'lottery'
   const frozenReason: 'paused' | 'night' | null =
@@ -373,6 +379,7 @@ async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team 
         myMaxBid={myMaxBid}
         hardMaxBid={myHardMaxBid}
         committed={myCommitted}
+        slotsLeft={mySlotsLeft}
         approvedTeamCount={approvedTeams.length}
         frozenReason={frozenReason}
       />
