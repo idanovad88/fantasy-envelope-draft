@@ -219,6 +219,19 @@ export function getOpenMaxBid(
   return getMaxBid(budgetRemaining - sumLeading, playerCount + leadingCount, playersPerTeam)
 }
 
+// The ceiling a team could reach if every auction it currently leads were lost
+// — i.e. plain getMaxBid() with no deduction for commitments. This is the line
+// between "cannot afford this player" and "money is tied up right now": only
+// the former is permanent, and only the former earns an automatic PASS.
+// Authoritative copy: open_team_hard_max_bid() in SQL.
+export function getOpenHardMaxBid(
+  budgetRemaining: number,
+  playerCount: number,
+  playersPerTeam: number
+) {
+  return getMaxBid(budgetRemaining, playerCount, playersPerTeam)
+}
+
 // Nomination order for the open board. Simpler than the envelope version: the
 // turn rotates the instant a player goes up (demote_nomination_rank runs inside
 // open_nominate), so there is no "has nominated" state to track — a team that

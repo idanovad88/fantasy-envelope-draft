@@ -241,7 +241,31 @@ BEGIN
   -- Reserve $1 for every slot still open after this one.
   RETURN (v_budget - v_sum_leading) - (v_slots_left - 1);
 END;
-$$;
+$;
+
+-- The ceiling this team could reach if every auction it currently leads were
+-- lost. This is the test for "out for good", and it is the ONLY budget reason
+-- that may produce a permanent auto-PASS: money tied up in another open auction
+-- comes back the moment the team is outbid there, so it must not eliminate.
+CREATE OR REPLACE FUNCTION open_team_hard_max_bid(p_team_id UUID)
+RETURNS INTEGER LANGUAGE plpgsql STABLE AS $
+DECLARE v_budget INTEGER; v_count INTEGER; v_per_team INTEGER; v_slots INTEGER;
+BEGIN
+  SELECT t.budget_remaining, t.player_count, l.players_per_team
+  INTO v_budget, v_count, v_per_team
+  FROM teams t JOIN leagues l ON l.id = t.league_id
+  WHERE t.id = p_team_id;
+
+  IF v_per_team IS NULL THEN RETURN 0; END IF;
+
+  -- Real roster slots: unlike open_team_open_slots() this does not subtract
+  -- auctions the team is leading.
+  v_slots := v_per_team - v_count;
+  IF v_slots <= 0 THEN RETURN 0; END IF;
+
+  RETURN v_budget - (v_slots - 1);
+END;
+$;
 
 -- ============================================================================
 -- 5. MUTATING FUNCTIONS
@@ -307,9 +331,10 @@ END;
 $$;
 
 -- Run after every bid and every pass.
---   1. Auto-PASS any team that cannot legally raise, with an explicit reason so
---      the board can say why instead of a team silently vanishing. Without this
---      a broke team would stall every auction until its deadline.
+--   1. Auto-PASS any team that is out for good — roster full, or unable to
+--      afford the price even if every auction it leads were lost — with an
+--      explicit reason so the board can say why. A team blocked only by its own
+--      commitments is NOT passed; the deadline is what ends the auction then.
 --   2. If nobody but the leader is left without a pass, close.
 CREATE OR REPLACE FUNCTION open_settle_auction(p_auction_id UUID)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER AS $$
@@ -323,18 +348,22 @@ BEGIN
 
   IF NOT FOUND OR v_status <> 'open' THEN RETURN; END IF;
 
+  -- Only teams that can never come back are passed. A team held up purely by
+  -- its own leading bids is left alone: it cannot bid at this moment, but being
+  -- outbid elsewhere puts it straight back in. Passing it would turn a rival's
+  -- temporary commitment into a permanent elimination, which is timeable.
+  --
+  -- 'roster_full' is therefore never produced: a team that is not is_complete
+  -- always has a real slot free, and a merely committed slot is temporary. The
+  -- value stays in the CHECK for rows written before this rule.
   INSERT INTO open_passes (open_auction_id, team_id, reason)
   SELECT p_auction_id, t.id,
-         CASE
-           WHEN t.is_complete                      THEN 'complete'
-           WHEN open_team_open_slots(t.id) <= 0    THEN 'roster_full'
-           ELSE                                         'no_budget'
-         END
+         CASE WHEN t.is_complete THEN 'complete' ELSE 'no_budget' END
   FROM teams t
   WHERE t.league_id = v_league_id
     AND t.approved
     AND (v_leader IS NULL OR t.id <> v_leader)
-    AND (t.is_complete OR open_team_max_bid(t.id) < v_price + 1)
+    AND (t.is_complete OR open_team_hard_max_bid(t.id) < v_price + 1)
   ON CONFLICT (open_auction_id, team_id) DO NOTHING;
 
   SELECT COUNT(*) INTO v_remaining

@@ -225,7 +225,13 @@ where `sumLeading`/`leadingCount` cover only the auctions the team **currently l
 
 **The clock.** One deadline per auction, reset by every new bid (`open_pass_timeout_minutes`, default 120). Stopping it — admin PAUSE, or being outside `draft_start_hour`–`draft_end_hour` (Israel time; these two columns existed unused on `leagues` from the original schema) — stamps `leagues.open_frozen_since`; resuming shifts every open deadline forward by the elapsed gap, so nobody loses part of their window. `open_set_pause()` stamps in the same transaction as the status flip rather than leaving it to the tick, which would leak up to a minute onto every auction. At the night boundary the tick stamps **the boundary itself**, not `now()`, for the same reason.
 
-**Auto-PASS.** After every bid and pass, `open_settle_auction()` inserts a pass row for any non-leader that cannot legally raise (`complete` / `roster_full` / `no_budget`) before checking whether anyone is left. Without it a broke team would stall every auction until its deadline. Accepted consequence: a team auto-passed for budget that later has money freed elsewhere does not come back — consistent with PASS being final.
+**The timer cannot be sniped.** Every bid sets `deadline_at = NOW() + open_pass_timeout_minutes`, a full reset rather than a small extension, so a bid placed a minute before the deadline hands *everyone* another two hours. An auction only ever closes on the clock after a full timeout during which nobody bid at all. Keep it a full reset: this format sends no push notifications, so the window is the only thing protecting a manager who is asleep.
+
+**Auto-PASS is for teams that are out for good, never for teams that are merely committed.** After every bid and pass, `open_settle_auction()` writes a pass row for a non-leader that is `is_complete`, or whose `open_team_hard_max_bid()` — the ceiling with *every* auction it leads treated as lost — cannot reach `current_price + 1`. Everything else is left in the auction.
+
+⚠️ The first version tested this with `open_team_max_bid()`, which deducts money tied up in auctions the team currently leads. That turned a rival's temporary commitment into a permanent elimination, and it was timeable: wait until a rival is leading something expensive, jump the price here, and they are auto-passed for good even though the money frees the moment they are outbid over there — closing the auction to you instantly, with no timer and no chance to respond. `roster_full` had the identical flaw (`open_team_open_slots()` counts a merely committed slot as taken) and is now unreachable, since a team that is not `is_complete` always has a real slot free. The enum value stays in the CHECK for older rows.
+
+A team blocked only by its own commitments therefore sits in the auction unable to bid; `OpenAuctionBoard` says so ("הכסף שלך תפוס במכרזים שאתה מוביל בהם") instead of a flat "no budget", and being outbid elsewhere puts it straight back in. Termination is unaffected — the auction runs to its deadline and `open_draft_tick()` closes it with `timeout` passes, which is exactly what the timer is for. The cost is that more auctions end on the clock and fewer on "everyone passed".
 
 **Realtime:** only `open_auctions` is published. `open_bids`/`open_passes` have no `league_id` and so could not be filtered per league; instead `open_pass()` bumps `open_auctions.updated_at`, so one filtered subscription in `RealtimeRefresher` covers nominations (INSERT), bids, passes and closes (UPDATE).
 
@@ -237,6 +243,7 @@ where `sumLeading`/`leadingCount` cover only the auctions the team **currently l
 1. `supabase/migration_open_auction_draft.sql` — tables, functions, RLS, grants. Run **before** deploying: `save-league` sends the new columns and PostgREST rejects the whole update if they are missing.
 2. `supabase/cron_open_draft_tick.sql` — the every-minute job.
 3. `supabase/migration_open_auction_grants_fix.sql` — the `anon`/`authenticated` revoke above. Folded into #1 as well, so a fresh install needs only #1 and #2; this file exists for the database where #1 already ran with the incomplete revoke. Applied 2026-08-29.
+4. `supabase/migration_open_auction_settle_fix.sql` — `open_team_hard_max_bid()` plus the narrowed auto-PASS above. Also folded into #1. Applied 2026-08-29.
 
 ### Trade system (snake only)
 

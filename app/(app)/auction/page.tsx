@@ -8,6 +8,7 @@ import {
   formatDateTime,
   formatCurrency,
   getOpenMaxBid,
+  getOpenHardMaxBid,
   isWithinDraftHours,
   REVEAL_WINDOW_MS,
 } from '@/lib/utils'
@@ -286,14 +287,21 @@ async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team 
   // auctions it *leads* tie money up — a bid that has been outbid can never
   // turn into a purchase, so it is released at once.
   const myLeading = myTeam ? board.filter(a => a.leader_team_id === myTeam.id) : []
+  const myCommitted = myLeading.reduce((sum, a) => sum + a.current_price, 0)
   const myMaxBid = myTeam
     ? getOpenMaxBid(
         myTeam.budget_remaining,
         myTeam.player_count,
         league.players_per_team,
-        myLeading.reduce((sum, a) => sum + a.current_price, 0),
+        myCommitted,
         myLeading.length
       )
+    : 0
+  // The same ceiling with those commitments released. Where the two disagree
+  // the team is not out of the auction, only short of cash this minute — the
+  // board says so rather than showing a flat "no budget".
+  const myHardMaxBid = myTeam
+    ? getOpenHardMaxBid(myTeam.budget_remaining, myTeam.player_count, league.players_per_team)
     : 0
 
   const notStarted = league.status === 'setup' || league.status === 'lottery'
@@ -363,6 +371,8 @@ async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team 
         }))}
         myTeamId={myTeam?.id ?? null}
         myMaxBid={myMaxBid}
+        hardMaxBid={myHardMaxBid}
+        committed={myCommitted}
         approvedTeamCount={approvedTeams.length}
         frozenReason={frozenReason}
       />

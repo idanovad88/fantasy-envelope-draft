@@ -46,6 +46,16 @@ interface Props {
    * only here to keep the form honest.
    */
   myMaxBid: number
+  /**
+   * Same ceiling with the team's current commitments released. When this is
+   * enough but {@link myMaxBid} is not, the team is not out of the auction —
+   * its money is just parked in another one, and being outbid there puts it
+   * straight back in. The DB draws the same distinction before writing an
+   * automatic PASS.
+   */
+  hardMaxBid: number
+  /** Total of the bids this team currently leads, for the explanation text. */
+  committed: number
   approvedTeamCount: number
   frozenReason: 'paused' | 'night' | null
 }
@@ -63,6 +73,8 @@ export default function OpenAuctionBoard({
   auctions,
   myTeamId,
   myMaxBid,
+  hardMaxBid,
+  committed,
   approvedTeamCount,
   frozenReason,
 }: Props) {
@@ -88,6 +100,8 @@ export default function OpenAuctionBoard({
           auction={auction}
           myTeamId={myTeamId}
           myMaxBid={myMaxBid}
+          hardMaxBid={hardMaxBid}
+          committed={committed}
           approvedTeamCount={approvedTeamCount}
           frozenReason={frozenReason}
         />
@@ -100,12 +114,16 @@ function OpenAuctionCard({
   auction,
   myTeamId,
   myMaxBid,
+  hardMaxBid,
+  committed,
   approvedTeamCount,
   frozenReason,
 }: {
   auction: BoardAuction
   myTeamId: string | null
   myMaxBid: number
+  hardMaxBid: number
+  committed: number
   approvedTeamCount: number
   frozenReason: 'paused' | 'night' | null
 }) {
@@ -127,6 +145,10 @@ function OpenAuctionCard({
   // auction is still waiting on before it closes.
   const stillIn = Math.max(0, approvedTeamCount - auction.passes.length - (auction.leaderTeamId ? 1 : 0))
   const cannotAfford = myMaxBid < minBid
+  // Blocked, but only by money parked in auctions this team is leading. It is
+  // still in this auction — no automatic PASS is written for this case — and
+  // the moment it is outbid elsewhere it can bid here.
+  const blockedByCommitment = cannotAfford && hardMaxBid >= minBid
 
   // An equal bid never wins anything — the standing leader keeps the player —
   // so it is rejected rather than silently accepted. open_place_bid() enforces
@@ -238,7 +260,13 @@ function OpenAuctionCard({
             disabled={!!busy || cannotAfford}
             onClick={submitBid}
           >
-            {busy === 'bid' ? 'שולח...' : cannotAfford ? `אין תקציב ל-$${minBid}` : 'הצע'}
+            {busy === 'bid'
+              ? 'שולח...'
+              : blockedByCommitment
+                ? 'הכסף תפוס'
+                : cannotAfford
+                  ? `אין תקציב ל-${minBid}`
+                  : 'הצע'}
           </button>
           <button
             type="button"
@@ -253,9 +281,16 @@ function OpenAuctionCard({
       )}
 
       {!myPass && myTeamId && !iLead && !frozenReason && (
-        <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>
-          מינימום {formatCurrency(minBid)} · המקסימום שלך {formatCurrency(Math.max(myMaxBid, 0))}
-        </p>
+        blockedByCommitment ? (
+          <p className="text-xs mt-2" style={{ color: 'var(--warning)' }}>
+            הכסף שלך תפוס במכרזים שאתה מוביל בהם ({formatCurrency(committed)}). אתה עדיין בפנים —
+            ברגע שיעקפו אותך שם תוכל להציע כאן.
+          </p>
+        ) : (
+          <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>
+            מינימום {formatCurrency(minBid)} · המקסימום שלך {formatCurrency(Math.max(myMaxBid, 0))}
+          </p>
+        )
       )}
 
       {error && <p className="text-sm mt-2" style={{ color: 'var(--danger)' }}>{error}</p>}
