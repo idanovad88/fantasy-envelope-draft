@@ -22,7 +22,11 @@ export async function POST(req: NextRequest) {
 
   const supabase = createAdminClient()
 
-  const { data: league } = await supabase.from('leagues').select('id, created_by').eq('id', leagueId).maybeSingle()
+  const { data: league } = await supabase
+    .from('leagues')
+    .select('id, created_by, players_per_team, roster_slots')
+    .eq('id', leagueId)
+    .maybeSingle()
   if (!league) return NextResponse.json({ error: 'ליגה לא נמצאה' }, { status: 404 })
 
   // Admin check: row in admin_users for this league OR creator of this league.
@@ -94,6 +98,32 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'שעות הפעילות חייבות להיות בין 0 ל-23' }, { status: 400 })
       }
       update[key] = n
+    }
+  }
+
+  // players_per_team and roster_slots are two halves of one setting: when a
+  // slot config exists it is what the team page draws, so a league saved with
+  // six players and three slots silently shows three roster rows and pushes the
+  // rest into "no matching position". The panel already turns the total red;
+  // this is what makes it stick. Either side may be absent from the payload, so
+  // both fall back to what is already stored.
+  const nextSlots = ('roster_slots' in update ? update.roster_slots : league.roster_slots) as
+    Record<string, number> | null
+  const nextPlayersPerTeam = Number(
+    'players_per_team' in update ? update.players_per_team : league.players_per_team
+  )
+
+  if (nextSlots && typeof nextSlots === 'object') {
+    const counts = Object.values(nextSlots).map(Number)
+    if (counts.some(v => !Number.isInteger(v) || v < 0)) {
+      return NextResponse.json({ error: 'עמדות ההרכב חייבות להיות מספרים שלמים אי-שליליים' }, { status: 400 })
+    }
+    const total = counts.reduce((a, b) => a + b, 0)
+    // All zeros means "no slot config" — the same thing the panel sends as null.
+    if (total > 0 && total !== nextPlayersPerTeam) {
+      return NextResponse.json({
+        error: `סכום עמדות ההרכב (${total}) חייב להיות שווה למספר השחקנים לקבוצה (${nextPlayersPerTeam})`,
+      }, { status: 400 })
     }
   }
 
