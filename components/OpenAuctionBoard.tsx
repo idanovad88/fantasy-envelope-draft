@@ -245,7 +245,12 @@ function OpenAuctionCard({
         <p className="text-sm" style={{ color: 'var(--muted)' }}>אין לך קבוצה בליגה הזו — צפייה בלבד</p>
       ) : myPass ? (
         <div className="p-2 rounded-lg text-center text-sm" style={{ background: 'var(--background)', color: 'var(--muted)' }}>
-          יצאת מהמכרז — {PASS_LABEL[myPass.reason]}. אין חזרה.
+          {/* A deliberate pass needs no explaining — "יצאת מהמכרז" already says
+              it, and the reason label would just read "פאס" again. The other
+              reasons are things the manager did not choose, so those keep it. */}
+          {myPass.reason === 'manual'
+            ? 'יצאת מהמכרז'
+            : `יצאת מהמכרז — ${PASS_LABEL[myPass.reason]}`}
         </div>
       ) : frozenReason ? (
         <div className="p-2 rounded-lg text-center text-sm" style={{ background: 'var(--background)', color: 'var(--muted)' }}>
