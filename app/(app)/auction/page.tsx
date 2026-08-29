@@ -397,15 +397,18 @@ async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team 
                 <div className="min-w-0">
                   <p className="font-medium truncate">{h.player?.name ?? 'שחקן'}</p>
                   <p className="text-xs" style={{ color: 'var(--muted)' }}>
+                    {/* Everyone passing is how an auction is *supposed* to end, so
+                        it goes unlabelled — only the two exceptions are named. */}
                     {h.status === 'cancelled'
                       ? 'בוטל — השחקן חזר לבריכה'
-                      : `${h.winning_team?.name ?? '—'} · ${
+                      : [
+                          h.winning_team?.name ?? '—',
                           h.closed_reason === 'timeout'
                             ? 'נסגר בזמן'
                             : h.closed_reason === 'admin'
                               ? 'נסגר ע"י המנהל'
-                              : 'כולם פאסו'
-                        }`}
+                              : null,
+                        ].filter(Boolean).join(' · ')}
                   </p>
                 </div>
                 <div className="text-left shrink-0">
