@@ -432,9 +432,10 @@ async function OpenDraftPlayersPage({
                 : canNominate
                   ? 'תורך להעלות שחקן!'
                   : upNext.length > 0
-                    // Only the head of the queue, to match the dashboard card.
-                    // More teams may be eligible when the board has several free
-                    // slots; the free-slot count above already says so.
+                    // Only the head of the queue. This is a one-line status,
+                    // not the full order — the dashboard card marks every team
+                    // that may nominate now, and the free-slot count above
+                    // already says how many turns are open.
                     ? `תור: ${upNext[0].team.name}`
                     : 'הלוח מלא — אין העלאות כרגע'}
             </p>

@@ -326,11 +326,6 @@ export default async function DashboardPage() {
       typedTeams, board.length, typedLeague.open_board_size, typedLeague.players_per_team, leadingByTeam
     )
 
-    // Only the head of the queue is marked. Several teams may legitimately
-    // nominate at once when the board has more than one free slot, but a column
-    // of identical markers reads as noise — the useful answer is who is up now.
-    const nextNominatorId = order.find(o => o.canNominateNow)?.team.id ?? null
-
     const running = typedLeague.status === 'active' &&
       isWithinDraftHours(typedLeague.draft_start_hour, typedLeague.draft_end_hour)
     const myLeading = typedMyTeam ? leadingByTeam.get(typedMyTeam.id) ?? { sum: 0, count: 0 } : { sum: 0, count: 0 }
@@ -508,8 +503,7 @@ export default async function DashboardPage() {
               : 'הלוח מלא — ההעלאה הבאה תיפתח כשמכרז ייסגר'}
           </p>
           <div className="flex flex-col gap-2">
-            {order.map(({ team, canNominate, position }) => {
-              const isNext = team.id === nextNominatorId
+            {order.map(({ team, canNominate, canNominateNow, position }) => {
               return (
                 <div
                   key={team.id}
@@ -517,11 +511,15 @@ export default async function DashboardPage() {
                   style={{ opacity: canNominate ? 1 : 0.45 }}
                 >
                   {/* The green number is the whole marker — no label, since the
-                      card's heading already says what the list is. */}
-                  <span className={`badge text-xs w-6 text-center flex-shrink-0 ${isNext ? 'badge-green' : 'badge-gray'}`}>
+                      card's heading already says what the list is. Every team
+                      that may nominate right now is marked, not just the head of
+                      the queue: with several free board slots they all have a
+                      real turn, and marking one of them made the rest look
+                      blocked. */}
+                  <span className={`badge text-xs w-6 text-center flex-shrink-0 ${canNominateNow ? 'badge-green' : 'badge-gray'}`}>
                     {position}
                   </span>
-                  <span className={`flex-1 truncate ${isNext ? 'font-bold' : 'font-medium'}`}>{team.name}</span>
+                  <span className={`flex-1 truncate ${canNominateNow ? 'font-bold' : 'font-medium'}`}>{team.name}</span>
                   {team.is_complete && <span className="badge badge-gray text-xs">הושלם</span>}
                   <span style={{ color: 'var(--muted)' }}>${team.budget_remaining}</span>
                 </div>
