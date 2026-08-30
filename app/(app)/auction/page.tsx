@@ -380,6 +380,8 @@ async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team 
         hardMaxBid={myHardMaxBid}
         committed={myCommitted}
         slotsLeft={mySlotsLeft}
+        extendShortMinutes={league.open_extend_short_minutes}
+        extendLongMinutes={league.open_extend_long_minutes}
         approvedTeamCount={approvedTeams.length}
         frozenReason={frozenReason}
       />

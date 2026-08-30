@@ -213,6 +213,8 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   // the original schema and were never read by anything until this format.
   const [openBoardSize, setOpenBoardSize] = useState(league?.open_board_size ?? 4)
   const [openPassTimeoutMinutes, setOpenPassTimeoutMinutes] = useState(league?.open_pass_timeout_minutes ?? 120)
+  const [openExtendShort, setOpenExtendShort] = useState(league?.open_extend_short_minutes ?? 30)
+  const [openExtendLong, setOpenExtendLong] = useState(league?.open_extend_long_minutes ?? 60)
   const [draftStartHour, setDraftStartHour] = useState(league?.draft_start_hour ?? 8)
   const [draftEndHour, setDraftEndHour] = useState(league?.draft_end_hour ?? 22)
   const [openNominateTeamId, setOpenNominateTeamId] = useState('')
@@ -468,6 +470,8 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
       } : isOpen ? {
         open_board_size: openBoardSize,
         open_pass_timeout_minutes: openPassTimeoutMinutes,
+        open_extend_short_minutes: openExtendShort,
+        open_extend_long_minutes: openExtendLong,
         draft_start_hour: draftStartHour,
         draft_end_hour: draftEndHour,
       } : {
@@ -2142,6 +2146,36 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                   />
                   <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
                     כל הצעה חדשה מאפסת את השעון. בתום הזמן כל מי שלא הגיב מסומן PASS והמוביל זוכה. ברירת מחדל: 120 דקות
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">הארכה בהצעה מאוחרת (דקות)</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      className="input text-center"
+                      value={openExtendShort}
+                      onChange={e => setOpenExtendShort(Number(e.target.value))}
+                      min={1}
+                      max={2880}
+                      dir="ltr"
+                    />
+                    <span style={{ color: 'var(--muted)' }}>ו-</span>
+                    <input
+                      type="number"
+                      className="input text-center"
+                      value={openExtendLong}
+                      onChange={e => setOpenExtendLong(Number(e.target.value))}
+                      min={1}
+                      max={2880}
+                      dir="ltr"
+                    />
+                  </div>
+                  <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                    הצעה דוחה את הסגירה לחלון הקטן מבין השניים שגדול מהזמן שנותר. עם {openExtendShort} ו-{openExtendLong}:
+                    נשארו פחות מ-{openExtendShort} דק&apos; ← {openExtendShort} דק&apos;; פחות מ-{openExtendLong} ← {openExtendLong} דק&apos;;
+                    יותר מזה — השעון לא זז. לביטול, הצב את שניהם על {openPassTimeoutMinutes}.
                   </p>
                 </div>
 

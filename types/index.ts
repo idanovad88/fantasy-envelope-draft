@@ -31,6 +31,8 @@ export interface League {
   // open-outcry draft only
   open_board_size: number
   open_pass_timeout_minutes: number
+  open_extend_short_minutes: number
+  open_extend_long_minutes: number
   open_frozen_since: string | null
   created_by: string
   created_at: string

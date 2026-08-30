@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
 
   const { data: league } = await supabase
     .from('leagues')
-    .select('id, created_by, players_per_team, roster_slots')
+    .select('id, created_by, players_per_team, roster_slots, open_extend_short_minutes, open_extend_long_minutes')
     .eq('id', leagueId)
     .maybeSingle()
   if (!league) return NextResponse.json({ error: 'ליגה לא נמצאה' }, { status: 404 })
@@ -87,6 +87,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'זמן ההמתנה למכרז חייב להיות בין 5 ל-2880 דקות' }, { status: 400 })
     }
     update.open_pass_timeout_minutes = n
+  }
+
+  // Soft close windows. Range first, then the ordering rule below — a "long"
+  // window shorter than the "short" one would never be selected, so the setting
+  // would look like it does nothing.
+  for (const key of ['open_extend_short_minutes', 'open_extend_long_minutes'] as const) {
+    if (key in body) {
+      const n = Number(body[key])
+      if (!Number.isInteger(n) || n < 1 || n > 2880) {
+        return NextResponse.json({ error: 'חלון ההארכה חייב להיות בין 1 ל-2880 דקות' }, { status: 400 })
+      }
+      update[key] = n
+    }
+  }
+
+  // Either field may be absent from the payload, so each falls back to what is
+  // stored — the same trap as roster_slots against players_per_team.
+  const nextShort = Number(
+    'open_extend_short_minutes' in update ? update.open_extend_short_minutes : league.open_extend_short_minutes
+  )
+  const nextLong = Number(
+    'open_extend_long_minutes' in update ? update.open_extend_long_minutes : league.open_extend_long_minutes
+  )
+  if (Number.isFinite(nextShort) && Number.isFinite(nextLong) && nextLong < nextShort) {
+    return NextResponse.json({
+      error: `חלון ההארכה הארוך (${nextLong}) חייב להיות גדול או שווה לקצר (${nextShort})`,
+    }, { status: 400 })
   }
 
   // Active hours. These two columns have lived on `leagues` unused since the

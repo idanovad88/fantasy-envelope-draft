@@ -225,7 +225,21 @@ where `sumLeading`/`leadingCount` cover only the auctions the team **currently l
 
 **The clock.** One deadline per auction, reset by every new bid (`open_pass_timeout_minutes`, default 120). Stopping it — admin PAUSE, or being outside `draft_start_hour`–`draft_end_hour` (Israel time; these two columns existed unused on `leagues` from the original schema) — stamps `leagues.open_frozen_since`; resuming shifts every open deadline forward by the elapsed gap, so nobody loses part of their window. `open_set_pause()` stamps in the same transaction as the status flip rather than leaving it to the tick, which would leak up to a minute onto every auction. At the night boundary the tick stamps **the boundary itself**, not `now()`, for the same reason.
 
-**The timer cannot be sniped.** Every bid sets `deadline_at = NOW() + open_pass_timeout_minutes`, a full reset rather than a small extension, so a bid placed a minute before the deadline hands *everyone* another two hours. An auction only ever closes on the clock after a full timeout during which nobody bid at all. Keep it a full reset: this format sends no push notifications, so the window is the only thing protecting a manager who is asleep.
+**The timer cannot be sniped — a graduated soft close.** On a bid the deadline moves to `NOW() + W`, where `W` is the **smallest configured window larger than the time remaining**; if neither qualifies the deadline does not move. With the defaults (`open_extend_short_minutes` 30, `open_extend_long_minutes` 60):
+
+| left when the bid lands | result |
+|---|---|
+| 90 min | untouched — 90 min still to run |
+| 50 min | `NOW() + 60` — the clock goes back up to an hour |
+| 10 min | `NOW() + 30` — 20 minutes added, half an hour to respond |
+
+**The deadline can never move earlier**, and that follows from the rule rather than from a guard: only a window greater than the remaining time is ever chosen, so `NOW() + W` is always past the deadline it replaces. No `GREATEST` needed.
+
+`open_pass_timeout_minutes` is **not** an extension — it is the opening window a newly nominated player gets, set in `open_nominate()`. The nominator's automatic $1 bid therefore never moves anything: 120 minutes remain at that instant, more than either window.
+
+This replaced a full reset to `NOW() + open_pass_timeout_minutes` on every bid. That was even harder to snipe, but each late bid bought another two hours, so a contested auction could run for days. Setting both windows equal to `open_pass_timeout_minutes` restores exactly that old behaviour, which is the documented way to switch the ladder off.
+
+⚠️ This format sends no push notifications, so a short window means a manager has to be watching. That is why the two numbers are league settings rather than constants — see `migration_open_auction_soft_close.sql`.
 
 **Auto-PASS is for teams that are out for good, never for teams that are merely committed.** After every bid and pass, `open_settle_auction()` writes a pass row for a non-leader that is `is_complete`, or whose `open_team_hard_max_bid()` — the ceiling with *every* auction it leads treated as lost — cannot reach `current_price + 1`. Everything else is left in the auction.
 
@@ -244,6 +258,7 @@ A team blocked only by its own commitments therefore sits in the auction unable 
 2. `supabase/cron_open_draft_tick.sql` — the every-minute job.
 3. `supabase/migration_open_auction_grants_fix.sql` — the `anon`/`authenticated` revoke above. Folded into #1 as well, so a fresh install needs only #1 and #2; this file exists for the database where #1 already ran with the incomplete revoke. Applied 2026-08-29.
 4. `supabase/migration_open_auction_settle_fix.sql` — `open_team_hard_max_bid()` plus the narrowed auto-PASS above. Also folded into #1. Applied 2026-08-29.
+5. `supabase/migration_open_auction_soft_close.sql` — `open_extend_short_minutes` / `open_extend_long_minutes` plus the graduated close in `open_place_bid()`. Also folded into #1. Applied 2026-08-30.
 
 ### Trade system (snake only)
 

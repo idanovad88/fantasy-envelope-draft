@@ -57,7 +57,12 @@ ALTER TABLE leagues
   -- Set while the draft's clocks are stopped (admin pause, or outside the
   -- league's active hours). On resume every open deadline moves forward by the
   -- elapsed gap. See open_draft_tick().
-  ADD COLUMN IF NOT EXISTS open_frozen_since TIMESTAMPTZ;
+  ADD COLUMN IF NOT EXISTS open_frozen_since TIMESTAMPTZ,
+  -- Soft close. On a bid the deadline moves to NOW() + the smallest of these
+  -- that is larger than the time remaining; if neither is, it does not move.
+  -- See open_place_bid().
+  ADD COLUMN IF NOT EXISTS open_extend_short_minutes INTEGER NOT NULL DEFAULT 30,
+  ADD COLUMN IF NOT EXISTS open_extend_long_minutes INTEGER NOT NULL DEFAULT 60;
 
 ALTER TABLE leagues DROP CONSTRAINT IF EXISTS leagues_open_board_size_check;
 ALTER TABLE leagues ADD CONSTRAINT leagues_open_board_size_check
@@ -66,6 +71,20 @@ ALTER TABLE leagues ADD CONSTRAINT leagues_open_board_size_check
 ALTER TABLE leagues DROP CONSTRAINT IF EXISTS leagues_open_pass_timeout_check;
 ALTER TABLE leagues ADD CONSTRAINT leagues_open_pass_timeout_check
   CHECK (open_pass_timeout_minutes BETWEEN 5 AND 2880);
+
+ALTER TABLE leagues DROP CONSTRAINT IF EXISTS leagues_open_extend_short_check;
+ALTER TABLE leagues ADD CONSTRAINT leagues_open_extend_short_check
+  CHECK (open_extend_short_minutes BETWEEN 1 AND 2880);
+
+ALTER TABLE leagues DROP CONSTRAINT IF EXISTS leagues_open_extend_long_check;
+ALTER TABLE leagues ADD CONSTRAINT leagues_open_extend_long_check
+  CHECK (open_extend_long_minutes BETWEEN 1 AND 2880);
+
+-- A "far" window shorter than the "near" one would simply never be selected,
+-- which reads as the setting doing nothing. Rejected outright instead.
+ALTER TABLE leagues DROP CONSTRAINT IF EXISTS leagues_open_extend_order_check;
+ALTER TABLE leagues ADD CONSTRAINT leagues_open_extend_order_check
+  CHECK (open_extend_long_minutes >= open_extend_short_minutes);
 
 -- NOTE: draft_start_hour (8) and draft_end_hour (22) already exist on `leagues`
 -- from the original schema and were never used by anything. They become this
@@ -457,7 +476,10 @@ $$;
 
 CREATE OR REPLACE FUNCTION open_place_bid(p_auction_id UUID, p_team_id UUID, p_amount INTEGER)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE v_a RECORD; v_timeout INTEGER; v_max INTEGER;
+DECLARE
+  v_a RECORD; v_max INTEGER;
+  v_short INTEGER; v_long INTEGER;
+  v_remaining INTERVAL; v_deadline TIMESTAMPTZ;
 BEGIN
   -- Row lock: two teams raising the same auction at the same instant must not
   -- both read the same current_price.
@@ -496,16 +518,32 @@ BEGIN
     RAISE EXCEPTION 'ההצעה חורגת מהתקציב הפנוי של הקבוצה — מקסימום $%', GREATEST(v_max, 0);
   END IF;
 
-  SELECT open_pass_timeout_minutes INTO v_timeout FROM leagues WHERE id = v_a.league_id;
+  SELECT open_extend_short_minutes, open_extend_long_minutes
+  INTO v_short, v_long
+  FROM leagues WHERE id = v_a.league_id;
+
+  -- Graduated soft close: the deadline moves to NOW() + the smallest configured
+  -- window LARGER than the time remaining, and stands when neither qualifies.
+  -- With 30/60: 90 minutes left is untouched, 50 left goes back up to an hour,
+  -- 10 left gains 20 minutes for half an hour to respond. It can never move
+  -- earlier — only a window greater than the remaining time is ever chosen.
+  --
+  -- open_pass_timeout_minutes is NOT used here; that is the opening window a
+  -- newly nominated player gets, set in open_nominate().
+  v_remaining := v_a.deadline_at - NOW();
+  v_deadline := CASE
+    WHEN v_remaining < make_interval(mins => v_short) THEN NOW() + make_interval(mins => v_short)
+    WHEN v_remaining < make_interval(mins => v_long)  THEN NOW() + make_interval(mins => v_long)
+    ELSE v_a.deadline_at
+  END;
 
   INSERT INTO open_bids (open_auction_id, team_id, amount)
   VALUES (p_auction_id, p_team_id, p_amount);
 
-  -- Every new bid restarts the clock for everyone still in.
   UPDATE open_auctions SET
     current_price  = p_amount,
     leader_team_id = p_team_id,
-    deadline_at    = NOW() + make_interval(mins => v_timeout),
+    deadline_at    = v_deadline,
     updated_at     = NOW()
   WHERE id = p_auction_id;
 

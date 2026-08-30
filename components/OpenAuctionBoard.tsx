@@ -56,6 +56,9 @@ interface Props {
   hardMaxBid: number
   /** Total of the bids this team currently leads, for the explanation text. */
   committed: number
+  /** The two soft-close windows, so the card can explain why the clock jumps. */
+  extendShortMinutes: number
+  extendLongMinutes: number
   /**
    * Roster slots left once the auctions this team leads are counted as won.
    * At zero the block is the roster, not the money — leading three auctions on
@@ -83,6 +86,8 @@ export default function OpenAuctionBoard({
   hardMaxBid,
   committed,
   slotsLeft,
+  extendShortMinutes,
+  extendLongMinutes,
   approvedTeamCount,
   frozenReason,
 }: Props) {
@@ -111,6 +116,8 @@ export default function OpenAuctionBoard({
           hardMaxBid={hardMaxBid}
           committed={committed}
           slotsLeft={slotsLeft}
+          extendShortMinutes={extendShortMinutes}
+          extendLongMinutes={extendLongMinutes}
           approvedTeamCount={approvedTeamCount}
           frozenReason={frozenReason}
         />
@@ -126,6 +133,8 @@ function OpenAuctionCard({
   hardMaxBid,
   committed,
   slotsLeft,
+  extendShortMinutes,
+  extendLongMinutes,
   approvedTeamCount,
   frozenReason,
 }: {
@@ -135,6 +144,8 @@ function OpenAuctionCard({
   hardMaxBid: number
   committed: number
   slotsLeft: number
+  extendShortMinutes: number
+  extendLongMinutes: number
   approvedTeamCount: number
   frozenReason: 'paused' | 'night' | null
 }) {
@@ -314,9 +325,17 @@ function OpenAuctionCard({
             ברגע שיעקפו אותך שם תוכל להציע כאן.
           </p>
         ) : (
-          <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>
-            מינימום {formatCurrency(minBid)} · המקסימום שלך {formatCurrency(Math.max(myMaxBid, 0))}
-          </p>
+          <>
+            <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>
+              מינימום {formatCurrency(minBid)} · המקסימום שלך {formatCurrency(Math.max(myMaxBid, 0))}
+            </p>
+            {/* Stated rather than inferred from the clock: without it a manager
+                sees the countdown jump after someone bids and cannot tell why. */}
+            <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+              הצעה מאוחרת דוחה את הסגירה — נשארו פחות מ-{extendShortMinutes} דק&apos; ← {extendShortMinutes} דק&apos;,
+              פחות מ-{extendLongMinutes} ← {extendLongMinutes} דק&apos;.
+            </p>
+          </>
         )
       )}
 
