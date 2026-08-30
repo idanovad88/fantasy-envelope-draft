@@ -150,13 +150,25 @@ function OpenAuctionCard({
   frozenReason: 'paused' | 'night' | null
 }) {
   const minBid = auction.currentPrice + 1
-  // What the manager typed, or null while they have not touched the field.
+  // The raw text in the field, or null while the manager has not touched it.
+  // It stays a string on purpose: coercing every keystroke to a number and
+  // clamping it to minBid meant the field could never be empty and never hold
+  // a prefix on the way to a bigger figure — clearing it snapped straight back
+  // to the minimum, so the only ways to change it were to select the amount
+  // first or to type past it and delete the extra digits.
+  const [typed, setTyped] = useState<string | null>(null)
   // The card keeps its state across the live refresh that follows someone
-  // else's bid, so a raw `useState(minBid)` would leave a stale amount sitting
-  // below the new minimum. Clamping up here means the input always tracks the
-  // price as it moves, while a higher figure they typed is preserved.
-  const [typed, setTyped] = useState<number | null>(null)
-  const amount = typed !== null && typed >= minBid ? typed : minBid
+  // else's bid, so a figure typed against the old price would sit below the new
+  // minimum. When the floor moves, drop what was typed unless it still clears
+  // it — a higher figure they had already entered is preserved. Adjusting state
+  // during render rather than in an effect: React re-runs the component before
+  // committing, so the stale amount is never painted.
+  const [floor, setFloor] = useState(minBid)
+  if (floor !== minBid) {
+    setFloor(minBid)
+    if (typed !== null && !(Number(typed) >= minBid)) setTyped(null)
+  }
+  const amount = typed === null ? minBid : Number(typed)
   const [busy, setBusy] = useState<'bid' | 'pass' | null>(null)
   const [error, setError] = useState('')
   const router = useRouter()
@@ -280,8 +292,8 @@ function OpenAuctionCard({
             className="input font-bold text-center flex-1 min-w-[6rem]"
             min={minBid}
             max={Math.max(myMaxBid, minBid)}
-            value={amount}
-            onChange={e => setTyped(Number(e.target.value))}
+            value={typed ?? String(minBid)}
+            onChange={e => setTyped(e.target.value)}
             disabled={!!busy || cannotAfford}
             dir="ltr"
           />

@@ -41,7 +41,10 @@ export default function BidForm({ auctionId, team, league, existingBid, revealTi
   // mandatory auto-bid. Everyone else pays at least $2. Enforced in the DB too
   // (trg_enforce_min_bid), since bids are upserted straight from the browser.
   const minBid = isNominator ? 1 : 2
-  const [amount, setAmount] = useState(existingBid ?? minBid)
+  // Raw text, not a number: coercing each keystroke turned a cleared field into
+  // a stubborn "0" that the manager had to type around.
+  const [amount, setAmount] = useState(String(existingBid ?? minBid))
+  const bid = Number(amount)
   const [loading, setLoading] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [message, setMessage] = useState('')
@@ -62,11 +65,11 @@ export default function BidForm({ auctionId, team, league, existingBid, revealTi
     setLoading(true)
     setMessage('')
 
-    if (amount < minBid) { setMessage(`מינימום $${minBid}`); setLoading(false); return }
-    if (amount > maxBid) { setMessage(`הצעה מקסימלית: $${maxBid}`); setLoading(false); return }
+    if (!Number.isInteger(bid) || bid < minBid) { setMessage(`מינימום $${minBid}`); setLoading(false); return }
+    if (bid > maxBid) { setMessage(`הצעה מקסימלית: $${maxBid}`); setLoading(false); return }
 
     const { error } = await supabase.from('bids').upsert(
-      { auction_id: auctionId, team_id: team.id, amount, updated_at: new Date().toISOString() },
+      { auction_id: auctionId, team_id: team.id, amount: bid, updated_at: new Date().toISOString() },
       { onConflict: 'auction_id,team_id' }
     )
 
@@ -96,7 +99,7 @@ export default function BidForm({ auctionId, team, league, existingBid, revealTi
       setMessage('שגיאה: ' + (data?.error ?? 'לא ניתן לבטל את ההצעה'))
     } else {
       setMessage('ההצעה בוטלה')
-      setAmount(minBid)
+      setAmount(String(minBid))
       router.refresh()
     }
     setCancelling(false)
@@ -162,7 +165,7 @@ export default function BidForm({ auctionId, team, league, existingBid, revealTi
           min={minBid}
           max={maxBid}
           value={amount}
-          onChange={e => setAmount(Number(e.target.value))}
+          onChange={e => setAmount(e.target.value)}
           disabled={expired || cannotAfford}
           dir="ltr"
         />
