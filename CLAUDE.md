@@ -275,8 +275,8 @@ A team blocked only by its own commitments therefore sits in the auction unable 
 3. `supabase/migration_open_auction_grants_fix.sql` — the `anon`/`authenticated` revoke above. Folded into #1 as well, so a fresh install needs only #1 and #2; this file exists for the database where #1 already ran with the incomplete revoke. Applied 2026-08-29.
 4. `supabase/migration_open_auction_settle_fix.sql` — `open_team_hard_max_bid()` plus the narrowed auto-PASS above. Also folded into #1. Applied 2026-08-29.
 5. `supabase/migration_open_auction_soft_close.sql` — `open_extend_short_minutes` / `open_extend_long_minutes` plus the graduated close in `open_place_bid()`. Also folded into #1. Applied 2026-08-30.
-6. `supabase/migration_open_auction_undo.sql` — `open_undo_auction()` plus its EXECUTE revoke. Also folded into #1.
-7. `supabase/migration_open_nominate_opening_bid.sql` — the nominator-chosen opening bid: drops the 3-arg `open_nominate` and creates the 4-arg one. Also folded into #1.
+6. `supabase/migration_open_auction_undo.sql` — `open_undo_auction()` plus its EXECUTE revoke. Also folded into #1. Applied 2026-09-01.
+7. `supabase/migration_open_nominate_opening_bid.sql` — the nominator-chosen opening bid: drops the 3-arg `open_nominate` and creates the 4-arg one. Also folded into #1. Applied 2026-09-01.
 
 ### Trade system (snake only)
 
@@ -621,4 +621,4 @@ After creation the creator is upserted into `admin_users` with the new `league_i
 ### New components (snake draft)
 
 - `components/SnakeDraftBoard.tsx` — rounds × teams grid showing pick assignments, current pick highlighted, round direction arrows (→/←)
-- `components/PlayerPicker.tsx` — searchable player table with an action button per row. Shared by snake ("בחר" → `POST /api/snake-pick`) and the open board ("העלה" → `POST /api/open/nominate`); both post the same `{ league_id, player_id, team_id? }` body, so `endpoint`/`actionLabel` are the only difference. Was `SnakePlayerPicker`.
+- `components/PlayerPicker.tsx` — searchable player table with an action button per row. Shared by snake ("בחר" → `POST /api/snake-pick`) and the open board ("העלה" → `POST /api/open/nominate`), which post the same `{ league_id, player_id, team_id? }` body. Snake sends on the first press; the open board sets `askOpeningBid`, which makes that press open an amount input under the player's row and adds `opening_bid` to the body (see **The opening bid is the nominator's to choose** above). Was `SnakePlayerPicker`.
