@@ -401,11 +401,23 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION open_nominate(p_league_id UUID, p_player_id UUID, p_team_id UUID)
+-- ⚠️ The 3-argument version must be DROPPED, not replaced. A defaulted 4th
+-- argument creates a NEW function rather than replacing the old one, and a
+-- 3-argument call would then match both and fail as ambiguous.
+
+DROP FUNCTION IF EXISTS open_nominate(UUID, UUID, UUID);
+
+CREATE OR REPLACE FUNCTION open_nominate(
+  p_league_id UUID,
+  p_player_id UUID,
+  p_team_id UUID,
+  p_opening_bid INTEGER DEFAULT 1
+)
 RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
   v_league RECORD; v_open INTEGER; v_rank INTEGER;
   v_eligible_ahead INTEGER; v_auction_id UUID; v_player_status TEXT;
+  v_max INTEGER;
 BEGIN
   SELECT * INTO v_league FROM leagues WHERE id = p_league_id FOR UPDATE;
   IF NOT FOUND OR v_league.draft_type <> 'open' THEN
@@ -413,6 +425,10 @@ BEGIN
   END IF;
   IF NOT open_is_running(p_league_id) THEN
     RAISE EXCEPTION 'הדראפט אינו פעיל כרגע — מושהה או מחוץ לשעות הפעילות';
+  END IF;
+
+  IF p_opening_bid IS NULL OR p_opening_bid < 1 THEN
+    RAISE EXCEPTION 'הצעת הפתיחה חייבת להיות לפחות $1';
   END IF;
 
   SELECT COUNT(*) INTO v_open
@@ -430,10 +446,16 @@ BEGIN
   FROM teams WHERE id = p_team_id AND league_id = p_league_id AND approved;
   IF v_rank IS NULL THEN RAISE EXCEPTION 'הקבוצה אינה בסדר ההעלאות של הליגה'; END IF;
 
-  -- Nominating forces a $1 bid, so a team that cannot cover it must not be
-  -- handed a turn. open_team_max_bid() already returns 0 for a full roster.
-  IF open_team_max_bid(p_team_id) < 1 THEN
+  -- Two separate gates, and they answer different questions. The first is
+  -- eligibility — may this team take a turn at all — and stays keyed to $1
+  -- so it matches canNominateNow in getOpenNominationOrder() exactly. The
+  -- second is about the number that was actually typed.
+  v_max := open_team_max_bid(p_team_id);
+  IF v_max < 1 THEN
     RAISE EXCEPTION 'לקבוצה אין תקציב או משבצת פנויה להעלאת שחקן';
+  END IF;
+  IF p_opening_bid > v_max THEN
+    RAISE EXCEPTION 'הצעת הפתיחה חורגת מהתקציב הפנוי של הקבוצה — מקסימום $%', v_max;
   END IF;
 
   -- Turn check. With K = board_size − open auctions, the first K eligible teams
@@ -455,12 +477,15 @@ BEGIN
   INSERT INTO open_auctions
     (league_id, player_id, nominating_team_id, current_price, leader_team_id, deadline_at)
   VALUES
-    (p_league_id, p_player_id, p_team_id, 1, p_team_id,
+    (p_league_id, p_player_id, p_team_id, p_opening_bid, p_team_id,
      NOW() + make_interval(mins => v_league.open_pass_timeout_minutes))
   RETURNING id INTO v_auction_id;
 
+  -- is_auto stays TRUE whatever the amount: it marks the bid that came with the
+  -- nomination rather than one placed against a standing price, and the board
+  -- renders it as "הצעת פתיחה" — which is what this is at any number.
   INSERT INTO open_bids (open_auction_id, team_id, amount, is_auto)
-  VALUES (v_auction_id, p_team_id, 1, TRUE);
+  VALUES (v_auction_id, p_team_id, p_opening_bid, TRUE);
 
   UPDATE players SET status = 'on_auction' WHERE id = p_player_id;
 
@@ -469,6 +494,8 @@ BEGIN
   -- would make the order depend on which one happened to end first.
   PERFORM demote_nomination_rank(p_team_id, p_league_id);
 
+  -- A high opening bid can auto-PASS teams that cannot reach opening + 1, which
+  -- is the point: it is exactly what a bid at that price would have done.
   PERFORM open_settle_auction(v_auction_id);
   RETURN v_auction_id;
 END;
@@ -751,6 +778,76 @@ BEGIN
 END;
 $$;
 
+
+-- Undo a CLOSED auction: the player returns to the pool and the money returns
+-- to the winner. open_cancel_auction() above only handles an auction that is
+-- still open; without this a mistaken close was permanent.
+--
+-- The refund is refresh_team_stats(), which recomputes budget and player_count
+-- from the team's drafted players — so clearing drafted_by_team_id/draft_price
+-- first IS the refund, and it cannot drift from a hand-written `+ price`.
+CREATE OR REPLACE FUNCTION open_undo_auction(p_auction_id UUID)
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_league_id UUID; v_player_id UUID; v_winner UUID; v_status TEXT;
+  v_holder UUID;
+  v_approved INTEGER; v_complete INTEGER;
+BEGIN
+  SELECT league_id, player_id, winning_team_id, status
+  INTO v_league_id, v_player_id, v_winner, v_status
+  FROM open_auctions WHERE id = p_auction_id FOR UPDATE;
+
+  IF NOT FOUND THEN RAISE EXCEPTION 'המכרז לא נמצא'; END IF;
+  IF v_status = 'cancelled' THEN RAISE EXCEPTION 'המכרז כבר בוטל'; END IF;
+  IF v_status <> 'completed' THEN
+    RAISE EXCEPTION 'המכרז עדיין פתוח — השתמש בביטול מכרז פתוח';
+  END IF;
+
+  -- Who actually holds the player now. Normally the winner; read separately so
+  -- a row that drifted still has both teams' budgets recomputed.
+  SELECT drafted_by_team_id INTO v_holder FROM players WHERE id = v_player_id;
+
+  UPDATE players SET
+    status = 'available',
+    drafted_by_team_id = NULL,
+    draft_price = NULL,
+    roster_slot = NULL
+  WHERE id = v_player_id;
+
+  DELETE FROM open_bids   WHERE open_auction_id = p_auction_id;
+  DELETE FROM open_passes WHERE open_auction_id = p_auction_id;
+
+  UPDATE open_auctions SET
+    status = 'cancelled',
+    closed_reason = 'cancelled',
+    leader_team_id = NULL,
+    winning_team_id = NULL,
+    winning_bid = NULL,
+    updated_at = NOW()
+  WHERE id = p_auction_id;
+
+  IF v_winner IS NOT NULL THEN PERFORM refresh_team_stats(v_winner); END IF;
+  IF v_holder IS NOT NULL AND v_holder IS DISTINCT FROM v_winner THEN
+    PERFORM refresh_team_stats(v_holder);
+  END IF;
+
+  -- The nomination turn is NOT given back: demote_nomination_rank() runs at
+  -- nomination time in this format, so every other team has since moved up
+  -- around the nominator and its old rank now belongs to someone else.
+
+  -- open_close_auction() may have marked the league finished on this very
+  -- auction. A roster just got a slot back, so undo that too.
+  SELECT COUNT(*) FILTER (WHERE approved),
+         COUNT(*) FILTER (WHERE approved AND is_complete)
+  INTO v_approved, v_complete
+  FROM teams WHERE league_id = v_league_id;
+
+  IF v_complete < v_approved THEN
+    UPDATE leagues SET status = 'active', updated_at = NOW()
+    WHERE id = v_league_id AND status = 'completed';
+  END IF;
+END;
+$$;
 -- ============================================================================
 -- 7. EXECUTE GRANTS
 -- ============================================================================
@@ -765,22 +862,24 @@ $$;
 -- ALTER DEFAULT PRIVILEGES that grants it), so dropping the PUBLIC grant left
 -- both roles able to run all of these. They must be named explicitly.
 
-REVOKE ALL ON FUNCTION open_nominate(UUID, UUID, UUID)      FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION open_nominate(UUID, UUID, UUID, INTEGER) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION open_place_bid(UUID, UUID, INTEGER)  FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION open_pass(UUID, UUID, TEXT)          FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION open_close_auction(UUID, TEXT)       FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION open_settle_auction(UUID)            FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION open_cancel_auction(UUID)            FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION open_undo_auction(UUID)              FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION open_set_pause(UUID, BOOLEAN)        FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION open_draft_tick(UUID)                FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION open_draft_tick_all()                FROM PUBLIC, anon, authenticated;
 
-GRANT EXECUTE ON FUNCTION open_nominate(UUID, UUID, UUID)      TO service_role;
+GRANT EXECUTE ON FUNCTION open_nominate(UUID, UUID, UUID, INTEGER) TO service_role;
 GRANT EXECUTE ON FUNCTION open_place_bid(UUID, UUID, INTEGER)  TO service_role;
 GRANT EXECUTE ON FUNCTION open_pass(UUID, UUID, TEXT)          TO service_role;
 GRANT EXECUTE ON FUNCTION open_close_auction(UUID, TEXT)       TO service_role;
 GRANT EXECUTE ON FUNCTION open_settle_auction(UUID)            TO service_role;
 GRANT EXECUTE ON FUNCTION open_cancel_auction(UUID)            TO service_role;
+GRANT EXECUTE ON FUNCTION open_undo_auction(UUID)              TO service_role;
 GRANT EXECUTE ON FUNCTION open_set_pause(UUID, BOOLEAN)        TO service_role;
 GRANT EXECUTE ON FUNCTION open_draft_tick(UUID)                TO service_role;
 GRANT EXECUTE ON FUNCTION open_draft_tick_all()                TO service_role;

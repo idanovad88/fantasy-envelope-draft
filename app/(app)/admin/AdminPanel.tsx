@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { formatDateTime, formatTime, getSnakeTeamForPick, isSnakeRoundReversed, getEnvelopeNominationOrder, getOpenNominationOrder } from '@/lib/utils'
+import { formatDateTime, formatTime, getSnakeTeamForPick, isSnakeRoundReversed, getEnvelopeNominationOrder, getOpenNominationOrder, getOpenMaxBid } from '@/lib/utils'
 import type { League, Team, Auction, SnakePick, TradeStatus, RevealMode } from '@/types'
 import LeagueLogo from '@/components/LeagueLogo'
 import { downscaleImage } from '@/lib/image'
@@ -219,6 +219,8 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   const [draftEndHour, setDraftEndHour] = useState(league?.draft_end_hour ?? 22)
   const [openNominateTeamId, setOpenNominateTeamId] = useState('')
   const [openNominatePlayerId, setOpenNominatePlayerId] = useState('')
+  // String, so the field can be emptied while typing rather than snapping to 1.
+  const [openNominateBid, setOpenNominateBid] = useState('1')
   const [openPassTeamByAuction, setOpenPassTeamByAuction] = useState<Record<string, string>>({})
   const SLOT_TYPES = ['PG', 'SG', 'G', 'SF', 'PF', 'F', 'C', 'UTIL', 'BENCH'] as const
   const [rosterSlots, setRosterSlots] = useState<Record<string, number>>(
@@ -1563,6 +1565,24 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
         )
         const eligible = order.filter(o => o.canNominateNow)
         const availablePlayers = players.filter(p => p.status === 'available')
+        // Opening-bid ceiling for whichever team is selected, display only —
+        // open_nominate() re-derives it and rejects anything over.
+        const nominatingTeam = teams.find(t => t.id === openNominateTeamId)
+        const nominatingLeading = nominatingTeam
+          ? leadingByTeam.get(nominatingTeam.id) ?? { sum: 0, count: 0 }
+          : { sum: 0, count: 0 }
+        const maxOpening = nominatingTeam
+          ? getOpenMaxBid(
+              nominatingTeam.budget_remaining,
+              nominatingTeam.player_count,
+              league.players_per_team,
+              nominatingLeading.sum,
+              nominatingLeading.count
+            )
+          : 0
+        const openingBidNum = Number(openNominateBid)
+        const openingBidValid =
+          Number.isInteger(openingBidNum) && openingBidNum >= 1 && openingBidNum <= maxOpening
         const teamName = (id: string) => teams.find(t => t.id === id)?.name ?? '—'
 
         return (
@@ -1678,7 +1698,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
             <div className="card">
               <h2 className="font-bold mb-1">העלה שחקן בשם קבוצה</h2>
               <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
-                רק קבוצות שתורן להעלות כרגע מופיעות ברשימה. ההעלאה מזכה אותן בהצעת פתיחה של $1 ומעבירה אותן לתחתית סדר ההעלאות.
+                רק קבוצות שתורן להעלות כרגע מופיעות ברשימה. ההעלאה מזכה אותן בהצעת הפתיחה שתבחר ומעבירה אותן לתחתית סדר ההעלאות.
               </p>
               {openAuctions.length >= league.open_board_size ? (
                 <p className="text-sm" style={{ color: 'var(--muted)' }}>הלוח מלא — אין מקום לשחקן נוסף</p>
@@ -1710,12 +1730,32 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                       </option>
                     ))}
                   </select>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <label className="text-sm whitespace-nowrap" style={{ color: 'var(--muted)' }}>
+                      הצעת פתיחה $
+                    </label>
+                    <input
+                      className="input"
+                      style={{ width: 90, padding: '4px 8px' }}
+                      type="number"
+                      min={1}
+                      max={maxOpening}
+                      value={openNominateBid}
+                      onChange={e => setOpenNominateBid(e.target.value)}
+                      dir="ltr"
+                    />
+                    {openNominateTeamId && (
+                      <span className="text-xs" style={{ color: 'var(--muted)' }}>
+                        מקסימום ${Math.max(maxOpening, 0)}
+                      </span>
+                    )}
+                  </div>
                   <button
                     className="btn btn-primary"
-                    disabled={!!loading || !openNominateTeamId || !openNominatePlayerId}
+                    disabled={!!loading || !openNominateTeamId || !openNominatePlayerId || !openingBidValid}
                     onClick={() => openBoardAction(
                       '/api/open/nominate',
-                      { league_id: league.id, player_id: openNominatePlayerId, team_id: openNominateTeamId },
+                      { league_id: league.id, player_id: openNominatePlayerId, team_id: openNominateTeamId, opening_bid: openingBidNum },
                       'open_nominate'
                     )}
                   >
@@ -1727,7 +1767,10 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
 
             {/* History */}
             <div className="card">
-              <h2 className="font-bold mb-3">היסטוריה ({openHistory.length})</h2>
+              <h2 className="font-bold mb-1">היסטוריה ({openHistory.length})</h2>
+              <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
+                ביטול מכרז שנסגר מחזיר את השחקן לבריכה ואת הכסף לזוכה. סדר ההעלאות לא משתנה — צריך להעלות אותו שוב ידנית.
+              </p>
               {openHistory.length === 0 ? (
                 <p className="text-sm" style={{ color: 'var(--muted)' }}>עדיין לא נסגרו מכרזים</p>
               ) : (
@@ -1741,7 +1784,22 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                         </p>
                       </div>
                       {h.status === 'completed' && (
-                        <span className="font-bold" style={{ color: 'var(--success)' }}>${h.winning_bid ?? 0}</span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="font-bold" style={{ color: 'var(--success)' }}>${h.winning_bid ?? 0}</span>
+                          <button
+                            className="btn btn-danger"
+                            style={{ fontSize: '0.7rem', padding: '3px 8px' }}
+                            disabled={!!loading}
+                            onClick={() => openBoardAction(
+                              '/api/admin/open/undo-auction',
+                              { auction_id: h.id },
+                              'open_undo_' + h.id,
+                              `לבטל את סגירת המכרז על ${h.player?.name}? ${h.winning_team?.name ?? '—'} יקבל בחזרה $${h.winning_bid ?? 0} והשחקן יחזור לבריכה.`
+                            )}
+                          >
+                            {loading === 'open_undo_' + h.id ? '...' : 'בטל'}
+                          </button>
+                        </div>
                       )}
                     </div>
                   ))}

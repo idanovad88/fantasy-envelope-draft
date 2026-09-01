@@ -221,7 +221,7 @@ getMaxBid(budget_remaining − sumLeading, player_count + leadingCount, players_
 
 where `sumLeading`/`leadingCount` cover only the auctions the team **currently leads** — being outbid frees the money at once, because a losing bid can never become a purchase. `budget_remaining` already excludes players actually won, so nothing is double-counted. A team also cannot lead more auctions than it has free roster slots. Authoritative copy: `open_team_max_bid()`; `getOpenMaxBid()` in `lib/utils.ts` is display-only and the DB rejects it if they disagree.
 
-**Turn order.** `priority_rank`, and `demote_nomination_rank()` runs **at nomination time, not at close** — several auctions run at once and finish out of order, so rotating on close would make the order depend on which happened to end first. With `K = open_board_size − openCount`, the first `K` eligible teams may nominate now (`getOpenNominationOrder()`, and the same test in `open_nominate()`). The nominator is forced into a $1 opening bid and becomes the first leader. **`tiebreak_rank` is unused** — an ascending auction cannot tie, so the admin lottery tab shows only the nomination order.
+**Turn order.** `priority_rank`, and `demote_nomination_rank()` runs **at nomination time, not at close** — several auctions run at once and finish out of order, so rotating on close would make the order depend on which happened to end first. With `K = open_board_size − openCount`, the first `K` eligible teams may nominate now (`getOpenNominationOrder()`, and the same test in `open_nominate()`). The nominator places an opening bid and becomes the first leader (see **The opening bid** below). **`tiebreak_rank` is unused** — an ascending auction cannot tie, so the admin lottery tab shows only the nomination order.
 
 **The clock.** One deadline per auction, reset by every new bid (`open_pass_timeout_minutes`, default 120). Stopping it — admin PAUSE, or being outside `draft_start_hour`–`draft_end_hour` (Israel time; these two columns existed unused on `leagues` from the original schema) — stamps `leagues.open_frozen_since`; resuming shifts every open deadline forward by the elapsed gap, so nobody loses part of their window. `open_set_pause()` stamps in the same transaction as the status flip rather than leaving it to the tick, which would leak up to a minute onto every auction. At the night boundary the tick stamps **the boundary itself**, not `now()`, for the same reason.
 
@@ -235,17 +235,33 @@ where `sumLeading`/`leadingCount` cover only the auctions the team **currently l
 
 **The deadline can never move earlier**, and that follows from the rule rather than from a guard: only a window greater than the remaining time is ever chosen, so `NOW() + W` is always past the deadline it replaces. No `GREATEST` needed.
 
-`open_pass_timeout_minutes` is **not** an extension — it is the opening window a newly nominated player gets, set in `open_nominate()`. The nominator's automatic $1 bid therefore never moves anything: 120 minutes remain at that instant, more than either window.
+`open_pass_timeout_minutes` is **not** an extension — it is the opening window a newly nominated player gets, set in `open_nominate()`. The nominator's opening bid therefore never moves anything, whatever its size: 120 minutes remain at that instant, more than either window.
 
 This replaced a full reset to `NOW() + open_pass_timeout_minutes` on every bid. That was even harder to snipe, but each late bid bought another two hours, so a contested auction could run for days. Setting both windows equal to `open_pass_timeout_minutes` restores exactly that old behaviour, which is the documented way to switch the ladder off.
 
 ⚠️ This format sends no push notifications, so a short window means a manager has to be watching. That is why the two numbers are league settings rather than constants — see `migration_open_auction_soft_close.sql`.
+
+**The opening bid is the nominator's to choose.** `open_nominate(league, player, team, opening_bid DEFAULT 1)` — putting a player up at $1 and waiting to be outbid was the only way to say what he was worth, so the nominator now names the price the auction starts at. The bid is inserted with `is_auto = TRUE` whatever the amount: that flag marks the bid that came *with the nomination* rather than one placed against a standing price, and the board renders it as "הצעת פתיחה", which it is at any number.
+
+Two separate gates, and they answer different questions. `open_team_max_bid(team) < 1` is **eligibility** — may this team take a turn at all — and stays keyed to $1 so it matches `canNominateNow` in `getOpenNominationOrder()` exactly; widening it to the typed amount would silently drop a team out of the nomination order for asking too much. The typed amount is then checked against that same ceiling on its own, with its own message. UI ceilings (`getOpenMaxBid()` on the players page and in the admin nominate form) are display only.
+
+On the players page the amount is a **second step**, not a field above the list: pressing "העלה" on a row opens the input under *that* row and the row's button turns into "סגור" — a single input in the card header read as part of the search bar and was missed entirely. `PlayerPicker` keeps its one-press behaviour for snake, where `askOpeningBid` is off.
+
+A high opening can auto-PASS teams that cannot reach `opening + 1` the moment the player goes up — that is not a new rule, it is exactly what `open_settle_auction()` would have done had the same number arrived as a bid a second later.
+
+⚠️ **The 3-argument `open_nominate` had to be DROPPED, not replaced.** A defaulted 4th argument creates a *new* function, leaving the old one in place, and a 3-argument call then matches both and fails as ambiguous. The default itself is what keeps a deploy ordering-safe in the other direction: a client that still sends three arguments gets $1, the old behaviour.
 
 **Auto-PASS is for teams that are out for good, never for teams that are merely committed.** After every bid and pass, `open_settle_auction()` writes a pass row for a non-leader that is `is_complete`, or whose `open_team_hard_max_bid()` — the ceiling with *every* auction it leads treated as lost — cannot reach `current_price + 1`. Everything else is left in the auction.
 
 ⚠️ The first version tested this with `open_team_max_bid()`, which deducts money tied up in auctions the team currently leads. That turned a rival's temporary commitment into a permanent elimination, and it was timeable: wait until a rival is leading something expensive, jump the price here, and they are auto-passed for good even though the money frees the moment they are outbid over there — closing the auction to you instantly, with no timer and no chance to respond. `roster_full` had the identical flaw (`open_team_open_slots()` counts a merely committed slot as taken) and is now unreachable, since a team that is not `is_complete` always has a real slot free. The enum value stays in the CHECK for older rows.
 
 A team blocked only by its own commitments therefore sits in the auction unable to bid; `OpenAuctionBoard` says so ("הכסף שלך תפוס במכרזים שאתה מוביל בהם") instead of a flat "no budget", and being outbid elsewhere puts it straight back in. Termination is unaffected — the auction runs to its deadline and `open_draft_tick()` closes it with `timeout` passes, which is exactly what the timer is for. The cost is that more auctions end on the clock and fewer on "everyone passed".
+
+**Two different admin cancels, and they are not interchangeable.** `open_cancel_auction()` pulls a player who is still **on the board** (bids and passes deleted, player back to the pool — the only way to undo a mistaken PASS, since PASS is final). `open_undo_auction()` reverses an auction that already **closed**: player back to the pool, and the winning bid back to the winner. It refuses anything that is not `completed`, and the open one refuses anything that is not `open`, so neither can be used for the other's case. Routes: `/api/admin/open/cancel-auction` and `/api/admin/open/undo-auction`; the undo button sits on each completed row of the admin board's history list.
+
+**The refund is `refresh_team_stats()`, never arithmetic on `budget_remaining`.** That function recomputes budget and `player_count` from the team's drafted players, so clearing the player's `drafted_by_team_id` / `draft_price` / `roster_slot` *is* the refund — a hand-written `budget_remaining + price` would drift the moment anything else touched the row. Clearing `player_count` also clears `is_complete`, which is why the undo re-checks the league: `open_close_auction()` may have marked the league `completed` on this very auction, and a roster that just got a slot back means it is `active` again.
+
+**Undo does not give the nomination turn back.** `demote_nomination_rank()` runs at *nomination* time in this format, so by the time an auction closes every other team has moved up around the nominator and its old rank belongs to someone else. Both cancels leave `priority_rank` alone; re-nominating is a separate admin step, and the history card says so.
 
 **Realtime:** only `open_auctions` is published. `open_bids`/`open_passes` have no `league_id` and so could not be filtered per league; instead `open_pass()` bumps `open_auctions.updated_at`, so one filtered subscription in `RealtimeRefresher` covers nominations (INSERT), bids, passes and closes (UPDATE).
 
@@ -259,6 +275,8 @@ A team blocked only by its own commitments therefore sits in the auction unable 
 3. `supabase/migration_open_auction_grants_fix.sql` — the `anon`/`authenticated` revoke above. Folded into #1 as well, so a fresh install needs only #1 and #2; this file exists for the database where #1 already ran with the incomplete revoke. Applied 2026-08-29.
 4. `supabase/migration_open_auction_settle_fix.sql` — `open_team_hard_max_bid()` plus the narrowed auto-PASS above. Also folded into #1. Applied 2026-08-29.
 5. `supabase/migration_open_auction_soft_close.sql` — `open_extend_short_minutes` / `open_extend_long_minutes` plus the graduated close in `open_place_bid()`. Also folded into #1. Applied 2026-08-30.
+6. `supabase/migration_open_auction_undo.sql` — `open_undo_auction()` plus its EXECUTE revoke. Also folded into #1.
+7. `supabase/migration_open_nominate_opening_bid.sql` — the nominator-chosen opening bid: drops the 3-arg `open_nominate` and creates the 4-arg one. Also folded into #1.
 
 ### Trade system (snake only)
 

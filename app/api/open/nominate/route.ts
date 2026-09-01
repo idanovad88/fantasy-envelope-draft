@@ -5,10 +5,14 @@ import { resolveOpenActor } from '@/lib/openAuth'
 
 // Put a player on the open board.
 //
-// Every rule — board full, player available, whose turn it is, can the team
-// cover the $1 auto-bid — is enforced by `open_nominate()` in Postgres, which
-// also inserts the opening bid, flips the player to `on_auction` and rotates
-// the nomination order. This route only decides which team is acting.
+// Every rule — board full, player available, whose turn it is, whether the team
+// can cover the opening bid it named — is enforced by `open_nominate()` in
+// Postgres, which also inserts that opening bid, flips the player to
+// `on_auction` and rotates the nomination order. This route only decides which
+// team is acting.
+//
+// `opening_bid` is optional and defaults to $1, the old fixed floor, so a
+// client that omits it behaves exactly as before.
 export async function POST(req: Request) {
   const supabase = await createClient()
   const user = await getAuthUser(supabase)
@@ -20,6 +24,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'חסרים פרטים' }, { status: 400 })
   }
 
+  // Shape only. Whether the team can actually afford it is open_nominate()'s
+  // call, which has the other auctions this team leads in front of it.
+  const openingBid = body?.opening_bid === undefined ? 1 : Number(body.opening_bid)
+  if (!Number.isInteger(openingBid) || openingBid < 1) {
+    return NextResponse.json({ error: 'הצעת הפתיחה אינה תקינה' }, { status: 400 })
+  }
+
   const actor = await resolveOpenActor(user.id, leagueId, requestedTeamId)
   if (!actor.ok) return NextResponse.json({ error: actor.error }, { status: actor.status })
 
@@ -28,6 +39,7 @@ export async function POST(req: Request) {
     p_league_id: leagueId,
     p_player_id: playerId,
     p_team_id: actor.teamId,
+    p_opening_bid: openingBid,
   })
 
   // The function's RAISE EXCEPTION messages are already the Hebrew text we want

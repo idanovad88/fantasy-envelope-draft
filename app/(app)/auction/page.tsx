@@ -402,7 +402,7 @@ async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team 
                     {/* Everyone passing is how an auction is *supposed* to end, so
                         it goes unlabelled — only the two exceptions are named. */}
                     {h.status === 'cancelled'
-                      ? 'בוטל — השחקן חזר לבריכה'
+                      ? 'בוטל'
                       : [
                           h.winning_team?.name ?? '—',
                           h.closed_reason === 'timeout'

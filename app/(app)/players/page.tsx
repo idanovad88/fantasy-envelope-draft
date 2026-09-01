@@ -12,6 +12,7 @@ import {
   getCurrentSnakePicker,
   buildPickOverridesMap,
   getOpenNominationOrder,
+  getOpenMaxBid,
   isWithinDraftHours,
 } from '@/lib/utils'
 import { myTeamOr } from '@/lib/team'
@@ -402,6 +403,22 @@ async function OpenDraftPlayersPage({
 
   const upNext = order.filter(o => o.canNominateNow)
 
+  // Ceiling for the opening bid, display only — open_nominate() re-derives it.
+  // Same shape as a normal bid: this team is not leading the auction it is
+  // about to create, so nothing here is double-counted.
+  const myLeading = myTeam
+    ? leadingByTeam.get(myTeam.id) ?? { sum: 0, count: 0 }
+    : { sum: 0, count: 0 }
+  const myMaxOpening = myTeam
+    ? getOpenMaxBid(
+        myTeam.budget_remaining,
+        myTeam.player_count,
+        league.players_per_team,
+        myLeading.sum,
+        myLeading.count
+      )
+    : 0
+
   return (
     <div className="max-w-4xl mx-auto">
       <RealtimeRefresher leagueId={league.id} openBoard />
@@ -460,6 +477,8 @@ async function OpenDraftPlayersPage({
         canPick={canNominate}
         endpoint="/api/open/nominate"
         actionLabel="העלה"
+        askOpeningBid
+        maxOpeningBid={myMaxOpening}
       />
 
       {drafted.length > 0 && (
