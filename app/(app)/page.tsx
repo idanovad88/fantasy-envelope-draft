@@ -285,8 +285,10 @@ export default async function DashboardPage() {
     await settleOpenDraft(selectedLeagueId)
 
     const [{ data: teams }, { data: openRows }, { data: recentRows }] = await Promise.all([
+      // Every approved team, ranked or not — the summary table below lists
+      // them all, and getOpenNominationOrder() drops the unranked ones itself.
       supabase.from('teams').select('*').eq('league_id', selectedLeagueId).eq('approved', true)
-        .not('priority_rank', 'is', null).order('priority_rank', { ascending: true }),
+        .order('priority_rank', { ascending: true }),
       supabase.from('open_auctions')
         .select('id, current_price, leader_team_id, deadline_at, player:players(name), leader_team:teams!leader_team_id(name)')
         .eq('league_id', selectedLeagueId).eq('status', 'open')
@@ -336,6 +338,22 @@ export default async function DashboardPage() {
 
     const totalPicks = typedLeague.num_teams * typedLeague.players_per_team
     const draftedCount = typedTeams.reduce((s, t) => s + t.player_count, 0)
+
+    // Same summary table as the envelope dashboard, with the open-format
+    // ceiling: getOpenMaxBid() deducts the money committed to the auctions a
+    // team currently leads, so the number is what it may actually bid now.
+    const summaryRows = typedTeams
+      .map(t => {
+        const leading = leadingByTeam.get(t.id) ?? { sum: 0, count: 0 }
+        return {
+          team: t,
+          leading,
+          maxBid: getOpenMaxBid(
+            t.budget_remaining, t.player_count, typedLeague.players_per_team, leading.sum, leading.count
+          ),
+        }
+      })
+      .sort((a, b) => b.maxBid - a.maxBid || b.team.budget_remaining - a.team.budget_remaining)
 
     return (
       <div className="max-w-4xl mx-auto">
@@ -490,41 +508,104 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        {/* Nomination order. The turn rotates the moment a player goes up, so
-            the teams marked here are exactly the ones who may nominate now. */}
-        <div className="card mt-4">
-          <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
-            <h2 className="font-bold">סדר העלאות</h2>
-            {myTurn && <Link href="/players" className="btn btn-primary text-sm">העלה שחקן</Link>}
+        {/* Teams, budget and ceiling — the envelope dashboard's summary table,
+            side by side with the nomination order it explains. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          <div className="card">
+            <h2 className="font-bold mb-1">טבלה מסכמת</h2>
+            <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>תקציב, שחקנים והצעה מקסימלית לכל קבוצה</p>
+            {summaryRows.length === 0 ? (
+              <p className="text-sm" style={{ color: 'var(--muted)' }}>אין קבוצות עדיין</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr style={{ color: 'var(--muted)' }}>
+                      <th className="text-right font-normal text-xs pb-2">קבוצה</th>
+                      <th className="text-center font-normal text-xs pb-2">תקציב</th>
+                      <th className="text-center font-normal text-xs pb-2">שחקנים</th>
+                      <th className="text-center font-normal text-xs pb-2">מקס׳ הצעה</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summaryRows.map(({ team, maxBid, leading }) => {
+                      const isMe = team.id === typedMyTeam?.id
+                      return (
+                        <tr key={team.id}
+                          style={{
+                            background: isMe ? 'rgba(99,102,241,0.1)' : undefined,
+                            opacity: team.is_complete ? 0.6 : 1,
+                          }}>
+                          <td className="py-1.5 px-2 rounded-r-lg font-medium">
+                            {team.name}
+                            {isMe && <span className="badge badge-blue text-xs mr-1.5">אתה</span>}
+                          </td>
+                          <td className="py-1.5 px-2 text-center font-bold" style={{ color: 'var(--success)' }}>
+                            ${team.budget_remaining}
+                            {/* Money tied up in auctions this team leads: still in
+                                budget_remaining, but it cannot be bid again — this
+                                is the whole gap to the ceiling on the left. */}
+                            {leading.sum > 0 && (
+                              <span className="block text-xs font-normal" style={{ color: 'var(--warning)' }}>
+                                ${leading.sum} מחויב
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-1.5 px-2 text-center">
+                            {team.player_count}
+                            <span style={{ color: 'var(--muted)' }}>/{typedLeague.players_per_team}</span>
+                            {leading.count > 0 && (
+                              <span className="text-xs" style={{ color: 'var(--warning)' }}> +{leading.count}</span>
+                            )}
+                          </td>
+                          <td className="py-1.5 px-2 text-center font-bold rounded-l-lg">
+                            {maxBid > 0 ? `$${maxBid}` : '—'}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-          <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
-            {typedLeague.open_board_size - board.length > 0
-              ? `${typedLeague.open_board_size - board.length} מקומות פנויים על הלוח`
-              : 'הלוח מלא — ההעלאה הבאה תיפתח כשמכרז ייסגר'}
-          </p>
-          <div className="flex flex-col gap-2">
-            {order.map(({ team, canNominate, canNominateNow, position }) => {
-              return (
-                <div
-                  key={team.id}
-                  className="flex items-center gap-2 text-sm"
-                  style={{ opacity: canNominate ? 1 : 0.45 }}
-                >
-                  {/* The green number is the whole marker — no label, since the
-                      card's heading already says what the list is. Every team
-                      that may nominate right now is marked, not just the head of
-                      the queue: with several free board slots they all have a
-                      real turn, and marking one of them made the rest look
-                      blocked. */}
-                  <span className={`badge text-xs w-6 text-center flex-shrink-0 ${canNominateNow ? 'badge-green' : 'badge-gray'}`}>
-                    {position}
-                  </span>
-                  <span className={`flex-1 truncate ${canNominateNow ? 'font-bold' : 'font-medium'}`}>{team.name}</span>
-                  {team.is_complete && <span className="badge badge-gray text-xs">הושלם</span>}
-                  <span style={{ color: 'var(--muted)' }}>${team.budget_remaining}</span>
-                </div>
-              )
-            })}
+
+          {/* Nomination order. The turn rotates the moment a player goes up, so
+              the teams marked here are exactly the ones who may nominate now. */}
+          <div className="card">
+            <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
+              <h2 className="font-bold">סדר העלאות</h2>
+              {myTurn && <Link href="/players" className="btn btn-primary text-sm">העלה שחקן</Link>}
+            </div>
+            <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
+              {typedLeague.open_board_size - board.length > 0
+                ? `${typedLeague.open_board_size - board.length} מקומות פנויים על הלוח`
+                : 'הלוח מלא — ההעלאה הבאה תיפתח כשמכרז ייסגר'}
+            </p>
+            <div className="flex flex-col gap-2">
+              {order.map(({ team, canNominate, canNominateNow, position }) => {
+                return (
+                  <div
+                    key={team.id}
+                    className="flex items-center gap-2 text-sm"
+                    style={{ opacity: canNominate ? 1 : 0.45 }}
+                  >
+                    {/* The green number is the whole marker — no label, since the
+                        card's heading already says what the list is. Every team
+                        that may nominate right now is marked, not just the head of
+                        the queue: with several free board slots they all have a
+                        real turn, and marking one of them made the rest look
+                        blocked. */}
+                    <span className={`badge text-xs w-6 text-center flex-shrink-0 ${canNominateNow ? 'badge-green' : 'badge-gray'}`}>
+                      {position}
+                    </span>
+                    <span className={`flex-1 truncate ${canNominateNow ? 'font-bold' : 'font-medium'}`}>{team.name}</span>
+                    {team.is_complete && <span className="badge badge-gray text-xs">הושלם</span>}
+                    <span style={{ color: 'var(--muted)' }}>${team.budget_remaining}</span>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </div>
       </div>
