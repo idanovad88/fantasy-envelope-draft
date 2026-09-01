@@ -260,14 +260,14 @@ BEGIN
   -- Reserve $1 for every slot still open after this one.
   RETURN (v_budget - v_sum_leading) - (v_slots_left - 1);
 END;
-$;
+$$;
 
 -- The ceiling this team could reach if every auction it currently leads were
 -- lost. This is the test for "out for good", and it is the ONLY budget reason
 -- that may produce a permanent auto-PASS: money tied up in another open auction
 -- comes back the moment the team is outbid there, so it must not eliminate.
 CREATE OR REPLACE FUNCTION open_team_hard_max_bid(p_team_id UUID)
-RETURNS INTEGER LANGUAGE plpgsql STABLE AS $
+RETURNS INTEGER LANGUAGE plpgsql STABLE AS $$
 DECLARE v_budget INTEGER; v_count INTEGER; v_per_team INTEGER; v_slots INTEGER;
 BEGIN
   SELECT t.budget_remaining, t.player_count, l.players_per_team
@@ -284,7 +284,7 @@ BEGIN
 
   RETURN v_budget - (v_slots - 1);
 END;
-$;
+$$;
 
 -- ============================================================================
 -- 5. MUTATING FUNCTIONS
