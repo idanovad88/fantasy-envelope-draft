@@ -790,7 +790,7 @@ CREATE OR REPLACE FUNCTION open_undo_auction(p_auction_id UUID)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
   v_league_id UUID; v_player_id UUID; v_winner UUID; v_status TEXT;
-  v_holder UUID;
+  v_holder UUID; r RECORD;
   v_approved INTEGER; v_complete INTEGER;
 BEGIN
   SELECT league_id, player_id, winning_team_id, status
@@ -830,6 +830,30 @@ BEGIN
   IF v_holder IS NOT NULL AND v_holder IS DISTINCT FROM v_winner THEN
     PERFORM refresh_team_stats(v_holder);
   END IF;
+
+  -- Put the refunded team back into the auctions it was passed out of only
+  -- because of the roster slot and the money this undo just returned. Must run
+  -- AFTER refresh_team_stats, which is what makes the re-derivation below read
+  -- the restored state. IN (a, b) with a NULL b simply matches nothing extra.
+  FOR r IN
+    SELECT DISTINCT p.open_auction_id AS id
+    FROM open_passes p
+    JOIN open_auctions a ON a.id = p.open_auction_id
+    WHERE p.team_id IN (v_winner, v_holder)
+      AND p.reason IN ('complete', 'no_budget')
+      AND a.status = 'open'
+      AND a.league_id = v_league_id
+  LOOP
+    DELETE FROM open_passes
+    WHERE open_auction_id = r.id
+      AND team_id IN (v_winner, v_holder)
+      AND reason IN ('complete', 'no_budget');
+
+    -- Bump for realtime, then let settle write the row back if the team still
+    -- cannot reach the price.
+    UPDATE open_auctions SET updated_at = NOW() WHERE id = r.id;
+    PERFORM open_settle_auction(r.id);
+  END LOOP;
 
   -- The nomination turn is NOT given back: demote_nomination_rank() runs at
   -- nomination time in this format, so every other team has since moved up

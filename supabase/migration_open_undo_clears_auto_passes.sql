@@ -1,29 +1,36 @@
--- Follow-up to migration_open_auction_draft.sql — undo a CLOSED open auction.
+-- Follow-up to migration_open_auction_undo.sql — undo must also put the team
+-- back into the auctions it was automatically passed out of.
 --
--- Touches ONLY the open-outcry path: it adds one function, `open_undo_auction`,
--- and revokes EXECUTE on it. It creates no table, alters no column, and does
--- not touch `auctions`, `bids`, `resolve_auction` or anything snake-related.
+-- Touches ONLY open_undo_auction(). Nothing else, envelope or snake.
 --
--- WHY
--- ---
--- `open_cancel_auction()` pulls a player back off the board, but refuses
--- anything that is not still `open` — so a mistaken close (admin hit "סגור
--- עכשיו" too early, the deadline ran out on a bid that should not have counted,
--- a wrong player was nominated) was permanent: the player stayed drafted and
--- the winner stayed charged, with no way back short of resetting the draft.
+-- THE BUG
+-- -------
+-- open_settle_auction() writes a pass row for any non-leader that is
+-- `is_complete` (reason 'complete') or whose open_team_hard_max_bid() cannot
+-- reach the price (reason 'no_budget'). Both are *derived* from the team's
+-- roster and budget at that instant.
 --
--- This reverses a completed auction: the player returns to the pool, the money
--- returns to the winner, and the auction row is kept as `cancelled` so history
--- still shows the player was up and the result was withdrawn. The admin can
--- then re-nominate.
+-- Undoing a closed auction reverses exactly those two inputs: the winner gets a
+-- roster slot and its money back. But the pass rows written while it was full
+-- or broke stayed, and PASS is final — open_place_bid() refuses with
+-- "הקבוצה כבר סימנה PASS במכרז הזה — אין חזרה". So a team whose last win the
+-- admin undid was refunded, un-completed, and still permanently locked out of
+-- every other auction on the board. Nothing surfaced it, and the only remedy
+-- was to cancel those auctions too and re-nominate.
 --
--- The refund is not arithmetic on `budget_remaining` — it is
--- `refresh_team_stats()`, which recomputes budget and player_count from the
--- team's drafted players. Clearing the player's `drafted_by_team_id` and
--- `draft_price` first is therefore the whole refund, and it cannot drift out of
--- sync with a hand-written `+ price`.
+-- THE FIX
+-- -------
+-- After the refund, drop that team's 'complete' / 'no_budget' rows in auctions
+-- that are still open and re-settle each. Deleting a pass can only ADD a team
+-- to an auction, so nothing can close that would not have closed already — and
+-- if the team still cannot reach the price, open_settle_auction() writes the
+-- row straight back. It is a re-derivation, not a blanket amnesty.
 --
--- Idempotent (CREATE OR REPLACE); safe to re-run.
+-- 'manual', 'admin' and 'timeout' are deliberately NOT cleared: a manager who
+-- chose to walk away, an admin who passed for them, and a clock that ran out
+-- are decisions, not derivations. PASS stays final for those.
+--
+-- Idempotent; safe to re-run.
 
 CREATE OR REPLACE FUNCTION open_undo_auction(p_auction_id UUID)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER AS $$
@@ -112,14 +119,7 @@ BEGIN
 END;
 $$;
 
--- SECURITY DEFINER, so EXECUTE must be revoked from anon/authenticated BY NAME —
--- Supabase grants both a direct EXECUTE on every new function in the public
--- schema, which a REVOKE FROM PUBLIC does not remove. Without this, anyone with
--- the anon key could refund and un-draft any player in any league.
+-- Signature is unchanged, so the existing grant still stands; re-stated because
+-- CREATE OR REPLACE keeps privileges and a fresh install runs this file alone.
 REVOKE ALL ON FUNCTION open_undo_auction(UUID) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION open_undo_auction(UUID) TO service_role;
-
--- Verify (changes nothing) — this row should show only postgres/service_role:
---   SELECT p.proname, array_to_string(p.proacl, ', ') AS grants
---   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
---   WHERE n.nspname = 'public' AND p.proname = 'open_undo_auction';

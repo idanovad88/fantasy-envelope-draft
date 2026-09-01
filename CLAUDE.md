@@ -261,6 +261,10 @@ A team blocked only by its own commitments therefore sits in the auction unable 
 
 **The refund is `refresh_team_stats()`, never arithmetic on `budget_remaining`.** That function recomputes budget and `player_count` from the team's drafted players, so clearing the player's `drafted_by_team_id` / `draft_price` / `roster_slot` *is* the refund — a hand-written `budget_remaining + price` would drift the moment anything else touched the row. Clearing `player_count` also clears `is_complete`, which is why the undo re-checks the league: `open_close_auction()` may have marked the league `completed` on this very auction, and a roster that just got a slot back means it is `active` again.
 
+**Undo also clears the auto-PASS rows it invalidated.** `open_settle_auction()` writes a pass for a non-leader that is `is_complete` or whose `open_team_hard_max_bid()` cannot reach the price — both *derived* from roster and budget. An undo reverses exactly those two inputs, so `open_undo_auction()` drops that team's `complete` / `no_budget` rows in auctions still `open` and re-settles each. Without it the refunded team was un-completed, repaid, and still permanently locked out of every other auction on the board, since PASS is final and nothing surfaced why.
+
+`manual`, `admin` and `timeout` are never cleared: a manager who walked away, an admin who passed for them, and a clock that ran out are decisions, not derivations. And deleting a pass can only *add* a team to an auction, so nothing closes that would not have closed anyway — if the team still cannot reach the price, settle writes the row straight back. It is a re-derivation, not an amnesty.
+
 **Undo does not give the nomination turn back.** `demote_nomination_rank()` runs at *nomination* time in this format, so by the time an auction closes every other team has moved up around the nominator and its old rank belongs to someone else. Both cancels leave `priority_rank` alone; re-nominating is a separate admin step, and the history card says so.
 
 **Realtime:** only `open_auctions` is published. `open_bids`/`open_passes` have no `league_id` and so could not be filtered per league; instead `open_pass()` bumps `open_auctions.updated_at`, so one filtered subscription in `RealtimeRefresher` covers nominations (INSERT), bids, passes and closes (UPDATE).
@@ -277,6 +281,7 @@ A team blocked only by its own commitments therefore sits in the auction unable 
 5. `supabase/migration_open_auction_soft_close.sql` — `open_extend_short_minutes` / `open_extend_long_minutes` plus the graduated close in `open_place_bid()`. Also folded into #1. Applied 2026-08-30.
 6. `supabase/migration_open_auction_undo.sql` — `open_undo_auction()` plus its EXECUTE revoke. Also folded into #1. Applied 2026-09-01.
 7. `supabase/migration_open_nominate_opening_bid.sql` — the nominator-chosen opening bid: drops the 3-arg `open_nominate` and creates the 4-arg one. Also folded into #1. Applied 2026-09-01.
+8. `supabase/migration_open_undo_clears_auto_passes.sql` — `open_undo_auction()` also clears the `complete` / `no_budget` passes it invalidated. Also folded into #1 and #6.
 
 ### Trade system (snake only)
 
