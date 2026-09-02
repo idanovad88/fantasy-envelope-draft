@@ -339,6 +339,16 @@ export default async function DashboardPage() {
     const totalPicks = typedLeague.num_teams * typedLeague.players_per_team
     const draftedCount = typedTeams.reduce((s, t) => s + t.player_count, 0)
 
+    // League-wide budget, derived from the actual teams so spent + remaining
+    // always add up (same shape as the envelope dashboard). The money standing
+    // on the board is deliberately a separate figure: it is committed, not
+    // spent — budget_remaining still holds it until an auction closes, and an
+    // outbid team gets every dollar of it back.
+    const totalBudget = typedTeams.length * typedLeague.budget_per_team
+    const budgetRemaining = typedTeams.reduce((s, t) => s + t.budget_remaining, 0)
+    const budgetSpent = Math.max(0, totalBudget - budgetRemaining)
+    const boardSum = board.reduce((s, a) => s + a.current_price, 0)
+
     // Same summary table as the envelope dashboard, with the open-format
     // ceiling: getOpenMaxBid() deducts the money committed to the auctions a
     // team currently leads, so the number is what it may actually bid now.
@@ -424,6 +434,14 @@ export default async function DashboardPage() {
           )}
           <div className="flex flex-col gap-2.5 mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
             <ProgressRow label="דראפט" pct={totalPicks > 0 ? (draftedCount / totalPicks) * 100 : 0} />
+            <ProgressRow label="תקציב" pct={totalBudget > 0 ? (budgetSpent / totalBudget) * 100 : 0} />
+            <p className="text-xs" style={{ color: 'var(--muted)' }}>
+              <span className="font-bold" style={{ color: 'var(--danger)' }}>${budgetSpent}</span>
+              <span>/${totalBudget} בוזבזו</span>
+              {' · '}
+              <span className="font-bold" style={{ color: 'var(--warning)' }}>${boardSum}</span>
+              <span> על הלוח</span>
+            </p>
           </div>
         </div>
 
