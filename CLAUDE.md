@@ -34,6 +34,8 @@ Dev only (`.env.local` only, never in production):
 
 ⚠️ **There is no separate dev database.** `.env.local` points `NEXT_PUBLIC_SUPABASE_URL` at the *production* Supabase project, so `npm run dev` reads and writes live league data — including drafts in progress. Scope any test data to a throwaway league and delete it afterwards; never mutate a real league from a local session.
 
+⚠️ **Deleting that throwaway league fails on `priority_log`.** Almost everything hangs off `leagues` with `ON DELETE CASCADE`, but `priority_log_league_id_fkey` does not — and any test that nominates or resolves an auction writes a row there. `DELETE FROM priority_log WHERE league_id = …` first, then the league, and the rest cascades.
+
 ## Architecture
 
 Fantasy NBA draft app supporting three draft types:
