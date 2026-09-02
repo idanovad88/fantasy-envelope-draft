@@ -1,32 +1,31 @@
--- Follow-up to migration_open_auction_draft.sql — the nominator picks the
--- opening price.
+-- ============================================================================
+-- Open outcry: nominating through the night too
+-- ============================================================================
+-- migration_open_night_actions.sql opened bidding and PASS outside the league's
+-- active hours and deliberately left `open_nominate()` on `open_is_running()`,
+-- so new players still went up only during the day. This finishes the job: the
+-- whole draft now runs on `open_accepts_actions()` and only an admin PAUSE stops
+-- anything. The active hours are purely a clock rule.
 --
--- Touches ONLY open_nominate(). No table, no column, nothing envelope or snake.
+-- Two changes, and the second is the one that matters:
 --
--- WHY
--- ---
--- Putting a player up always opened at $1, so a team that wanted a player badly
--- had to nominate at a dollar and then wait to be outbid before it could say
--- what he was worth. Now the opening bid is an argument: the nominator names
--- the price the auction starts at, and everyone else has to beat it.
+--   1. The gate. `open_is_running()` -> `open_accepts_actions()`.
+--   2. The opening window. A newly nominated player gets
+--      `open_pass_timeout_minutes` measured from `open_clock_now()`, not NOW().
+--      Nominate at 02:00 with a 120-minute window and a wall-clock deadline
+--      would be `04:00` — an instant the clock never reaches, because it is
+--      stopped. The morning thaw shifts every open deadline forward by the
+--      whole gap, so that auction would open at 08:00 with far more than two
+--      hours on it, scaled by how deep into the night it was created. Measured
+--      in frozen time it is `frozen_since + 120min`, which the same shift turns
+--      into exactly `08:00 + 120min` — the window the nominator was promised,
+--      starting when the draft does.
 --
--- The old floor is the new default, so this is strictly a widening —
--- p_opening_bid DEFAULT 1 reproduces the previous behaviour exactly, and an
--- older client that still sends three arguments keeps working.
+-- `open_is_running()` is left in place: nothing calls it any more, but older
+-- function bodies in migration files here still do, and dropping it would make
+-- re-running one of those fail rather than merely revert behaviour.
 --
--- ⚠️ The 3-argument version must be DROPPED, not replaced. A defaulted 4th
--- argument creates a NEW function rather than replacing the old one, and a
--- 3-argument call would then match both and fail as ambiguous.
---
--- Idempotent; safe to re-run.
---
--- ⚠️ SUPERSEDED by migration_open_nominate_at_night.sql, which replaces this
--- same function again: the open_is_running() gate below refuses a nomination at
--- night, and the opening window is measured from NOW() where it must now be
--- measured from open_clock_now(). Do not re-run this file on a database that
--- already has the night version.
-
-DROP FUNCTION IF EXISTS open_nominate(UUID, UUID, UUID);
+-- Idempotent. Also folded into migration_open_auction_draft.sql.
 
 CREATE OR REPLACE FUNCTION open_nominate(
   p_league_id UUID,
@@ -44,8 +43,9 @@ BEGIN
   IF NOT FOUND OR v_league.draft_type <> 'open' THEN
     RAISE EXCEPTION 'הליגה אינה דראפט מכרז פתוח';
   END IF;
-  IF NOT open_is_running(p_league_id) THEN
-    RAISE EXCEPTION 'הדראפט אינו פעיל כרגע — מושהה או מחוץ לשעות הפעילות';
+  -- Night stops the clock, not the draft. Only a pause stops this.
+  IF NOT open_accepts_actions(p_league_id) THEN
+    RAISE EXCEPTION 'הדראפט מושהה כרגע — אי-אפשר להעלות שחקן';
   END IF;
 
   IF p_opening_bid IS NULL OR p_opening_bid < 1 THEN
@@ -95,11 +95,13 @@ BEGIN
     RAISE EXCEPTION 'עדיין לא תורה של הקבוצה להעלות שחקן';
   END IF;
 
+  -- The opening window runs on the draft's clock, not the wall's — see the
+  -- header. During the day the two are the same instant.
   INSERT INTO open_auctions
     (league_id, player_id, nominating_team_id, current_price, leader_team_id, deadline_at)
   VALUES
     (p_league_id, p_player_id, p_team_id, p_opening_bid, p_team_id,
-     NOW() + make_interval(mins => v_league.open_pass_timeout_minutes))
+     open_clock_now(p_league_id) + make_interval(mins => v_league.open_pass_timeout_minutes))
   RETURNING id INTO v_auction_id;
 
   -- is_auto stays TRUE whatever the amount: it marks the bid that came with the
@@ -122,15 +124,13 @@ BEGIN
 END;
 $$;
 
--- SECURITY DEFINER — EXECUTE must be revoked from anon/authenticated BY NAME,
--- and the signature changed, so the new one needs its own revoke. Supabase's
--- ALTER DEFAULT PRIVILEGES granted both roles a direct EXECUTE on it the moment
--- it was created.
+-- ----------------------------------------------------------------------------
+-- Grants
+-- ----------------------------------------------------------------------------
+-- CREATE OR REPLACE preserves the existing ACL, so this is already locked down
+-- where the base migration ran. Re-run anyway: Supabase's ALTER DEFAULT
+-- PRIVILEGES grants EXECUTE on every NEW function in `public` directly to anon
+-- and authenticated, so any path that creates it fresh would leave a SECURITY
+-- DEFINER nominate callable from the browser with nothing but an anon key.
 REVOKE ALL ON FUNCTION open_nominate(UUID, UUID, UUID, INTEGER) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION open_nominate(UUID, UUID, UUID, INTEGER) TO service_role;
-
--- Verify (changes nothing) — one row, grants only postgres/service_role:
---   SELECT p.proname, pg_get_function_identity_arguments(p.oid) AS args,
---          array_to_string(p.proacl, ', ') AS grants
---   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
---   WHERE n.nspname = 'public' AND p.proname = 'open_nominate';

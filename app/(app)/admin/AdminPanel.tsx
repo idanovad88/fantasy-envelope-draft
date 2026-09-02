@@ -1598,7 +1598,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
                   {openFrozenReason === 'paused'
                     ? 'השעונים עצורים ואי-אפשר להציע. הזמן שנותר לכל מכרז יישמר לחידוש.'
-                    : `שעות הפעילות ${String(league.draft_start_hour).padStart(2, '0')}:00–${String(league.draft_end_hour).padStart(2, '0')}:00. השעונים עצורים ומועדי הסגירה שלמטה יידחו קדימה בבוקר, אבל הצעות ו-PASS מתקבלים כרגיל — מכרז שכולם ויתרו בו ייסגר גם בלילה. העלאת שחקן חדש אפשרית רק בשעות הפעילות.`}
+                    : `שעות הפעילות ${String(league.draft_start_hour).padStart(2, '0')}:00–${String(league.draft_end_hour).padStart(2, '0')}:00. רק השעונים עצורים ומועדי הסגירה שלמטה יידחו קדימה בבוקר — העלאות, הצעות ו-PASS מתקבלים כרגיל, ומכרז שכולם ויתרו בו ייסגר גם בלילה.`}
                 </p>
               </div>
             )}

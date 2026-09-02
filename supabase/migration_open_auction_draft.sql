@@ -472,8 +472,9 @@ BEGIN
   IF NOT FOUND OR v_league.draft_type <> 'open' THEN
     RAISE EXCEPTION 'הליגה אינה דראפט מכרז פתוח';
   END IF;
-  IF NOT open_is_running(p_league_id) THEN
-    RAISE EXCEPTION 'הדראפט אינו פעיל כרגע — מושהה או מחוץ לשעות הפעילות';
+  -- Night stops the clock, not the draft. Only a pause stops this.
+  IF NOT open_accepts_actions(p_league_id) THEN
+    RAISE EXCEPTION 'הדראפט מושהה כרגע — אי-אפשר להעלות שחקן';
   END IF;
 
   IF p_opening_bid IS NULL OR p_opening_bid < 1 THEN
@@ -523,11 +524,18 @@ BEGIN
     RAISE EXCEPTION 'עדיין לא תורה של הקבוצה להעלות שחקן';
   END IF;
 
+  -- The opening window runs on the draft's clock, not the wall's. Nominating at
+  -- 02:00 with a wall-clock deadline of 04:00 names an instant the clock never
+  -- reaches, and the morning thaw — which shifts every open deadline by the
+  -- whole gap — would then hand that auction far more than its window, scaled
+  -- by how deep into the night it went up. In frozen time it is
+  -- `frozen_since + timeout`, which the same shift turns into exactly
+  -- `morning + timeout`. During the day the two are the same instant.
   INSERT INTO open_auctions
     (league_id, player_id, nominating_team_id, current_price, leader_team_id, deadline_at)
   VALUES
     (p_league_id, p_player_id, p_team_id, p_opening_bid, p_team_id,
-     NOW() + make_interval(mins => v_league.open_pass_timeout_minutes))
+     open_clock_now(p_league_id) + make_interval(mins => v_league.open_pass_timeout_minutes))
   RETURNING id INTO v_auction_id;
 
   -- is_auto stays TRUE whatever the amount: it marks the bid that came with the

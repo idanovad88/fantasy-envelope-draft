@@ -395,11 +395,14 @@ async function OpenDraftPlayersPage({
     leadingByTeam
   )
 
-  const running =
-    league.status === 'active' &&
-    isWithinDraftHours(league.draft_start_hour, league.draft_end_hour)
+  // Night stops the clocks, not the managers: nominating, bidding and PASS all
+  // run straight through it, and only an admin pause stops them. Mirrors
+  // open_accepts_actions() in SQL, which is the real gate.
+  const acceptsActions = league.status === 'active'
+  const isNight =
+    acceptsActions && !isWithinDraftHours(league.draft_start_hour, league.draft_end_hour)
   const myTurn = !!myTeam && !!order.find(o => o.team.id === myTeam.id)?.canNominateNow
-  const canNominate = running && myTurn
+  const canNominate = acceptsActions && myTurn
 
   const upNext = order.filter(o => o.canNominateNow)
 
@@ -440,12 +443,10 @@ async function OpenDraftPlayersPage({
               {board.length}/{league.open_board_size} שחקנים על הלוח
             </p>
             <p className="font-bold">
-              {!running
+              {!acceptsActions
                 ? league.status === 'paused'
                   ? 'הדראפט מושהה'
-                  : league.status === 'active'
-                    ? 'מחוץ לשעות הפעילות'
-                    : 'הדראפט טרם החל'
+                  : 'הדראפט טרם החל'
                 : canNominate
                   ? 'תורך להעלות שחקן!'
                   : upNext.length > 0
@@ -456,12 +457,11 @@ async function OpenDraftPlayersPage({
                     ? `תור: ${upNext[0].team.name}`
                     : 'הלוח מלא — אין העלאות כרגע'}
             </p>
-            {/* Night closes nominations only. Without this the headline reads
-                as "the draft is asleep", and a manager with a live auction
-                waiting on him would not go look at the board. */}
-            {!running && league.status === 'active' && (
+            {/* Said here because the consequence is not obvious: the player
+                goes up now, but his window starts counting in the morning. */}
+            {isNight && (
               <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-                העלאת שחקן חדש תיפתח ב-{String(league.draft_start_hour).padStart(2, '0')}:00 · הצעות ו-PASS על השחקנים שכבר על הלוח פתוחים גם עכשיו
+                🌙 השעונים עצורים עד {String(league.draft_start_hour).padStart(2, '0')}:00 — אפשר להעלות שחקן גם עכשיו, והשעון של המכרז יתחיל לרוץ בבוקר
               </p>
             )}
           </div>

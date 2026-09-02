@@ -113,12 +113,10 @@ export default function OpenAuctionBoard({
   frozenReason,
   frozenSince,
 }: Props) {
-  // Night stops the clocks, not the managers: bids and PASS are accepted right
-  // through it (open_accepts_actions() in SQL), and a deadline written while
-  // frozen is expressed in frozen time, so it starts running again in the
-  // morning. Only a pause closes the board for input. Nominating is the one
-  // action still tied to the active hours, which is why an empty board reads
-  // differently at night than under a pause.
+  // Night stops the clocks, not the managers: nominating, bidding and PASS are
+  // all accepted right through it (open_accepts_actions() in SQL), and a
+  // deadline written while frozen is expressed in frozen time, so it starts
+  // running again in the morning. Only a pause closes the board for input.
   const actionsBlocked = frozenReason === 'paused'
 
   if (auctions.length === 0) {
@@ -129,9 +127,7 @@ export default function OpenAuctionBoard({
         <p className="text-sm mt-1">
           {frozenReason === 'paused'
             ? 'הדראפט מושהה — שחקנים חדשים יעלו כשיתחדש'
-            : frozenReason === 'night'
-              ? 'מחוץ לשעות הפעילות — שחקנים חדשים יעלו בבוקר'
-              : 'הקבוצות שבתורן יעלו שחקנים בקרוב'}
+            : 'הקבוצות שבתורן יעלו שחקנים בקרוב'}
         </p>
       </div>
     )

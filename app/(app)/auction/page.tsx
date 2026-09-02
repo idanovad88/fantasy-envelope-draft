@@ -347,7 +347,7 @@ async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team 
           <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
             {frozenReason === 'paused'
               ? 'השעונים עצורים ואי-אפשר להציע או לסמן PASS. הזמן שנותר לכל מכרז יישמר.'
-              : `אפשר להציע ולסמן PASS גם עכשיו — השעונים עצורים, והזמן שנותר לכל מכרז ימשיך לרוץ ב-${String(league.draft_start_hour).padStart(2, '0')}:00. שחקנים חדשים יעלו רק בבוקר.`}
+              : `הדראפט ממשיך כרגיל — אפשר להעלות, להציע ולסמן PASS. רק השעונים עצורים, והזמן שנותר לכל מכרז ימשיך לרוץ ב-${String(league.draft_start_hour).padStart(2, '0')}:00.`}
           </p>
         </div>
       )}

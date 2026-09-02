@@ -393,7 +393,7 @@ export default async function DashboardPage() {
             </p>
             {typedLeague.status === 'active' && (
               <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-                השעונים עצורים עד {String(typedLeague.draft_start_hour).padStart(2, '0')}:00 · אפשר להציע ולסמן PASS גם עכשיו
+                השעונים עצורים עד {String(typedLeague.draft_start_hour).padStart(2, '0')}:00 · הדראפט עצמו ממשיך כרגיל
               </p>
             )}
           </div>

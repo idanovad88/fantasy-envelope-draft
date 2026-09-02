@@ -14,8 +14,9 @@
 --   * An auction may therefore close at night, when every team but the leader
 --     has passed. That is a decision the managers made, not a clock running.
 --
--- Nomination is deliberately NOT included: `open_nominate()` keeps its
--- `open_is_running()` gate, so new players still go up only during the day.
+-- Nomination was deliberately NOT included here: `open_nominate()` kept its
+-- `open_is_running()` gate, so new players still went up only during the day.
+-- migration_open_nominate_at_night.sql lifted that too — run it after this one.
 --
 -- Idempotent. Also folded into migration_open_auction_draft.sql.
 
