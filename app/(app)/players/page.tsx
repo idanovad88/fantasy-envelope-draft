@@ -456,6 +456,14 @@ async function OpenDraftPlayersPage({
                     ? `תור: ${upNext[0].team.name}`
                     : 'הלוח מלא — אין העלאות כרגע'}
             </p>
+            {/* Night closes nominations only. Without this the headline reads
+                as "the draft is asleep", and a manager with a live auction
+                waiting on him would not go look at the board. */}
+            {!running && league.status === 'active' && (
+              <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
+                העלאת שחקן חדש תיפתח ב-{String(league.draft_start_hour).padStart(2, '0')}:00 · הצעות ו-PASS על השחקנים שכבר על הלוח פתוחים גם עכשיו
+              </p>
+            )}
           </div>
         </div>
       </div>

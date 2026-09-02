@@ -52,6 +52,10 @@ ALTER TABLE leagues ADD CONSTRAINT leagues_open_extend_order_check
   CHECK (open_extend_long_minutes >= open_extend_short_minutes);
 
 -- ── 2. The bid, with the ladder ─────────────────────────────────────────────
+-- ⚠️ SUPERSEDED by migration_open_night_actions.sql, which replaces this same
+-- function again: the open_is_running() gate below refuses a bid at night, and
+-- the deadline math uses NOW() where it must now use open_clock_now(). Do not
+-- re-run this file on a database that already has the night version.
 CREATE OR REPLACE FUNCTION open_place_bid(p_auction_id UUID, p_team_id UUID, p_amount INTEGER)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE

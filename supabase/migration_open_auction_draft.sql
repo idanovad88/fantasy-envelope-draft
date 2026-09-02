@@ -216,6 +216,55 @@ BEGIN
 END;
 $$;
 
+-- "Is the clock running" and "may a manager act" are two different questions.
+-- open_is_running() above answers the first and gates open_nominate(): new
+-- players go up only during active hours. Bids and passes use this one instead,
+-- so a draft stays playable through the night with its clocks stopped. Only an
+-- admin PAUSE stops everything.
+CREATE OR REPLACE FUNCTION open_accepts_actions(p_league_id UUID)
+RETURNS BOOLEAN LANGUAGE plpgsql STABLE AS $$
+DECLARE v_status TEXT;
+BEGIN
+  SELECT status INTO v_status FROM leagues WHERE id = p_league_id;
+  RETURN v_status = 'active';
+END;
+$$;
+
+-- "Now" on the draft's own clock.
+--
+-- The tick stamps `leagues.open_frozen_since` when the active-hours window
+-- closes and, in the morning, shifts every open deadline forward by the gap. A
+-- deadline written during a freeze must therefore be expressed in frozen time:
+-- `frozen_since + W` becomes `morning + W` once that shift lands, which is
+-- precisely "the clock did not run while you were asleep".
+--
+-- The order of the branches matters, and the stamp comes first. A stamp still
+-- set while the league is inside its hours means the thaw has not been applied
+-- yet (the tick runs once a minute), so the deadlines it is about to shift are
+-- still the pre-freeze ones and the stamp is the right base then too. Only with
+-- no stamp does the window decide — and outside it the boundary is used rather
+-- than NOW(), which is exactly what the tick would have stamped had it already
+-- run. Without that branch a bid in the first minute of the night would quietly
+-- be granted the length of that minute twice.
+CREATE OR REPLACE FUNCTION open_clock_now(p_league_id UUID)
+RETURNS TIMESTAMPTZ LANGUAGE plpgsql STABLE AS $$
+DECLARE v RECORD;
+BEGIN
+  SELECT status, draft_start_hour, draft_end_hour, open_frozen_since
+  INTO v FROM leagues WHERE id = p_league_id;
+
+  IF NOT FOUND THEN RETURN NOW(); END IF;
+  IF v.open_frozen_since IS NOT NULL THEN RETURN v.open_frozen_since; END IF;
+
+  IF v.status = 'active'
+     AND NOT open_within_hours(v.draft_start_hour, v.draft_end_hour, NOW()) THEN
+    RETURN open_last_hours_boundary(v.draft_end_hour, NOW());
+  END IF;
+
+  RETURN NOW();
+END;
+$$;
+
 -- Roster slots a team has left once the auctions it is currently leading are
 -- counted as already won.
 CREATE OR REPLACE FUNCTION open_team_open_slots(p_team_id UUID)
@@ -506,7 +555,7 @@ RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
   v_a RECORD; v_max INTEGER;
   v_short INTEGER; v_long INTEGER;
-  v_remaining INTERVAL; v_deadline TIMESTAMPTZ;
+  v_now TIMESTAMPTZ; v_remaining INTERVAL; v_deadline TIMESTAMPTZ;
 BEGIN
   -- Row lock: two teams raising the same auction at the same instant must not
   -- both read the same current_price.
@@ -514,8 +563,10 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'המכרז לא נמצא'; END IF;
   IF v_a.status <> 'open' THEN RAISE EXCEPTION 'המכרז כבר נסגר'; END IF;
 
-  IF NOT open_is_running(v_a.league_id) THEN
-    RAISE EXCEPTION 'הדראפט אינו פעיל כרגע — מושהה או מחוץ לשעות הפעילות';
+  -- Night is not a reason to refuse a bid — the clock stops, the draft does
+  -- not. A pause stops both.
+  IF NOT open_accepts_actions(v_a.league_id) THEN
+    RAISE EXCEPTION 'הדראפט מושהה כרגע — אי-אפשר להציע';
   END IF;
 
   IF NOT EXISTS (
@@ -549,24 +600,34 @@ BEGIN
   INTO v_short, v_long
   FROM leagues WHERE id = v_a.league_id;
 
-  -- Graduated soft close: the deadline moves to NOW() + the smallest configured
+  -- Graduated soft close: the deadline moves to now + the smallest configured
   -- window LARGER than the time remaining, and stands when neither qualifies.
   -- With 30/60: 90 minutes left is untouched, 50 left goes back up to an hour,
   -- 10 left gains 20 minutes for half an hour to respond. It can never move
   -- earlier — only a window greater than the remaining time is ever chosen.
   --
+  -- "Now" here is open_clock_now(), not NOW(). During a freeze the two differ,
+  -- and the wall clock would be wrong twice over: the remaining time would read
+  -- as shrinking through the night (so every night bid would take the short
+  -- window, and a long-running auction would look nearly expired), and the
+  -- morning shift would then add the whole night on top of the window just
+  -- granted.
+  --
   -- open_pass_timeout_minutes is NOT used here; that is the opening window a
   -- newly nominated player gets, set in open_nominate().
-  v_remaining := v_a.deadline_at - NOW();
+  v_now := open_clock_now(v_a.league_id);
+  v_remaining := v_a.deadline_at - v_now;
   v_deadline := CASE
-    WHEN v_remaining < make_interval(mins => v_short) THEN NOW() + make_interval(mins => v_short)
-    WHEN v_remaining < make_interval(mins => v_long)  THEN NOW() + make_interval(mins => v_long)
+    WHEN v_remaining < make_interval(mins => v_short) THEN v_now + make_interval(mins => v_short)
+    WHEN v_remaining < make_interval(mins => v_long)  THEN v_now + make_interval(mins => v_long)
     ELSE v_a.deadline_at
   END;
 
   INSERT INTO open_bids (open_auction_id, team_id, amount)
   VALUES (p_auction_id, p_team_id, p_amount);
 
+  -- updated_at stays on the wall clock: it drives the realtime subscription,
+  -- not the auction's deadline.
   UPDATE open_auctions SET
     current_price  = p_amount,
     leader_team_id = p_team_id,
@@ -588,10 +649,15 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'המכרז לא נמצא'; END IF;
   IF v_a.status <> 'open' THEN RAISE EXCEPTION 'המכרז כבר נסגר'; END IF;
 
-  -- Automatic reasons (timeout / no_budget) are written by the clock, which
-  -- runs precisely when the league is not.
-  IF p_reason IN ('manual', 'admin') AND NOT open_is_running(v_a.league_id) THEN
-    RAISE EXCEPTION 'הדראפט אינו פעיל כרגע — מושהה או מחוץ לשעות הפעילות';
+  -- A manager may drop out at any hour; only a pause stops it. Automatic
+  -- reasons (timeout / no_budget) are written by the clock, which runs
+  -- precisely when the league is not, and are never gated.
+  --
+  -- This is what lets an auction close at night: once the last non-leader
+  -- passes, open_settle_auction() closes it. Nobody was cut off by a timer —
+  -- every team still in it chose to leave.
+  IF p_reason IN ('manual', 'admin') AND NOT open_accepts_actions(v_a.league_id) THEN
+    RAISE EXCEPTION 'הדראפט מושהה כרגע — אי-אפשר לסמן PASS';
   END IF;
 
   IF NOT EXISTS (
@@ -908,8 +974,11 @@ GRANT EXECUTE ON FUNCTION open_set_pause(UUID, BOOLEAN)        TO service_role;
 GRANT EXECUTE ON FUNCTION open_draft_tick(UUID)                TO service_role;
 GRANT EXECUTE ON FUNCTION open_draft_tick_all()                TO service_role;
 
--- The read-only helpers stay callable by anyone: they only read data that is
--- already public through the SELECT policies above.
+-- The read-only helpers stay callable by anyone — open_is_running,
+-- open_accepts_actions, open_clock_now, open_team_max_bid,
+-- open_team_hard_max_bid, open_team_open_slots, open_within_hours,
+-- open_last_hours_boundary. They only read data that is already public through
+-- the SELECT policies above.
 
 -- ============================================================================
 -- 8. REALTIME

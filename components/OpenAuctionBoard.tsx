@@ -68,6 +68,14 @@ interface Props {
   slotsLeft: number
   approvedTeamCount: number
   frozenReason: 'paused' | 'night' | null
+  /**
+   * `leagues.open_frozen_since` — the instant the clocks stopped, read after the
+   * tick so it is not a minute stale. While frozen, `deadline_at` is a frozen-
+   * time stamp that the morning thaw shifts forward, so the time actually left
+   * is `deadline_at − frozenSince` and it does not move. Null when the draft is
+   * running, and the live countdown is used instead.
+   */
+  frozenSince: string | null
 }
 
 const PASS_LABEL: Record<OpenPassReason, string> = {
@@ -77,6 +85,19 @@ const PASS_LABEL: Record<OpenPassReason, string> = {
   no_budget: 'אין תקציב',
   roster_full: 'אין משבצת פנויה',
   complete: 'סגל מלא',
+}
+
+/**
+ * How much of the auction's window is left, in frozen time. A live `Countdown`
+ * would tick down against a clock that is not running — and at night it would
+ * go negative and read "הסתיים" on an auction nobody can lose yet.
+ */
+function formatFrozenRemaining(deadlineAt: string, frozenSince: string) {
+  const mins = Math.floor((new Date(deadlineAt).getTime() - new Date(frozenSince).getTime()) / 60_000)
+  if (mins < 1) return 'פחות מדקה'
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')} ש׳` : `${m} דק׳`
 }
 
 export default function OpenAuctionBoard({
@@ -90,16 +111,27 @@ export default function OpenAuctionBoard({
   extendLongMinutes,
   approvedTeamCount,
   frozenReason,
+  frozenSince,
 }: Props) {
+  // Night stops the clocks, not the managers: bids and PASS are accepted right
+  // through it (open_accepts_actions() in SQL), and a deadline written while
+  // frozen is expressed in frozen time, so it starts running again in the
+  // morning. Only a pause closes the board for input. Nominating is the one
+  // action still tied to the active hours, which is why an empty board reads
+  // differently at night than under a pause.
+  const actionsBlocked = frozenReason === 'paused'
+
   if (auctions.length === 0) {
     return (
       <div className="card mb-6 text-center py-8" style={{ color: 'var(--muted)' }}>
         <p className="text-4xl mb-2">🏀</p>
         <p>אין שחקנים על הלוח כרגע</p>
         <p className="text-sm mt-1">
-          {frozenReason
+          {frozenReason === 'paused'
             ? 'הדראפט מושהה — שחקנים חדשים יעלו כשיתחדש'
-            : 'הקבוצות שבתורן יעלו שחקנים בקרוב'}
+            : frozenReason === 'night'
+              ? 'מחוץ לשעות הפעילות — שחקנים חדשים יעלו בבוקר'
+              : 'הקבוצות שבתורן יעלו שחקנים בקרוב'}
         </p>
       </div>
     )
@@ -112,8 +144,11 @@ export default function OpenAuctionBoard({
           buried the per-auction numbers (minimum, your ceiling) in boilerplate.
           Stated rather than inferred from the clock: without it a manager sees
           the countdown jump after someone bids and cannot tell why. */}
-      {myTeamId && !frozenReason && (
+      {myTeamId && !actionsBlocked && (
         <p className="text-xs" style={{ color: 'var(--muted)' }}>
+          {frozenReason === 'night' && (
+            <>🌙 השעונים עצורים — הצעה או PASS עכשיו נספרים כרגיל, והזמן ימשיך לרוץ בבוקר.{' '}</>
+          )}
           הצעה מאוחרת דוחה את הסגירה — נשארו פחות מ-{extendShortMinutes} דק&apos; ← {extendShortMinutes} דק&apos;,
           פחות מ-{extendLongMinutes} ← {extendLongMinutes} דק&apos;.
         </p>
@@ -130,6 +165,7 @@ export default function OpenAuctionBoard({
           slotsLeft={slotsLeft}
           approvedTeamCount={approvedTeamCount}
           frozenReason={frozenReason}
+          frozenSince={frozenSince}
         />
       ))}
     </div>
@@ -145,6 +181,7 @@ function OpenAuctionCard({
   slotsLeft,
   approvedTeamCount,
   frozenReason,
+  frozenSince,
 }: {
   auction: BoardAuction
   myTeamId: string | null
@@ -154,6 +191,7 @@ function OpenAuctionCard({
   slotsLeft: number
   approvedTeamCount: number
   frozenReason: 'paused' | 'night' | null
+  frozenSince: string | null
 }) {
   const minBid = auction.currentPrice + 1
   // The raw text in the field, or null while the manager has not touched it.
@@ -179,6 +217,9 @@ function OpenAuctionCard({
   const [error, setError] = useState('')
   const router = useRouter()
 
+  // See the note in OpenAuctionBoard: a pause closes the card for input, night
+  // only stops the clock.
+  const actionsBlocked = frozenReason === 'paused'
   const iLead = !!myTeamId && auction.leaderTeamId === myTeamId
   const myPass = myTeamId ? auction.passes.find(p => p.teamId === myTeamId) : undefined
   // Everyone except the leader has to answer, so this is how many replies the
@@ -238,6 +279,7 @@ function OpenAuctionCard({
         {frozenReason ? (
           <span className="badge badge-gray">
             {frozenReason === 'paused' ? '⏸ מושהה' : '🌙 שעות לילה'}
+            {frozenSince && ` · נותרו ${formatFrozenRemaining(auction.deadlineAt, frozenSince)}`}
           </span>
         ) : (
           <Countdown targetDate={auction.deadlineAt} label="לסגירה" />
@@ -281,11 +323,9 @@ function OpenAuctionCard({
             ? 'יצאת מהמכרז'
             : `יצאת מהמכרז — ${PASS_LABEL[myPass.reason]}`}
         </div>
-      ) : frozenReason ? (
+      ) : actionsBlocked ? (
         <div className="p-2 rounded-lg text-center text-sm" style={{ background: 'var(--background)', color: 'var(--muted)' }}>
-          {frozenReason === 'paused'
-            ? 'הדראפט מושהה על ידי המנהל — השעונים עצורים'
-            : 'מחוץ לשעות הפעילות — השעונים עצורים עד הבוקר'}
+          הדראפט מושהה על ידי המנהל — השעונים עצורים
         </div>
       ) : iLead ? (
         <div className="p-2 rounded-lg text-center text-sm" style={{ background: 'var(--background)', color: 'var(--success)' }}>
@@ -331,7 +371,7 @@ function OpenAuctionCard({
         </div>
       )}
 
-      {!myPass && myTeamId && !iLead && !frozenReason && (
+      {!myPass && myTeamId && !iLead && !actionsBlocked && (
         slotBlocked ? (
           <p className="text-xs mt-2" style={{ color: 'var(--warning)' }}>
             כל משבצות הסגל שלך כבר מחויבות למכרזים שאתה מוביל בהם. אתה עדיין בפנים —

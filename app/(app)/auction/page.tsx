@@ -252,7 +252,7 @@ async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team 
   // catches up.
   await settleOpenDraft(league.id)
 
-  const [{ data: openRows }, { data: historyRows }, { data: teams }] = await Promise.all([
+  const [{ data: openRows }, { data: historyRows }, { data: teams }, { data: clock }] = await Promise.all([
     supabase
       .from('open_auctions')
       .select(
@@ -277,6 +277,10 @@ async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team 
       // the past, behind auctions that actually finished before it.
       .order('updated_at', { ascending: false }),
     supabase.from('teams').select('*').eq('league_id', league.id).eq('approved', true),
+    // Re-read after the tick. `league` was fetched before settleOpenDraft(), so
+    // its open_frozen_since can be a minute stale in either direction, and the
+    // board divides by it to show how much of each window is left.
+    supabase.from('leagues').select('open_frozen_since').eq('id', league.id).maybeSingle(),
   ])
 
   const board = (openRows ?? []) as unknown as OpenRow[]
@@ -342,8 +346,8 @@ async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team 
           </p>
           <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
             {frozenReason === 'paused'
-              ? 'השעונים עצורים. הזמן שנותר לכל מכרז יישמר.'
-              : `המכרזים יתחדשו ב-${String(league.draft_start_hour).padStart(2, '0')}:00. הזמן שנותר לכל מכרז יישמר.`}
+              ? 'השעונים עצורים ואי-אפשר להציע או לסמן PASS. הזמן שנותר לכל מכרז יישמר.'
+              : `אפשר להציע ולסמן PASS גם עכשיו — השעונים עצורים, והזמן שנותר לכל מכרז ימשיך לרוץ ב-${String(league.draft_start_hour).padStart(2, '0')}:00. שחקנים חדשים יעלו רק בבוקר.`}
           </p>
         </div>
       )}
@@ -384,6 +388,7 @@ async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team 
         extendLongMinutes={league.open_extend_long_minutes}
         approvedTeamCount={approvedTeams.length}
         frozenReason={frozenReason}
+        frozenSince={frozenReason ? clock?.open_frozen_since ?? null : null}
       />
 
       {history.length > 0 && (
