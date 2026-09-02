@@ -107,6 +107,18 @@ export default function OpenAuctionBoard({
 
   return (
     <div className="flex flex-col gap-4 mb-6">
+      {/* The soft close is one league rule, not a property of a single player,
+          so it is stated once above the board. Repeating it under every card
+          buried the per-auction numbers (minimum, your ceiling) in boilerplate.
+          Stated rather than inferred from the clock: without it a manager sees
+          the countdown jump after someone bids and cannot tell why. */}
+      {myTeamId && !frozenReason && (
+        <p className="text-xs" style={{ color: 'var(--muted)' }}>
+          הצעה מאוחרת דוחה את הסגירה — נשארו פחות מ-{extendShortMinutes} דק&apos; ← {extendShortMinutes} דק&apos;,
+          פחות מ-{extendLongMinutes} ← {extendLongMinutes} דק&apos;.
+        </p>
+      )}
+
       {auctions.map(auction => (
         <OpenAuctionCard
           key={auction.id}
@@ -116,8 +128,6 @@ export default function OpenAuctionBoard({
           hardMaxBid={hardMaxBid}
           committed={committed}
           slotsLeft={slotsLeft}
-          extendShortMinutes={extendShortMinutes}
-          extendLongMinutes={extendLongMinutes}
           approvedTeamCount={approvedTeamCount}
           frozenReason={frozenReason}
         />
@@ -133,8 +143,6 @@ function OpenAuctionCard({
   hardMaxBid,
   committed,
   slotsLeft,
-  extendShortMinutes,
-  extendLongMinutes,
   approvedTeamCount,
   frozenReason,
 }: {
@@ -144,8 +152,6 @@ function OpenAuctionCard({
   hardMaxBid: number
   committed: number
   slotsLeft: number
-  extendShortMinutes: number
-  extendLongMinutes: number
   approvedTeamCount: number
   frozenReason: 'paused' | 'night' | null
 }) {
@@ -337,17 +343,9 @@ function OpenAuctionCard({
             ברגע שיעקפו אותך שם תוכל להציע כאן.
           </p>
         ) : (
-          <>
-            <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>
-              מינימום {formatCurrency(minBid)} · המקסימום שלך {formatCurrency(Math.max(myMaxBid, 0))}
-            </p>
-            {/* Stated rather than inferred from the clock: without it a manager
-                sees the countdown jump after someone bids and cannot tell why. */}
-            <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
-              הצעה מאוחרת דוחה את הסגירה — נשארו פחות מ-{extendShortMinutes} דק&apos; ← {extendShortMinutes} דק&apos;,
-              פחות מ-{extendLongMinutes} ← {extendLongMinutes} דק&apos;.
-            </p>
-          </>
+          <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>
+            מינימום {formatCurrency(minBid)} · המקסימום שלך {formatCurrency(Math.max(myMaxBid, 0))}
+          </p>
         )
       )}
 
