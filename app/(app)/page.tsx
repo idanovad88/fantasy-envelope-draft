@@ -284,7 +284,7 @@ export default async function DashboardPage() {
   if (typedLeague?.draft_type === 'open') {
     await settleOpenDraft(selectedLeagueId)
 
-    const [{ data: teams }, { data: openRows }, { data: recentRows }] = await Promise.all([
+    const [{ data: teams }, { data: openRows }, { data: recentRows }, { data: passRows }] = await Promise.all([
       // Every approved team, ranked or not — the summary table below lists
       // them all, and getOpenNominationOrder() drops the unranked ones itself.
       supabase.from('teams').select('*').eq('league_id', selectedLeagueId).eq('approved', true)
@@ -299,6 +299,14 @@ export default async function DashboardPage() {
         .select('id, updated_at, winning_bid, player:players(name), winning_team:teams!winning_team_id(name)')
         .eq('league_id', selectedLeagueId).eq('status', 'completed')
         .order('updated_at', { ascending: false }).limit(6),
+      // PASS rows for the auctions currently on the board — the input to
+      // "מדד המניאק" below. Filtered through an embedded !inner join rather
+      // than .in(boardIds), which keeps the URL a constant size as the draft
+      // grows. Bounded by open_board_size × teams (tens of rows), so the
+      // 1000-row cap is not in play.
+      supabase.from('open_passes')
+        .select('team_id, auction:open_auctions!inner(league_id, status)')
+        .eq('auction.league_id', selectedLeagueId).eq('auction.status', 'open'),
     ])
 
     const typedTeams = (teams || []) as Team[]
@@ -323,6 +331,36 @@ export default async function DashboardPage() {
       const cur = leadingByTeam.get(a.leader_team_id) ?? { sum: 0, count: 0 }
       leadingByTeam.set(a.leader_team_id, { sum: cur.sum + a.current_price, count: cur.count + 1 })
     }
+
+    // מדד המניאק — in how many of the auctions on the board each team is still
+    // in *without leading*. A team is in until it PASSes: everyone counts until
+    // a pass row exists, however it was written — manual, admin, timeout or
+    // automatic. The auctions it leads are then subtracted: standing at the top
+    // of the price is a commitment, and the index is about the other case —
+    // sitting in an auction, holding it open for everyone else, without having
+    // put yourself on the hook for it.
+    const passesByTeam = new Map<string, number>()
+    for (const p of (passRows ?? []) as unknown as { team_id: string }[]) {
+      passesByTeam.set(p.team_id, (passesByTeam.get(p.team_id) ?? 0) + 1)
+    }
+    const maniakRanking = typedTeams
+      .map(t => {
+        const leadingCount = (leadingByTeam.get(t.id) ?? { count: 0 }).count
+        return {
+          team: t,
+          // A leader never has a pass row on the auction it leads, so the two
+          // subtractions can never overlap and this cannot go negative.
+          openNotLeading: board.length - (passesByTeam.get(t.id) ?? 0) - leadingCount,
+          leadingCount,
+        }
+      })
+      // Equal counts break in favour of the team leading less: same pressure on
+      // everyone else, less of its own money standing behind it.
+      .sort((a, b) =>
+        b.openNotLeading - a.openNotLeading ||
+        a.leadingCount - b.leadingCount ||
+        a.team.name.localeCompare(b.team.name, 'he')
+      )
 
     const order = getOpenNominationOrder(
       typedTeams, board.length, typedLeague.open_board_size, typedLeague.players_per_team, leadingByTeam
@@ -625,6 +663,55 @@ export default async function DashboardPage() {
               })}
             </div>
           </div>
+        </div>
+
+        {/* מדד המניאק — how many of the auctions on the board each team is
+            still holding open. Full width under the two-column grid: the row
+            carries a name, two badges and a count, and squeezing that into a
+            half-width column truncated every team name. */}
+        <div className="card mt-4">
+          <h2 className="font-bold mb-1">מדד המניאק 😈</h2>
+          <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
+            בכמה מהמכרזים שעל הלוח כל קבוצה עדיין בפנים (לא סימנה PASS) אבל לא מובילה · מכרז שהיא מובילה בו לא נספר
+          </p>
+          {board.length === 0 || maniakRanking.length === 0 ? (
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>אין מכרזים פתוחים כרגע</p>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {maniakRanking.map(({ team, openNotLeading, leadingCount }, i) => {
+                const isMe = team.id === typedMyTeam?.id
+                // Nobody is the מניאק when nobody is in anything — with an empty
+                // top row the badge would just decorate whoever sorted first.
+                const isFirst = i === 0 && openNotLeading > 0
+                return (
+                  <div key={team.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm"
+                    style={{
+                      background: isMe ? 'rgba(99,102,241,0.1)' : isFirst ? 'rgba(239,68,68,0.07)' : 'var(--background)',
+                      border: isMe ? '1px solid rgba(99,102,241,0.3)' : isFirst ? '1px solid rgba(239,68,68,0.2)' : '1px solid transparent',
+                      opacity: team.is_complete ? 0.6 : 1,
+                    }}>
+                    <span className="font-bold w-5 text-center" style={{ color: isFirst ? 'var(--danger)' : 'var(--muted)' }}>
+                      {i + 1}
+                    </span>
+                    <span className="font-medium flex-1 truncate">
+                      {team.name}
+                      {leadingCount > 0 && (
+                        <span className="text-xs font-normal mr-1.5" style={{ color: 'var(--warning)' }}>
+                          (מוביל ב-{leadingCount} — לא נספר)
+                        </span>
+                      )}
+                    </span>
+                    {team.is_complete && <span className="badge badge-gray text-xs">הושלם</span>}
+                    {isFirst && <span className="badge badge-red text-xs">מניאק 💩</span>}
+                    {isMe && <span className="badge badge-blue text-xs">אתה</span>}
+                    <span className="font-bold" style={{ color: isFirst ? 'var(--danger)' : undefined }}>
+                      {openNotLeading}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       </div>
     )
