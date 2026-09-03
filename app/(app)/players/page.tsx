@@ -69,6 +69,7 @@ export default async function PlayersPage() {
             .select('*, drafting_team:teams!drafted_by_team_id(id, name)')
             .eq('league_id', league.id)
             .order('ranking', { ascending: true, nullsFirst: false })
+            .order('name', { ascending: true })
         : Promise.resolve({ data: [] }),
       league
         ? supabase.from('auctions').select('id, player_id').eq('league_id', league.id).eq('status', 'active').maybeSingle()
@@ -199,7 +200,8 @@ async function SnakeDraftPage({
     supabase.from('players')
       .select('*, drafting_team:teams!drafted_by_team_id(id, name)')
       .eq('league_id', league.id)
-      .order('ranking', { ascending: true, nullsFirst: false }),
+      .order('ranking', { ascending: true, nullsFirst: false })
+      .order('name', { ascending: true }),
     supabase.from('teams')
       .select('*')
       .eq('league_id', league.id)
@@ -349,7 +351,8 @@ async function OpenDraftPlayersPage({
     supabase.from('players')
       .select('*, drafting_team:teams!drafted_by_team_id(id, name)')
       .eq('league_id', league.id)
-      .order('ranking', { ascending: true, nullsFirst: false }),
+      .order('ranking', { ascending: true, nullsFirst: false })
+      .order('name', { ascending: true }),
     supabase.from('teams')
       .select('*')
       .eq('league_id', league.id)
