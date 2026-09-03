@@ -13,10 +13,11 @@ interface Props {
   playersPerTeam: number
   rosterSlots: Record<string, number> | null
   isSnake?: boolean
+  isOpen?: boolean
   pickNumbers?: Record<string, number>
 }
 
-export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTeam, playersPerTeam, rosterSlots, isSnake, pickNumbers = {} }: Props) {
+export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTeam, playersPerTeam, rosterSlots, isSnake, isOpen, pickNumbers = {} }: Props) {
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
 
   const visibleTeams = selectedTeamId ? teams.filter(t => t.id === selectedTeamId) : teams
@@ -86,7 +87,9 @@ export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTea
                     {team.is_complete && <span className="badge badge-green text-xs">✅ שלם</span>}
                     {!team.approved && <span className="badge badge-yellow text-xs">ממתין לאישור</span>}
                   </div>
-                  {!isSnake && (
+                  {/* Tiebreak priority is envelope-only — an ascending open-outcry
+                      auction cannot tie, and snake has no bidding at all. */}
+                  {!isSnake && !isOpen && (
                     <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
                       פריוריטי: {tiebreakPosition.get(team.id) ?? (team.is_complete ? 'הסתיים' : '—')}
                     </p>

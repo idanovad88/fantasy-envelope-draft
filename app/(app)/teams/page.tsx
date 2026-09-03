@@ -29,6 +29,7 @@ export default async function TeamsPage() {
     : { data: null }
 
   const isSnake = (league as League)?.draft_type === 'snake'
+  const isOpen = (league as League)?.draft_type === 'open'
 
   const [{ data: teams }, { data: players }, { data: snakePicks }] = await Promise.all([
     league
@@ -66,6 +67,7 @@ export default async function TeamsPage() {
         playersPerTeam={(league as League)?.players_per_team ?? 13}
         rosterSlots={(league as League)?.roster_slots ?? null}
         isSnake={isSnake}
+        isOpen={isOpen}
         pickNumbers={pickNumbers}
       />
     </div>
