@@ -2,6 +2,8 @@
 
 import { Fragment, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { usePlayerFilter } from '@/hooks/usePlayerFilter'
+import PlayerFilterBar from './PlayerFilterBar'
 
 type Player = {
   id: string
@@ -47,7 +49,6 @@ export default function PlayerPicker({
   askOpeningBid = false,
   maxOpeningBid,
 }: Props) {
-  const [query, setQuery] = useState('')
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState('')
   // Kept as a string so the field can be emptied while typing instead of
@@ -63,9 +64,8 @@ export default function PlayerPicker({
     openingBidNum >= 1 &&
     (maxOpeningBid === undefined || openingBidNum <= maxOpeningBid)
 
-  const filtered = query.trim()
-    ? players.filter(p => p.name.toLowerCase().includes(query.trim().toLowerCase()))
-    : players
+  const { query, setQuery, position, setPosition, sortKey, setSortKey, positions, filtered } =
+    usePlayerFilter(players)
 
   // The row button opens the amount panel instead of nominating outright; a
   // second press on the same row closes it again.
@@ -100,16 +100,18 @@ export default function PlayerPicker({
 
   return (
     <div className="card">
-      <div className="flex items-center justify-between mb-1 gap-3">
-        <h2 className="font-bold whitespace-nowrap">{title} ({players.length})</h2>
-        <input
-          className="input text-sm flex-1 max-w-48"
-          placeholder="חיפוש שחקן..."
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          dir="ltr"
-        />
-      </div>
+      <PlayerFilterBar
+        title={title}
+        total={players.length}
+        shown={filtered.length}
+        query={query}
+        onQuery={setQuery}
+        positions={positions}
+        position={position}
+        onPosition={setPosition}
+        sortKey={sortKey}
+        onSort={setSortKey}
+      />
 
       {error && (
         <p className="text-sm mb-2" style={{ color: 'var(--danger)' }}>{error}</p>
@@ -128,10 +130,10 @@ export default function PlayerPicker({
               </tr>
             </thead>
             <tbody>
-              {filtered.map((p, i) => (
+              {filtered.map(p => (
                 <Fragment key={p.id}>
                 <tr className="border-t" style={{ borderColor: 'var(--border)' }}>
-                  <td className="py-2 pr-2" style={{ color: 'var(--muted)' }}>{p.ranking ?? i + 1}</td>
+                  <td className="py-2 pr-2" style={{ color: 'var(--muted)' }}>{p.ranking ?? '—'}</td>
                   <td className="py-2">
                     <div className="flex items-center gap-2" dir="ltr">
                       {p.position && (

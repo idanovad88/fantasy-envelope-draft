@@ -315,3 +315,55 @@ export function getCountdown(targetDate: string) {
 
   return { hours, minutes, seconds, total: diff }
 }
+
+/**
+ * Canonical key for comparing two spellings of the same player.
+ *
+ * Strips diacritics (`Jokić` → `jokic`), punctuation (`T.J.` → `tj`,
+ * `Gilgeous-Alexander` → `gilgeousalexander`) and a trailing generational
+ * suffix, so `Jaren Jackson Jr.` and `Jaren Jackson Jr` collapse to one key.
+ */
+export function normalizePlayerName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[.'`\-]/g, '')
+    .replace(/\s+(jr|sr|ii|iii|iv|v)$/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** `?` and U+FFFD — one corrupted character standing for one lost letter. */
+const CORRUPTED_CHAR = /[?\uFFFD]/
+
+/**
+ * Resolves one player name against a set of candidate keys.
+ *
+ * The exact key is tried first. Failing that, a name carrying corrupted
+ * characters is retried with each of them as a single-character wildcard —
+ * the league's player pool was imported from a Latin-1 CSV that
+ * `ImportPlayers` read as UTF-8, so `Nikola Jokić` is stored as
+ * `Nikola Joki?` and `Dennis Schröder` as `Dennis Schr<FFFD>der`. Those are
+ * not obscure names: Jokić and Dončić are the two most expensive players in
+ * the draft, and without this they would match nothing and sort to the very
+ * bottom of the list.
+ *
+ * A wildcard that matches more than one candidate is rejected rather than
+ * guessed — an ambiguous match would silently give a player the wrong rank.
+ */
+export function matchPlayerName(name: string, candidateKeys: string[]): string | null {
+  const key = normalizePlayerName(name)
+  if (candidateKeys.includes(key)) return key
+  if (!CORRUPTED_CHAR.test(key)) return null
+
+  const pattern = [...key]
+    .map(c => {
+      if (CORRUPTED_CHAR.test(c)) return '.'
+      return /[.*+?^${}()|[\]\\]/.test(c) ? `\\${c}` : c
+    })
+    .join('')
+  const rx = new RegExp(`^${pattern}$`)
+  const hits = candidateKeys.filter(k => rx.test(k))
+  return hits.length === 1 ? hits[0] : null
+}

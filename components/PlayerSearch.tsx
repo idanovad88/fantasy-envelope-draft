@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { usePlayerFilter } from '@/hooks/usePlayerFilter'
+import PlayerFilterBar from './PlayerFilterBar'
 
 type Player = {
   id: string
@@ -15,24 +16,23 @@ interface Props {
 }
 
 export default function PlayerSearch({ players }: Props) {
-  const [query, setQuery] = useState('')
-
-  const filtered = query.trim()
-    ? players.filter(p => p.name.toLowerCase().includes(query.trim().toLowerCase()))
-    : players
+  const { query, setQuery, position, setPosition, sortKey, setSortKey, positions, filtered } =
+    usePlayerFilter(players)
 
   return (
     <div className="card">
-      <div className="flex items-center justify-between mb-1 gap-3">
-        <h2 className="font-bold whitespace-nowrap">שחקנים זמינים ({players.length})</h2>
-        <input
-          className="input text-sm flex-1 max-w-48"
-          placeholder="חיפוש שחקן..."
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          dir="ltr"
-        />
-      </div>
+      <PlayerFilterBar
+        title="שחקנים זמינים"
+        total={players.length}
+        shown={filtered.length}
+        query={query}
+        onQuery={setQuery}
+        positions={positions}
+        position={position}
+        onPosition={setPosition}
+        sortKey={sortKey}
+        onSort={setSortKey}
+      />
 
       {filtered.length === 0 ? (
         <p className="text-sm text-center py-4" style={{ color: 'var(--muted)' }}>לא נמצאו שחקנים</p>
@@ -46,9 +46,9 @@ export default function PlayerSearch({ players }: Props) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((p, i) => (
+              {filtered.map(p => (
                 <tr key={p.id} className="border-t" style={{ borderColor: 'var(--border)' }}>
-                  <td className="py-2 pr-2" style={{ color: 'var(--muted)' }}>{p.ranking ?? i + 1}</td>
+                  <td className="py-2 pr-2" style={{ color: 'var(--muted)' }}>{p.ranking ?? '—'}</td>
                   <td className="py-2">
                     <div className="flex items-center gap-2" dir="ltr">
                       {p.position && (

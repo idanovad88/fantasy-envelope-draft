@@ -1726,7 +1726,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                     <option value="">בחר שחקן...</option>
                     {availablePlayers.map(p => (
                       <option key={p.id} value={p.id}>
-                        {p.name}{p.position ? ` (${p.position})` : ''}
+                        {p.ranking ? `#${p.ranking} ` : ''}{p.name}{p.position ? ` (${p.position})` : ''}
                       </option>
                     ))}
                   </select>
