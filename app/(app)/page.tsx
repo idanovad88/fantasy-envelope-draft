@@ -678,7 +678,7 @@ export default async function DashboardPage() {
             <p className="text-sm" style={{ color: 'var(--muted)' }}>אין מכרזים פתוחים כרגע</p>
           ) : (
             <div className="flex flex-col gap-1">
-              {maniakRanking.map(({ team, openNotLeading, leadingCount }, i) => {
+              {maniakRanking.map(({ team, openNotLeading }, i) => {
                 const isMe = team.id === typedMyTeam?.id
                 // Nobody is the מניאק when nobody is in anything — with an empty
                 // top row the badge would just decorate whoever sorted first.
@@ -693,14 +693,7 @@ export default async function DashboardPage() {
                     <span className="font-bold w-5 text-center" style={{ color: isFirst ? 'var(--danger)' : 'var(--muted)' }}>
                       {i + 1}
                     </span>
-                    <span className="font-medium flex-1 truncate">
-                      {team.name}
-                      {leadingCount > 0 && (
-                        <span className="text-xs font-normal mr-1.5" style={{ color: 'var(--warning)' }}>
-                          (מוביל ב-{leadingCount} — לא נספר)
-                        </span>
-                      )}
-                    </span>
+                    <span className="font-medium flex-1 truncate">{team.name}</span>
                     {team.is_complete && <span className="badge badge-gray text-xs">הושלם</span>}
                     {isFirst && <span className="badge badge-red text-xs">מניאק 💩</span>}
                     {isMe && <span className="badge badge-blue text-xs">אתה</span>}
