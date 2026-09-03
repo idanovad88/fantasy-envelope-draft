@@ -407,6 +407,22 @@ Leagues can optionally define a roster slot configuration via `roster_slots` JSO
 - Team pages display players sorted by slot order; each player shows a blue badge with their slot. If the player's actual position differs from the slot, it appears in grey parentheses.
 - Migration: `supabase/migration_roster_slots.sql` — adds `roster_slots` to `leagues`, `roster_slot` to `players`, creates `assign_roster_slot()`, and updates `resolve_auction()` to call it.
 
+### Player pool: ranking and import
+
+The player list is ordered by `players.ranking` everywhere (`players/page.tsx` ×3, the admin panel, `PlayerPicker`, `PlayerSearch`). **That column is only ever populated from a CSV `rank` column** — a pool imported from a name-and-position file lands with `ranking = NULL` for every row, the `ORDER BY` becomes a total tie, and Postgres returns heap order, i.e. the order of the file. That is why the 2026-27 pool read alphabetically: it was imported from a 430-row `Player,Position` export with no rank.
+
+`nba_players_2026_27.csv` (`name,pos,team,rank,value`) is the ranked pool, pulled from ESPN's public fantasy API — the one call that carries rank *and* auction value for every ranked player:
+
+```
+POST-less GET https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/<year>/segments/0/leaguedefaults/3?view=kona_player_info
+header x-fantasy-filter: {"players":{"limit":900,"sortDraftRanks":{"sortPriority":100,"sortAsc":true,"value":"STANDARD"}}}
+```
+Read `player.draftRanksByRankType.STANDARD.{rank,auctionValue}`; `proTeamId` and `eligibleSlots` 0–4 give team and positions. ESPN's ranks contain ties, so renumber 1..N before writing the file. Regenerating for a new season is a browser job — the endpoint needs that header, so `WebFetch` cannot do it.
+
+⚠️ **Never re-run `/api/import-players` against a league that has already drafted.** It `insert`s with `status: 'available'` hardcoded and has no dedupe, so it creates a second, undrafted copy of every player, including the ones already sold. Re-ranking an existing league goes through **`POST /api/admin/update-player-rankings`** instead, which only ever `UPDATE`s, and only `ranking` (plus `nba_team` where still blank) — `status`, `drafted_by_team_id`, `draft_price` and `roster_slot` are never written. Send `dry_run: true` first and read the report; there is no dev database, so the first run hits the live league either way.
+
+⚠️ **`ImportPlayers` reads the file with `readAsText(file, 'UTF-8')`, and the pool exports are Latin-1.** Every accented name in the live league is therefore stored corrupted — `Nikola Jokić` as `Nikola Joki?`, `Dennis Schröder` as `Dennis Schr<FFFD>der` (16 names, `?` where Google Sheets already lost the character and U+FFFD where the Latin-1 byte was mis-decoded). This is not a cosmetic problem: **Jokić is rank 1 and Dončić rank 5**, so a naive name match drops the two most expensive players in the draft to the bottom of the list. `matchPlayerName()` in `lib/utils.ts` handles it by retrying a corrupted name with each bad character as a single-character regex wildcard, and **refusing any pattern that matches more than one candidate** rather than guessing. Against the live pool that recovers all 12 recoverable names with zero ambiguity (314/429 matched; the other 115 are genuinely unranked by ESPN and correctly sort last).
+
 ### Cancelling a bid (envelope only)
 
 A team can withdraw its sealed bid entirely while the auction is still open — `BidForm` shows a "בטל הצעה" button whenever the team already has a bid and the deadline hasn't passed. **One click, no confirmation step** (there was one; it was removed as noise) — the bid can simply be submitted again while the auction is open, so a mis-click costs nothing. Lowering the bid is not a substitute: the minimum is $1, so without this a team that bid the floor is locked in.
