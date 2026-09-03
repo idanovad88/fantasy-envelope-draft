@@ -305,7 +305,7 @@ export default async function DashboardPage() {
       // grows. Bounded by open_board_size × teams (tens of rows), so the
       // 1000-row cap is not in play.
       supabase.from('open_passes')
-        .select('team_id, auction:open_auctions!inner(league_id, status)')
+        .select('team_id, open_auction_id, auction:open_auctions!inner(league_id, status)')
         .eq('auction.league_id', selectedLeagueId).eq('auction.status', 'open'),
     ])
 
@@ -332,32 +332,48 @@ export default async function DashboardPage() {
       leadingByTeam.set(a.leader_team_id, { sum: cur.sum + a.current_price, count: cur.count + 1 })
     }
 
-    // מדד המניאק — in how many of the auctions on the board each team is still
-    // in *without leading*. A team is in until it PASSes: everyone counts until
-    // a pass row exists, however it was written — manual, admin, timeout or
-    // automatic. The auctions it leads are then subtracted: standing at the top
-    // of the price is a commitment, and the index is about the other case —
-    // sitting in an auction, holding it open for everyone else, without having
-    // put yourself on the hook for it.
-    const passesByTeam = new Map<string, number>()
-    for (const p of (passRows ?? []) as unknown as { team_id: string }[]) {
-      passesByTeam.set(p.team_id, (passesByTeam.get(p.team_id) ?? 0) + 1)
+    // מדד המניאק — in how many of the auctions on the board each team is
+    // actually applying pressure right now. Three subtractions, in order:
+    //
+    //  · auctions it has PASSed, however the pass row was written — manual,
+    //    admin, timeout or automatic;
+    //  · auctions it leads, because standing at the top of the price is a
+    //    commitment, not pressure;
+    //  · auctions where its ceiling cannot reach current_price + 1, so it
+    //    could not raise even if it wanted to.
+    //
+    // That last one is the same ceiling the board itself enforces —
+    // getOpenMaxBid(), with the money and the slots tied up in the auctions
+    // this team leads already deducted. It covers the two blocks the card
+    // shows separately ("אין תקציב" and "הכסף תפוס"): both mean the team is
+    // sitting in an auction it cannot answer, which is the opposite of what
+    // this index measures. Note the permanently broke case is usually gone
+    // already — open_settle_auction() writes it a pass row — so what this
+    // mostly removes is a team whose money is parked in its own leading bids.
+    const passedPairs = new Set<string>()
+    for (const p of (passRows ?? []) as unknown as { team_id: string; open_auction_id: string }[]) {
+      passedPairs.add(p.team_id + ':' + p.open_auction_id)
     }
     const maniakRanking = typedTeams
       .map(t => {
-        const leadingCount = (leadingByTeam.get(t.id) ?? { count: 0 }).count
+        const leading = leadingByTeam.get(t.id) ?? { sum: 0, count: 0 }
+        const maxBid = getOpenMaxBid(
+          t.budget_remaining, t.player_count, typedLeague.players_per_team, leading.sum, leading.count
+        )
         return {
           team: t,
-          // A leader never has a pass row on the auction it leads, so the two
-          // subtractions can never overlap and this cannot go negative.
-          openNotLeading: board.length - (passesByTeam.get(t.id) ?? 0) - leadingCount,
-          leadingCount,
+          contesting: board.filter(a =>
+            a.leader_team_id !== t.id &&
+            !passedPairs.has(t.id + ':' + a.id) &&
+            maxBid >= a.current_price + 1
+          ).length,
+          leadingCount: leading.count,
         }
       })
       // Equal counts break in favour of the team leading less: same pressure on
       // everyone else, less of its own money standing behind it.
       .sort((a, b) =>
-        b.openNotLeading - a.openNotLeading ||
+        b.contesting - a.contesting ||
         a.leadingCount - b.leadingCount ||
         a.team.name.localeCompare(b.team.name, 'he')
       )
@@ -672,17 +688,17 @@ export default async function DashboardPage() {
         <div className="card mt-4">
           <h2 className="font-bold mb-1">מדד המניאק 😈</h2>
           <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
-            בכמה מהמכרזים שעל הלוח כל קבוצה עדיין בפנים (לא סימנה PASS) אבל לא מובילה · מכרז שהיא מובילה בו לא נספר
+            בכמה מהמכרזים שעל הלוח כל קבוצה עדיין בפנים (לא סימנה PASS), לא מובילה, ויש לה תקציב להציע מעל המחיר הנוכחי
           </p>
           {board.length === 0 || maniakRanking.length === 0 ? (
             <p className="text-sm" style={{ color: 'var(--muted)' }}>אין מכרזים פתוחים כרגע</p>
           ) : (
             <div className="flex flex-col gap-1">
-              {maniakRanking.map(({ team, openNotLeading }, i) => {
+              {maniakRanking.map(({ team, contesting }, i) => {
                 const isMe = team.id === typedMyTeam?.id
                 // Nobody is the מניאק when nobody is in anything — with an empty
                 // top row the badge would just decorate whoever sorted first.
-                const isFirst = i === 0 && openNotLeading > 0
+                const isFirst = i === 0 && contesting > 0
                 return (
                   <div key={team.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm"
                     style={{
@@ -698,7 +714,7 @@ export default async function DashboardPage() {
                     {isFirst && <span className="badge badge-red text-xs">מניאק 💩</span>}
                     {isMe && <span className="badge badge-blue text-xs">אתה</span>}
                     <span className="font-bold" style={{ color: isFirst ? 'var(--danger)' : undefined }}>
-                      {openNotLeading}
+                      {contesting}
                     </span>
                   </div>
                 )
