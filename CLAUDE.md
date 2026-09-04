@@ -411,13 +411,29 @@ Leagues can optionally define a roster slot configuration via `roster_slots` JSO
 
 The player list is ordered by `players.ranking` everywhere (`players/page.tsx` ×3, the admin panel, `PlayerPicker`, `PlayerSearch`). **That column is only ever populated from a CSV `rank` column** — a pool imported from a name-and-position file lands with `ranking = NULL` for every row, the `ORDER BY` becomes a total tie, and Postgres returns heap order, i.e. the order of the file. That is why the 2026-27 pool read alphabetically: it was imported from a 430-row `Player,Position` export with no rank.
 
-`nba_players_2026_27.csv` (`name,pos,rank,value`) is the ranked pool, pulled from ESPN's public fantasy API — the one call that carries rank *and* auction value for every ranked player:
+#### The pool comes from ESPN, and nothing about it is manual any more
+
+`lib/espnPool.mjs` is the only code that reads ESPN. It is plain `.mjs` on purpose — `scripts/fetch-espn-ranks.mjs` has no TypeScript runner, and `allowJs` lets the route import the same file, so the script and the server can never disagree about what a rank is.
 
 ```
-POST-less GET https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/<year>/segments/0/leaguedefaults/3?view=kona_player_info
-header x-fantasy-filter: {"players":{"limit":900,"sortDraftRanks":{"sortPriority":100,"sortAsc":true,"value":"STANDARD"}}}
+GET https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/<year>/segments/0/leaguedefaults/3?view=kona_player_info
+header x-fantasy-filter: {"players":{"limit":450,"sortDraftRanks":{"sortPriority":100,"sortAsc":true,"value":"STANDARD"}}}
 ```
-Read `player.draftRanksByRankType.STANDARD.{rank,auctionValue}`; `proTeamId` and `eligibleSlots` 0–4 give team and positions. ESPN's ranks contain ties, so renumber 1..N before writing the file. Regenerating for a new season is a browser job — the endpoint needs that header, so `WebFetch` cannot do it.
+
+Read `player.draftRanksByRankType.STANDARD.{rank,auctionValue}`; `eligibleSlots` 0–4 map to PG/SG/SF/PF/C (verified to reproduce the pool 387/387). A season is named by the year it *ends* in, and `limit: 450` covers all 387 ranked players in 15.5MB — the old 900 pulled 21MB for nothing.
+
+**Regenerating is not a browser job.** That claim was only ever true of `WebFetch`, which cannot send the `x-fantasy-filter` header; `curl` and `fetch` can, and the whole call takes under two seconds. `npm run ranks` rewrites both outputs:
+
+| file | read by |
+|---|---|
+| `nba_players_<season>.csv` | the admin panel's manual paste, still there for fixing an existing league |
+| `data/nba-pool.json` | `create-league`, as the fallback when ESPN is unreachable |
+
+`node scripts/fetch-espn-ranks.mjs --check` writes nothing and exits 1 when the ranks actually moved — that is what the weekly scheduled task runs.
+
+⚠️ **Break the ties deterministically or the diff is worthless.** ESPN's ranks contain ties — 7 of them today, covering 14 players — and **the order it returns tied players in is not stable between calls.** Renumbering 1..N in response order therefore produced a different file every run: two calls minutes apart swapped Mobley/Adebayo, Okongwu/Lillard and two more pairs, all four with identical auction values. The sort is `rank ASC → auctionValue DESC → name ASC` before renumbering, and the JSON's keys are written field by field rather than spread, because key order is part of the file the diff compares. Two consecutive runs must be byte-identical; that is the one test worth re-running after touching this.
+
+**A new league seeds itself.** `POST /api/create-league` fetches the pool live (8s timeout, `maxDuration = 30`), falls back to the bundled JSON, and inserts all 387 rows — the row shape copied from `/api/import-players`, `nba_team` left NULL. **A seeding failure must never 500**: the league row already exists, so the route returns `{ success: true, seeded, seedSource }` and the page tells the creator to import by hand when `seeded` is 0. Live-first means a league created today has today's ranks without waiting for a deploy; the bundled file only has to be current enough to be a net.
 
 ⚠️ **Never re-run `/api/import-players` against a league that has already drafted.** It `insert`s with `status: 'available'` hardcoded and has no dedupe, so it creates a second, undrafted copy of every player, including the ones already sold. Re-ranking an existing league goes through **`POST /api/admin/update-player-rankings`** instead, which only ever `UPDATE`s, and only `ranking` (plus `nba_team` where still blank) — `status`, `drafted_by_team_id`, `draft_price` and `roster_slot` are never written. Send `dry_run: true` first and read the report; there is no dev database, so the first run hits the live league either way.
 

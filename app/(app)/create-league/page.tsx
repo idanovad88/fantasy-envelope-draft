@@ -36,6 +36,7 @@ export default function CreateLeaguePage() {
   const [joinDraft, setJoinDraft] = useState(false)
   const [teamName, setTeamName] = useState('')
   const [error, setError] = useState('')
+  const [poolWarning, setPoolWarning] = useState(false)
   const [loading, setLoading] = useState(false)
   const supabase = createClient()
   const router = useRouter()
@@ -79,6 +80,14 @@ export default function CreateLeaguePage() {
       return
     }
 
+    // The league exists either way; only an empty pool is worth stopping for,
+    // because it is the one case that needs a manual import from the panel.
+    if (data.seeded === 0) {
+      setPoolWarning(true)
+      setLoading(false)
+      return
+    }
+
     router.push('/admin')
     router.refresh()
   }
@@ -98,6 +107,27 @@ export default function CreateLeaguePage() {
           <p className="text-3xl mb-3">🔒</p>
           <p className="font-bold mb-2">אינך מורשה להקים ליגה</p>
           <p className="text-sm" style={{ color: 'var(--muted)' }}>פנה למנהל המערכת להוסיף את כתובת המייל שלך לרשימת המורשים.</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (poolWarning) {
+    return (
+      <div className="max-w-lg mx-auto mt-12">
+        <div className="card text-center">
+          <p className="text-3xl mb-3">⚠️</p>
+          <p className="font-bold mb-2">הליגה הוקמה, אבל בלי שחקנים</p>
+          <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>
+            לא הצלחנו למשוך את רשימת השחקנים. אפשר לייבא אותה ידנית מהפאנל — אדמין ← שחקנים ← ייבוא CSV.
+          </p>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => { router.push('/admin'); router.refresh() }}
+          >
+            המשך לפאנל הניהול
+          </button>
         </div>
       </div>
     )
