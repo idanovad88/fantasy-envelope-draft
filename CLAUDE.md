@@ -411,7 +411,7 @@ Leagues can optionally define a roster slot configuration via `roster_slots` JSO
 
 The player list is ordered by `players.ranking` everywhere (`players/page.tsx` ×3, the admin panel, `PlayerPicker`, `PlayerSearch`). **That column is only ever populated from a CSV `rank` column** — a pool imported from a name-and-position file lands with `ranking = NULL` for every row, the `ORDER BY` becomes a total tie, and Postgres returns heap order, i.e. the order of the file. That is why the 2026-27 pool read alphabetically: it was imported from a 430-row `Player,Position` export with no rank.
 
-`nba_players_2026_27.csv` (`name,pos,team,rank,value`) is the ranked pool, pulled from ESPN's public fantasy API — the one call that carries rank *and* auction value for every ranked player:
+`nba_players_2026_27.csv` (`name,pos,rank,value`) is the ranked pool, pulled from ESPN's public fantasy API — the one call that carries rank *and* auction value for every ranked player:
 
 ```
 POST-less GET https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/<year>/segments/0/leaguedefaults/3?view=kona_player_info
@@ -429,7 +429,7 @@ The symptom that prompted it is worth recognising on sight: **pressing "דירו
 SELECT count(*) FROM players WHERE league_id = '<id>' AND ranking IS NOT NULL;
 ```
 
-⚠️ **The `team` column in `nba_players_2026_27.csv` is wrong and must not be applied** — the ESPN scrape's `proTeamId` lookup is broken (Giannis → MIA, LeBron → PHI, Zubac → IND). `name`, `pos` and `rank` are all correct, so the ranks themselves are sound. The live pool was imported from a `Player,Position` sheet with no team column at all, so `update-player-rankings`' "fill a blank `nba_team`" branch wrote 250 bogus teams on the first run; they were cleared back to NULL the same day. Strip the column, or re-scrape, before pointing that CSV at another league.
+⚠️ **`nba_players_2026_27.csv` carries no `team` column, and that is deliberate — do not add one back from the same scrape.** The `proTeamId` lookup in the ESPN recipe above is broken (Giannis → MIA, LeBron → PHI, Zubac → IND) and the column was dropped on 2026-09-04 after `update-player-rankings`' "fill a blank `nba_team`" branch wrote 250 bogus teams into the live pool — which had none, having been imported from a `Player,Position` sheet. They were cleared back to NULL the same day. `name`, `pos` and `rank` were correct throughout, so the ranks are sound; a future scrape must have its team mapping checked against a few known players before the column comes back.
 
 ⚠️ **`ImportPlayers` reads the file with `readAsText(file, 'UTF-8')`, and the pool exports are Latin-1.** Every accented name in the live league is therefore stored corrupted — `Nikola Jokić` as `Nikola Joki?`, `Dennis Schröder` as `Dennis Schr<FFFD>der` (16 names, `?` where Google Sheets already lost the character and U+FFFD where the Latin-1 byte was mis-decoded). This is not a cosmetic problem: **Jokić is rank 1 and Dončić rank 5**, so a naive name match drops the two most expensive players in the draft to the bottom of the list. `matchPlayerName()` in `lib/utils.ts` handles it by retrying a corrupted name with each bad character as a single-character regex wildcard, and **refusing any pattern that matches more than one candidate** rather than guessing. Against the live pool that recovers all 12 recoverable names with zero ambiguity (314/429 matched; the other 115 are genuinely unranked by ESPN and correctly sort last).
 

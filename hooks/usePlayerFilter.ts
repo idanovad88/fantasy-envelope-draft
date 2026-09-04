@@ -11,10 +11,32 @@ export type FilterablePlayer = {
 export type SortKey = 'rank' | 'name'
 
 /** Canonical order for the position chips; anything else follows, alphabetically. */
-const POSITION_ORDER = ['PG', 'SG', 'SF', 'PF', 'C']
+const POSITION_ORDER = ['PG', 'SG', 'G', 'SF', 'PF', 'F', 'C']
+
+/**
+ * G and F are group chips, not positions of their own: they stand for the
+ * guards and the forwards, the same way the G and F roster slots do.
+ *
+ * Each group also covers a player listed as a bare "G" or "F" — the pool has
+ * a few, ESPN lists them that way — so the chip is a superset of its own
+ * label rather than something competing with it. Without that a bare-G player
+ * would be the *only* thing behind the G chip, which is what made pressing it
+ * look broken: 5 rows out of 135 guards.
+ */
+const POSITION_GROUPS: Record<string, string[]> = {
+  G: ['PG', 'SG', 'G'],
+  F: ['SF', 'PF', 'F'],
+}
 
 function splitPositions(position: string | null): string[] {
   return (position ?? '').split('/').map(p => p.trim()).filter(Boolean)
+}
+
+/** Does a player belong under `chip` — a group chip or a plain position? */
+function matchesPosition(position: string | null, chip: string): boolean {
+  const parts = splitPositions(position)
+  const group = POSITION_GROUPS[chip]
+  return group ? parts.some(p => group.includes(p)) : parts.includes(chip)
 }
 
 /**
@@ -34,6 +56,10 @@ export function usePlayerFilter<T extends FilterablePlayer>(players: T[]) {
     const seen = new Set<string>()
     // A player listed as "PG/SG" belongs under both chips.
     for (const p of players) for (const part of splitPositions(p.position)) seen.add(part)
+    // A group chip appears as soon as anyone in the pool falls under it.
+    for (const [chip, group] of Object.entries(POSITION_GROUPS)) {
+      if (group.some(p => seen.has(p))) seen.add(chip)
+    }
     return [...seen].sort((a, b) => {
       const ai = POSITION_ORDER.indexOf(a), bi = POSITION_ORDER.indexOf(b)
       if (ai !== -1 && bi !== -1) return ai - bi
@@ -47,7 +73,7 @@ export function usePlayerFilter<T extends FilterablePlayer>(players: T[]) {
     const q = query.trim().toLowerCase()
     const out = players.filter(p =>
       (!q || p.name.toLowerCase().includes(q)) &&
-      (!position || splitPositions(p.position).includes(position))
+      (!position || matchesPosition(p.position, position))
     )
     return out.sort((a, b) => {
       if (sortKey === 'name') return a.name.localeCompare(b.name)
