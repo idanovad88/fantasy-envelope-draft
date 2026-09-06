@@ -134,6 +134,8 @@ All join logic is in `app/api/join-league/route.ts` (uses admin client to bypass
 5. Check capacity: `teams.count < league.num_teams`
 6. Create new team with `approved: true`
 
+⚠️ **Step 4 must stay an error — never re-link a taken name to the caller.** It did until 2026-09-06: a name collision moved `teams.user_id` to whoever asked, and carried the previous owner's `admin_users` row across with it. League name + join code were therefore enough to take over another manager's team, and their admin rights along with it — and a join code is shared with every prospective member of the league. Step 3 already covers the only legitimate case (the same person coming back), because a Google `user_id` is stable. The check uses `.limit(1).maybeSingle()`: two names differing only in case would make a bare `.maybeSingle()` error out, leaving `data` null and the gate open.
+
 ### Team assistant managers (עוזר מנהל)
 
 A team can have **one optional assistant manager** (`teams.assistant_user_id`) who acts as the team on **draft actions only**:

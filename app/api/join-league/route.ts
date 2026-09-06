@@ -30,27 +30,17 @@ export async function POST(req: Request) {
     .from('teams').select('id').eq('user_id', user.id).eq('league_id', league.id).maybeSingle()
   if (existingByUser) return NextResponse.json({ success: true })
 
-  // Team name exists → re-link to current user (admin client bypasses RLS)
+  // Team name exists → refuse. Under Google auth a user's id is stable, so a
+  // name collision is always a different person — the same person coming back
+  // is caught by the user_id check above. This used to re-link the team to the
+  // caller and carry the previous owner's admin_users row over with it, which
+  // made league name + join code enough to take over someone else's team, and
+  // their admin rights along with it.
   const { data: existingByName } = await admin
-    .from('teams').select('id, user_id').eq('league_id', league.id).ilike('name', teamName.trim()).maybeSingle()
+    .from('teams').select('id').eq('league_id', league.id).ilike('name', teamName.trim())
+    .limit(1).maybeSingle()
   if (existingByName) {
-    const oldUserId = existingByName.user_id
-    await admin.from('teams').update({ user_id: user.id }).eq('id', existingByName.id)
-
-    // Transfer admin permissions from old session to new session
-    if (oldUserId && oldUserId !== user.id) {
-      const { data: oldAdminRow } = await admin
-        .from('admin_users').select('league_id, role').eq('user_id', oldUserId).maybeSingle()
-      if (oldAdminRow) {
-        await admin.from('admin_users').upsert(
-          { user_id: user.id, league_id: oldAdminRow.league_id, role: oldAdminRow.role },
-          { onConflict: 'user_id' }
-        )
-        await admin.from('admin_users').delete().eq('user_id', oldUserId)
-      }
-    }
-
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ error: 'שם הקבוצה כבר תפוס בליגה — בחר שם אחר' }, { status: 400 })
   }
 
   // Check capacity
