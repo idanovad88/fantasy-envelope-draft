@@ -294,6 +294,7 @@ A team blocked only by its own commitments therefore sits in the auction unable 
 8. `supabase/migration_open_undo_clears_auto_passes.sql` — `open_undo_auction()` also clears the `complete` / `no_budget` passes it invalidated. Also folded into #1 and #6.
 9. `supabase/migration_open_night_actions.sql` — bidding and PASS through the night (see **The night stops the clock, not the managers** above): adds `open_accepts_actions()` and `open_clock_now()`, and replaces `open_place_bid()` / `open_pass()`. Also folded into #1. Applied 2026-09-02. ⚠️ It **supersedes #5**, which replaces `open_place_bid()` with the night-blind version — re-running that file after this one silently reverts night bidding, so its header now says so.
 10. `supabase/migration_open_nominate_at_night.sql` — the same for nominating: `open_nominate()` moves to `open_accepts_actions()`, and its opening window to `open_clock_now()`. Also folded into #1. ⚠️ It **supersedes #7** for the same reason #9 supersedes #5.
+11. `supabase/migration_open_notifications.sql` — `player_watch`, `open_notifications`, and the two `open_notify_*` functions behind the push notifications (see **Open outcry notifications** below). Self-contained; it touches none of the functions above, so nothing here supersedes anything. Its companion `supabase/cron_notify_open.sql` schedules the job by hand.
 
 ### Trade system (snake only)
 
@@ -468,7 +469,7 @@ The winner finale is unchanged and independent of this order. Set in **Admin →
 
 ### Push notifications (envelope only)
 
-Web Push reminder sent `leagues.notify_before_minutes` (default 1) before an auction's `reveal_time`, **to every team manager and assistant manager in the league** — regardless of whether they've already bid, and regardless of `is_complete`. A finished roster can no longer bid but still follows the draft, so it is told when an auction is about to close. The only filter on recipients is `approved = true`. Works with the app closed. This is the only scheduled work that leaves the database — see **Scheduled jobs** below for the other one, which does not.
+Web Push reminder sent `leagues.notify_before_minutes` (default 1) before an auction's `reveal_time`, **to every team manager and assistant manager in the league** — regardless of whether they've already bid, and regardless of `is_complete`. A finished roster can no longer bid but still follows the draft, so it is told when an auction is about to close. The only filter on recipients is `approved = true`. Works with the app closed. One of two scheduled jobs that leave the database — the other is `notify-open-draft`, under **Open outcry notifications** below.
 
 ⚠️ **The schedule lives in the database, not in this repo.** Nothing in the codebase reveals that a cron exists. It is a `pg_cron` job created by hand once from `supabase/cron_notify_auctions.sql`:
 ```sql
@@ -482,9 +483,13 @@ Requires the `pg_cron` and `pg_net` extensions (Supabase Dashboard → Database 
 
 **Pieces:**
 - `public/sw.js` — service worker: `push` + `notificationclick` (opens `/auction`). Deliberately **no `fetch` handler** (would break cookie-auth SSR). Must stay excluded in the `proxy.ts` matcher.
-- `components/PushSubscribe.tsx` — opt-in button, mounted in the "my team" card of the **envelope** dashboard only. `Notification.requestPermission()` must stay the **first** `await` — iOS drops the user-gesture context otherwise.
+- `components/PushSubscribe.tsx` — opt-in button, mounted in the "my team" card of the envelope **and** open dashboards (`label` changes what it offers; one subscription covers both formats, since `push_subscriptions` is per device and not per league). `Notification.requestPermission()` must stay the **first** `await` — iOS drops the user-gesture context otherwise.
 - `POST /api/push/{subscribe,unsubscribe}` → `push_subscriptions` (service-role-only table, RLS with no policies, like `team_invites` — an endpoint is a bearer capability to push to a device and must never be publicly selectable). `subscribe` upserts on `endpoint`, so re-POSTing on every mount is free and self-heals rotated endpoints.
-- `GET /api/cron/notify-auctions` — `runtime = 'nodejs'` (web-push needs Node crypto; edge breaks it). Bearer `CRON_SECRET`. Also activates overdue `pending` auctions first, since nothing else does so on a timer. Recipients = `user_id` + `assistant_user_id` of every approved team (complete rosters included).
+- `GET /api/cron/notify-auctions` — `runtime = 'nodejs'` (web-push needs Node crypto; edge breaks it). The sending itself is `sendPushToUsers()` in `lib/push.ts`, shared with the open-draft route: it fetches the subscriptions, sends, and prunes 404/410 endpoints while deliberately **not** pruning on a 401/403 (that is one bad VAPID key, and pruning would wipe every subscription in the app). Bearer `CRON_SECRET`. Also activates overdue `pending` auctions first, since nothing else does so on a timer. Recipients = `user_id` + `assistant_user_id` of every approved team (complete rosters included).
+
+⚠️ **"Registration failed - push service error" is a stale subscription far more often than a broken key.** The same build subscribes fine on a laptop and fails on a phone, which reads like a server problem and is not one: `pushManager.subscribe()` never touches our server. The browser is holding a registration its push service will no longer honour — from an earlier VAPID key, an earlier install of the PWA, or a service worker that has since been replaced (replacing `sw.js` is enough to trigger it). `subscribeWithRetry()` in `PushSubscribe` drops whatever subscription is there and asks once more; that is what fixed it on 2026-09-06, after removing and reinstalling the PWA had not.
+
+**A phone has no console, so a failure prints its own diagnosis.** One line under the button: error name, the browser's message, iOS/Android, PWA vs browser tab, the permission state, and the first 8 characters and length of the VAPID key **this bundle** is using. That last field is the only thing that separates a device problem from a deploy problem — Vercel stores the env var as a Secret, so it cannot be read back any other way, and the chunk carrying it is behind auth so it cannot be grepped out of the deployed bundle either. `BCllnhWt..87` is the current key.
 
 **Idempotency:** `auction_notifications` with `UNIQUE (auction_id, kind, reveal_time)`. The cron inserts the claim row **before** sending, so overlapping ticks can't double-send. `reveal_time` is part of the key on purpose: if an admin moves the deadline, that's a new key and a fresh reminder goes out (the `tag` on the notification replaces the stale one in the tray).
 
@@ -494,15 +499,42 @@ Requires the `pg_cron` and `pg_net` extensions (Supabase Dashboard → Database 
 
 **Migration:** `supabase/migration_push_notifications.sql` — `push_subscriptions`, `auction_notifications`, `leagues.notify_before_minutes`, partial index on `auctions(reveal_time)`. Run it **before** deploying: `saveLeague()` sends `notify_before_minutes`, and if the column is missing PostgREST rejects the *entire* league-settings save.
 
+### Open outcry notifications
+
+The open format sent nothing until now, which with a 30-minute soft-close window meant a manager had to be watching the screen. Three notifications, all open-only, all riding the same `push_subscriptions` rows as the envelope reminder:
+
+| What | To whom | Fires on |
+|---|---|---|
+| 🏀 תורך להעלות שחקן | that team's owner + assistant | a board slot opening for it |
+| ⭐ a starred player | everyone who starred him | he goes up, and every raise against him |
+| ❗ עקפו אותך | the previous leader | being outbid |
+
+**The decision of what is due lives in Postgres**, in two read-only functions — `open_notify_turn_candidates()` and `open_notify_bid_events()`. The pg_cron guard and `/api/cron/notify-open` call the *same* two functions, so unlike `notify-auctions` the guard cannot drift from the route: widening one widens the other by construction. Both are `SECURITY DEFINER`, so both need `REVOKE EXECUTE … FROM anon, authenticated` **by name** and are covered by the `open_*` grants check.
+
+**Night holds the notification, not the action.** Nominating, bidding and PASS all run through the night in this format; a push does not. Both functions filter on `open_within_hours()`, so an event at 03:00 is not due until `draft_start_hour`. This is also why the bid key is the **latest bid of each open auction** rather than every row of the ledger: five overnight raises on one player collapse into one morning notification carrying the current price, not five stale ones.
+
+**Claim keys** (`open_notifications`, service-role only, claim inserted *before* sending):
+- turn — `(team_id, priority_rank)`. `demote_nomination_rank()` writes `MAX(rank) + 1`, so a team's rank rises strictly after every nomination: one notification per turn cycle, and no repeat within it. Rewriting the order by hand in the admin lottery tab can hand a team a rank it already held, which swallows one notification — known and accepted.
+- bid — the `open_bids` row id.
+
+**A user is never told twice about one bid.** The bidder's own managers are excluded outright, and a user who was both outbid and following the player gets only "עקפו אותך" — the stronger of the two. Every push for an auction carries the same `tag`, so a later raise **replaces** the earlier toast instead of stacking a stale price on top of it. `public/sw.js` reads `payload.tag`, falling back to the older `payload.auctionId` form for service workers installed before it existed.
+
+**Starring a player** is `player_watch`, per **user** (an owner and their assistant each keep their own) and private under own-rows-only RLS — which is what lets the server components read it with the cookie client. Writes go through `POST /api/players/watch`, which additionally checks league membership. The star is rendered in three places, and the third is not optional: a nominated player becomes `on_auction` and **leaves the players page's available list**, so the star is repeated on the board cards there and on every card of `OpenAuctionBoard`. The dashboard's "רשימת המעקב שלי" card is the one view that follows a starred player all the way from pool to sale.
+
+**⚠️ The baseline matters.** `migration_open_notifications.sql` ends by claiming everything already true — every current turn and the latest bid of every open auction — so switching this on mid-draft does not fire a backlog at a live league. Re-running the migration re-baselines and will swallow anything pending at that moment.
+
+**Order of deployment:** migration → deploy → `cron.schedule`. The players and auction pages read `player_watch`, so the app is broken (error boundary) until the table exists.
+
 ### Scheduled jobs (pg_cron)
 
-**Three** jobs run every minute, all created by hand, all living only in the database. Nothing in the app imports them and `cron.job` is the only place they exist:
+**Four** jobs run every minute, all created by hand, all living only in the database. Nothing in the app imports them and `cron.job` is the only place they exist:
 
 | Job | Runs | Costs Vercel? |
 |---|---|---|
 | `auto-resolve-expired-auctions` | `SELECT auto_resolve_expired_auctions()` — pure SQL | No |
 | `notify-auctions` | `net.http_post` → `/api/cron/notify-auctions` | Yes, and it is guarded |
 | `open-draft-tick` | `SELECT open_draft_tick_all()` — pure SQL | No |
+| `notify-open-draft` | `net.http_post` → `/api/cron/notify-open` | Yes, and it is guarded |
 
 ```sql
 SELECT jobid, jobname, schedule, active, command FROM cron.job ORDER BY jobid;
@@ -522,6 +554,8 @@ Any row is an auction the resolver has been failing on; the warning text is in S
 **`notify-auctions`** is covered under **Push notifications** above — note especially that its schedule is guarded and why.
 
 **`open-draft-tick`** (`supabase/cron_open_draft_tick.sql`) drives the open outcry board: freeze/thaw around pauses and night hours, then close any auction past its deadline. Pure SQL, so no guard is needed. Its per-league failures are swallowed into `RAISE WARNING` the same way — the query that finds a stuck auction is in that file.
+
+**`notify-open-draft`** (`supabase/cron_notify_open.sql`) is the open-outcry half of push — see **Open outcry notifications** below. Its guard cannot drift from what the route does, because both call the same two functions.
 
 ### Auction activation (`lib/auctions.ts`)
 

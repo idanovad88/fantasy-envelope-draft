@@ -28,9 +28,12 @@ self.addEventListener('push', event => {
     badge: '/icons/icon-192.png',
     dir: 'rtl',
     lang: 'he',
-    // Re-notifying after an admin moves reveal_time replaces the old toast
-    // instead of stacking a second one for the same auction.
-    tag: payload.auctionId ? 'auction-' + payload.auctionId : 'auction',
+    // A later push with the same tag REPLACES the earlier toast instead of
+    // stacking: re-notifying after an admin moves reveal_time, and every raise
+    // on an open auction, must not fill the tray with stale prices.
+    // payload.auctionId is the older form, still sent by the envelope cron so
+    // that a service worker installed before `tag` existed keeps grouping.
+    tag: payload.tag || (payload.auctionId ? 'auction-' + payload.auctionId : 'auction'),
     renotify: true,
     data: { url: payload.url || '/auction' },
   }

@@ -23,6 +23,7 @@ import RealtimeRefresher from '@/components/RealtimeRefresher'
 import JoinLeagueForm from '@/components/JoinLeagueForm'
 import AssistantManager from '@/components/AssistantManager'
 import PushSubscribe from '@/components/PushSubscribe'
+import WatchStar from '@/components/WatchStar'
 import { activateOverdueSnakeDraft } from '@/lib/activateDraft'
 import { settleOpenDraft } from '@/lib/openDraft'
 
@@ -284,13 +285,13 @@ export default async function DashboardPage() {
   if (typedLeague?.draft_type === 'open') {
     await settleOpenDraft(selectedLeagueId)
 
-    const [{ data: teams }, { data: openRows }, { data: recentRows }, { data: passRows }] = await Promise.all([
+    const [{ data: teams }, { data: openRows }, { data: recentRows }, { data: passRows }, { data: watchRows }] = await Promise.all([
       // Every approved team, ranked or not — the summary table below lists
       // them all, and getOpenNominationOrder() drops the unranked ones itself.
       supabase.from('teams').select('*').eq('league_id', selectedLeagueId).eq('approved', true)
         .order('priority_rank', { ascending: true }),
       supabase.from('open_auctions')
-        .select('id, current_price, leader_team_id, deadline_at, player:players(name), leader_team:teams!leader_team_id(name)')
+        .select('id, current_price, leader_team_id, deadline_at, player_id, player:players(name), leader_team:teams!leader_team_id(name)')
         .eq('league_id', selectedLeagueId).eq('status', 'open')
         .order('created_at', { ascending: true }),
       // Winners only, straight off the auction row — the bid ledger is never
@@ -307,6 +308,12 @@ export default async function DashboardPage() {
       supabase.from('open_passes')
         .select('team_id, open_auction_id, auction:open_auctions!inner(league_id, status)')
         .eq('auction.league_id', selectedLeagueId).eq('auction.status', 'open'),
+      // The caller's own starred players, with everything the card needs to say
+      // where each one stands. player_watch is own-rows-only under RLS, so this
+      // can never return anyone else's list. Bounded by what one user starred.
+      supabase.from('player_watch')
+        .select('player_id, player:players(id, name, position, ranking, status, draft_price, drafting_team:teams!drafted_by_team_id(name))')
+        .eq('league_id', selectedLeagueId).eq('user_id', user!.id),
     ])
 
     const typedTeams = (teams || []) as Team[]
@@ -315,6 +322,7 @@ export default async function DashboardPage() {
       current_price: number
       leader_team_id: string | null
       deadline_at: string
+      player_id: string
       player: { name: string } | null
       leader_team: { name: string } | null
     }[]
@@ -376,6 +384,34 @@ export default async function DashboardPage() {
         b.contesting - a.contesting ||
         a.leadingCount - b.leadingCount ||
         a.team.name.localeCompare(b.team.name, 'he')
+      )
+
+    // ⭐ רשימת המעקב — the starred players and where each one stands. The list
+    // is private to this user (own-rows-only RLS on player_watch) and exists
+    // because a player leaves the players page's available list the moment he
+    // is nominated: this is the one place that follows him from pool to sale.
+    const boardByPlayer = new Map(board.map(a => [a.player_id, a]))
+    type WatchRow = {
+      player_id: string
+      player: {
+        id: string
+        name: string
+        position: string | null
+        ranking: number | null
+        status: 'available' | 'on_auction' | 'drafted'
+        draft_price: number | null
+        drafting_team: { name: string } | null
+      } | null
+    }
+    // On the board first, then still in the pool by ranking, then sold.
+    const watchGroup = (w: { live: unknown; status: string }) =>
+      w.live ? 0 : w.status === 'drafted' ? 2 : 1
+    const watchlist = ((watchRows ?? []) as unknown as WatchRow[])
+      .flatMap(w => (w.player ? [{ ...w.player, live: boardByPlayer.get(w.player_id) ?? null }] : []))
+      .sort((a, b) =>
+        watchGroup(a) - watchGroup(b) ||
+        (a.ranking ?? 9999) - (b.ranking ?? 9999) ||
+        a.name.localeCompare(b.name)
       )
 
     const order = getOpenNominationOrder(
@@ -544,6 +580,9 @@ export default async function DashboardPage() {
                     role={isTeamOwner ? 'owner' : 'assistant'}
                   />
                 )}
+                {(isTeamOwner || isTeamAssistant) && (
+                  <PushSubscribe label="🔔 הפעל התראות דראפט" />
+                )}
               </div>
             ) : createdLeague ? (
               <div>
@@ -579,6 +618,47 @@ export default async function DashboardPage() {
             )}
           </div>
         </div>
+
+        {watchlist.length > 0 && (
+          <div className="card mb-4">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h2 className="font-bold">⭐ רשימת המעקב שלי ({watchlist.length})</h2>
+              <Link href="/players" className="text-sm" style={{ color: 'var(--primary)' }}>לכל השחקנים</Link>
+            </div>
+            <div className="flex flex-col">
+              {watchlist.map(p => (
+                <div
+                  key={p.id}
+                  className="flex items-center gap-2 py-2 border-b text-sm"
+                  style={{ borderColor: 'var(--border)', opacity: p.status === 'drafted' ? 0.6 : 1 }}
+                >
+                  <WatchStar playerId={p.id} watched />
+                  <span className="font-medium truncate flex-1" dir="ltr">{p.name}</span>
+                  {p.live ? (
+                    <>
+                      <span className="badge badge-yellow">במכרז · ${p.live.current_price}</span>
+                      <span
+                        className="truncate"
+                        style={{
+                          maxWidth: '7rem',
+                          color: p.live.leader_team_id === typedMyTeam?.id ? 'var(--success)' : 'var(--muted)',
+                        }}
+                      >
+                        {p.live.leader_team_id === typedMyTeam?.id ? 'אתה מוביל' : p.live.leader_team?.name ?? '—'}
+                      </span>
+                    </>
+                  ) : p.status === 'drafted' ? (
+                    <span style={{ color: 'var(--muted)' }}>
+                      {p.drafting_team?.name ?? '—'} · ${p.draft_price ?? 0}
+                    </span>
+                  ) : (
+                    <span style={{ color: 'var(--muted)' }}>עדיין לא עלה</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Teams, budget and ceiling — the envelope dashboard's summary table,
             side by side with the nomination order it explains. */}

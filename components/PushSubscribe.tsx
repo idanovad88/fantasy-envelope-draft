@@ -27,10 +27,55 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 
 type State = 'loading' | 'unsupported' | 'ios-not-installed' | 'denied' | 'subscribed' | 'idle'
 
-export default function PushSubscribe() {
+/**
+ * Ask the browser for a push subscription, and try a second time on failure
+ * with whatever subscription it is already holding thrown away.
+ *
+ * A phone that has subscribed before — under an earlier VAPID key, an earlier
+ * install of the PWA, or a service worker that has since been replaced — can be
+ * left with a registration the push service will no longer honour. Chrome and
+ * iOS both report that as a flat "Registration failed - push service error"
+ * with nothing to act on, and it is unrecoverable from the UI: the button looks
+ * broken forever while the same code works on a desktop that never subscribed.
+ * Dropping the stale one is the whole fix. If the retry fails too, the error is
+ * real and it propagates.
+ */
+async function subscribeWithRetry(reg: ServiceWorkerRegistration, vapidKey: string) {
+  const options: PushSubscriptionOptionsInit = {
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(vapidKey) as BufferSource,
+  }
+  try {
+    return await reg.pushManager.subscribe(options)
+  } catch (first) {
+    const existing = await reg.pushManager.getSubscription()
+    if (!existing) throw first
+    await existing.unsubscribe().catch(() => {})
+    return await reg.pushManager.subscribe(options)
+  }
+}
+
+interface Props {
+  /**
+   * What the enable button says. The envelope dashboard has one notification to
+   * name; the open board has three (your turn, a starred player, being outbid),
+   * so it passes something that covers all of them.
+   */
+  label?: string
+}
+
+export default function PushSubscribe({ label = '🔔 הפעל התראות לפני חשיפת מכרז' }: Props) {
   const [state, setState] = useState<State>('loading')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // Printed on screen when subscribing fails. A push service refusing is not
+  // reproducible from another device — the same build works on a laptop and
+  // fails on a phone — and there is no console to open on a phone, so the few
+  // facts that separate the causes have to be visible in the UI itself: which
+  // error the browser actually raised, iOS vs Android, PWA vs browser tab, the
+  // permission state, and the key THIS bundle is using (a different key here
+  // than on the machine where it works is a deploy problem, not a device one).
+  const [details, setDetails] = useState('')
 
   const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
 
@@ -81,6 +126,7 @@ export default function PushSubscribe() {
     if (!vapidKey) return
     setBusy(true)
     setError('')
+    setDetails('')
     try {
       // requestPermission must be the first await — iOS drops the user-gesture
       // context across an earlier one.
@@ -92,10 +138,7 @@ export default function PushSubscribe() {
       }
       const reg = await navigator.serviceWorker.register('/sw.js')
       await navigator.serviceWorker.ready
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapidKey) as BufferSource,
-      })
+      const sub = await subscribeWithRetry(reg, vapidKey)
       const res = await fetch('/api/push/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -107,7 +150,21 @@ export default function PushSubscribe() {
       }
       setState('subscribed')
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'שגיאה')
+      const err = e as { name?: string; message?: string }
+      setError('ההרשמה להתראות נכשלה. שלח את השורה הבאה כדי שנדע למה:')
+      const ua = navigator.userAgent
+      const platform = /iphone|ipad|ipod/i.test(ua) ? 'iOS' : /android/i.test(ua) ? 'Android' : 'desktop'
+      const standalone =
+        window.matchMedia('(display-mode: standalone)').matches ||
+        (navigator as Navigator & { standalone?: boolean }).standalone === true
+      setDetails([
+        err.name || 'no-name',
+        err.message || 'no-message',
+        platform + (standalone ? '/PWA' : '/browser'),
+        'perm=' + Notification.permission,
+        'sw=' + ('serviceWorker' in navigator),
+        `key=${vapidKey.slice(0, 8)}..${vapidKey.length}`,
+      ].join(' | '))
     }
     setBusy(false)
   }
@@ -171,10 +228,26 @@ export default function PushSubscribe() {
         </span>
       ) : (
         <button onClick={enable} disabled={busy} style={{ ...linkStyle, color: 'var(--primary)' }}>
-          {busy ? 'מפעיל...' : '🔔 הפעל התראות לפני חשיפת מכרז'}
+          {busy ? 'מפעיל...' : label}
         </button>
       )}
       {error && <p className="mt-1" style={{ color: 'var(--danger)' }}>{error}</p>}
+      {details && (
+        <p
+          className="mt-1"
+          dir="ltr"
+          style={{
+            color: 'var(--muted)',
+            fontFamily: 'monospace',
+            fontSize: '0.62rem',
+            wordBreak: 'break-all',
+            userSelect: 'all',
+            textAlign: 'left',
+          }}
+        >
+          {details}
+        </p>
+      )}
     </div>
   )
 }

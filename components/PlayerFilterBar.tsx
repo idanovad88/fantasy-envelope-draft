@@ -14,6 +14,13 @@ interface Props {
   onPosition: (v: string | null) => void
   sortKey: SortKey
   onSort: (v: SortKey) => void
+  /**
+   * The "starred only" chip. Rendered only when `onStarredOnly` is passed —
+   * the pages with no watchlist (snake, envelope) leave it out entirely.
+   */
+  starredOnly?: boolean
+  onStarredOnly?: (v: boolean) => void
+  starredCount?: number
 }
 
 const chipStyle = (active: boolean) => ({
@@ -29,6 +36,7 @@ const chipStyle = (active: boolean) => ({
 export default function PlayerFilterBar({
   title, total, shown, query, onQuery,
   positions, position, onPosition, sortKey, onSort,
+  starredOnly = false, onStarredOnly, starredCount = 0,
 }: Props) {
   const filtering = shown !== total
 
@@ -61,6 +69,21 @@ export default function PlayerFilterBar({
             {p}
           </button>
         ))}
+
+        {onStarredOnly && (
+          <button
+            type="button"
+            style={{
+              ...chipStyle(starredOnly),
+              ...(starredOnly
+                ? { borderColor: 'var(--warning)', color: 'var(--warning)', background: 'rgba(234,179,8,0.15)' }
+                : {}),
+            }}
+            onClick={() => onStarredOnly(!starredOnly)}
+          >
+            ⭐ מסומנים ({starredCount})
+          </button>
+        )}
 
         <span className="mr-auto flex items-center gap-1">
           <span className="text-xs" style={{ color: 'var(--muted)' }}>מיון:</span>

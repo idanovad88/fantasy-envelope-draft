@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Countdown from './Countdown'
+import WatchStar from './WatchStar'
 import { formatCurrency, formatTime } from '@/lib/utils'
 import type { OpenPassReason } from '@/types'
 
@@ -23,6 +24,7 @@ export interface BoardPass {
 
 export interface BoardAuction {
   id: string
+  playerId: string
   playerName: string
   playerPosition: string | null
   playerTeam: string | null
@@ -76,6 +78,12 @@ interface Props {
    * running, and the live countdown is used instead.
    */
   frozenSince: string | null
+  /**
+   * The players this user has starred. The star is repeated here because a
+   * nominated player is gone from the players page's available list — this is
+   * where you follow him from once he is up.
+   */
+  watchedPlayerIds: string[]
 }
 
 const PASS_LABEL: Record<OpenPassReason, string> = {
@@ -112,6 +120,7 @@ export default function OpenAuctionBoard({
   approvedTeamCount,
   frozenReason,
   frozenSince,
+  watchedPlayerIds,
 }: Props) {
   // Night stops the clocks, not the managers: nominating, bidding and PASS are
   // all accepted right through it (open_accepts_actions() in SQL), and a
@@ -162,6 +171,7 @@ export default function OpenAuctionBoard({
           approvedTeamCount={approvedTeamCount}
           frozenReason={frozenReason}
           frozenSince={frozenSince}
+          watched={watchedPlayerIds.includes(auction.playerId)}
         />
       ))}
     </div>
@@ -178,6 +188,7 @@ function OpenAuctionCard({
   approvedTeamCount,
   frozenReason,
   frozenSince,
+  watched,
 }: {
   auction: BoardAuction
   myTeamId: string | null
@@ -188,6 +199,7 @@ function OpenAuctionCard({
   approvedTeamCount: number
   frozenReason: 'paused' | 'night' | null
   frozenSince: string | null
+  watched: boolean
 }) {
   const minBid = auction.currentPrice + 1
   // The raw text in the field, or null while the manager has not touched it.
@@ -267,7 +279,10 @@ function OpenAuctionCard({
     <div className="card" style={iLead ? { borderColor: 'var(--success)' } : undefined}>
       <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
         <div className="min-w-0">
-          <h2 className="text-xl font-bold">{auction.playerName}</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-bold">{auction.playerName}</h2>
+            <WatchStar playerId={auction.playerId} watched={watched} size="md" />
+          </div>
           <p className="text-sm mt-0.5" style={{ color: 'var(--muted)' }}>
             {[auction.playerPosition, auction.playerTeam].filter(Boolean).join(' · ')}
           </p>

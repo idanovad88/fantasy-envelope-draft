@@ -4,6 +4,7 @@ import { Fragment, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { usePlayerFilter } from '@/hooks/usePlayerFilter'
 import PlayerFilterBar from './PlayerFilterBar'
+import WatchStar from './WatchStar'
 
 type Player = {
   id: string
@@ -36,6 +37,12 @@ interface Props {
   askOpeningBid?: boolean
   /** Display-only ceiling for that input; `open_nominate()` is the real gate. */
   maxOpeningBid?: number
+  /**
+   * Open outcry only: the players this user has starred. Passing it turns on
+   * the star column and the "starred only" chip; leaving it out (snake,
+   * envelope) renders the table exactly as before.
+   */
+  watchedIds?: string[]
 }
 
 export default function PlayerPicker({
@@ -48,9 +55,22 @@ export default function PlayerPicker({
   title = 'שחקנים זמינים',
   askOpeningBid = false,
   maxOpeningBid,
+  watchedIds,
 }: Props) {
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState('')
+  // Held locally so starring a player updates the chip's count immediately
+  // instead of waiting for the next server render. Re-seeded from the server
+  // list when its CONTENT changes, not its identity: a router.refresh() hands
+  // down a fresh array on every realtime event, and comparing by identity would
+  // throw away a star the user had just added while that render was in flight.
+  const [watched, setWatched] = useState<Set<string>>(() => new Set(watchedIds ?? []))
+  const serverKey = (watchedIds ?? []).join(',')
+  const [seededFrom, setSeededFrom] = useState(serverKey)
+  if (seededFrom !== serverKey) {
+    setSeededFrom(serverKey)
+    setWatched(new Set(watchedIds ?? []))
+  }
   // Kept as a string so the field can be emptied while typing instead of
   // snapping back to 1 on every keystroke.
   const [openingBid, setOpeningBid] = useState('1')
@@ -64,8 +84,11 @@ export default function PlayerPicker({
     openingBidNum >= 1 &&
     (maxOpeningBid === undefined || openingBidNum <= maxOpeningBid)
 
-  const { query, setQuery, position, setPosition, sortKey, setSortKey, positions, filtered } =
-    usePlayerFilter(players)
+  const showWatch = watchedIds !== undefined
+  const {
+    query, setQuery, position, setPosition, sortKey, setSortKey,
+    starredOnly, setStarredOnly, starredCount, positions, filtered,
+  } = usePlayerFilter(players, showWatch ? watched : undefined)
 
   // The row button opens the amount panel instead of nominating outright; a
   // second press on the same row closes it again.
@@ -111,6 +134,9 @@ export default function PlayerPicker({
         onPosition={setPosition}
         sortKey={sortKey}
         onSort={setSortKey}
+        starredOnly={starredOnly}
+        onStarredOnly={showWatch ? setStarredOnly : undefined}
+        starredCount={starredCount}
       />
 
       {error && (
@@ -126,6 +152,7 @@ export default function PlayerPicker({
               <tr style={{ color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
                 <th className="text-right pb-2 pr-2 w-8">#</th>
                 <th className="text-right pb-2">שחקן</th>
+                {showWatch && <th className="pb-2 w-8"></th>}
                 {canPick && <th className="pb-2 w-20"></th>}
               </tr>
             </thead>
@@ -147,6 +174,22 @@ export default function PlayerPicker({
                       )}
                     </div>
                   </td>
+                  {showWatch && (
+                    <td className="py-2 text-center">
+                      <WatchStar
+                        playerId={p.id}
+                        watched={watched.has(p.id)}
+                        onChange={next =>
+                          setWatched(prev => {
+                            const copy = new Set(prev)
+                            if (next) copy.add(p.id)
+                            else copy.delete(p.id)
+                            return copy
+                          })
+                        }
+                      />
+                    </td>
+                  )}
                   {canPick && (
                     <td className="py-2 text-center">
                       <button
@@ -165,7 +208,7 @@ export default function PlayerPicker({
                     number and the name are read together. */}
                 {canPick && askOpeningBid && pendingId === p.id && (
                   <tr style={{ background: 'var(--background)' }}>
-                    <td colSpan={3} className="p-3">
+                    <td colSpan={showWatch ? 4 : 3} className="p-3">
                       <div className="flex items-center gap-2 flex-wrap">
                         <label className="text-sm whitespace-nowrap" style={{ color: 'var(--muted)' }}>
                           הצעת פתיחה $

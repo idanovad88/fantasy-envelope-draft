@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
-import webpush from 'web-push'
 import { createAdminClient } from '@/lib/supabase/server'
 import { activateAllOverduePendingAuctions } from '@/lib/auctions'
+import { configureWebPush, sendPushToUsers } from '@/lib/push'
 
 // web-push needs Node's crypto — this breaks on the edge runtime.
 export const runtime = 'nodejs'
@@ -40,14 +40,10 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const vapidPublic = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
-  const vapidPrivate = process.env.VAPID_PRIVATE_KEY
-  const vapidSubject = process.env.VAPID_SUBJECT
-  if (!vapidPublic || !vapidPrivate || !vapidSubject) {
+  if (!configureWebPush()) {
     console.error('[notify-auctions] VAPID env vars are incomplete')
     return NextResponse.json({ error: 'Not configured' }, { status: 500 })
   }
-  webpush.setVapidDetails(vapidSubject, vapidPublic, vapidPrivate)
 
   const admin = createAdminClient()
 
@@ -109,62 +105,27 @@ export async function GET(req: Request) {
         .filter((id): id is string => !!id)
     )]
 
-    if (userIds.length === 0) {
-      await admin.from('auction_notifications')
-        .update({ sent_at: new Date().toISOString(), recipients: 0 }).eq('id', claim.id)
-      continue
-    }
-
-    const { data: subs } = await admin
-      .from('push_subscriptions').select('endpoint, p256dh, auth').in('user_id', userIds)
-
-    if (!subs || subs.length === 0) {
-      await admin.from('auction_notifications')
-        .update({ sent_at: new Date().toISOString(), recipients: 0 }).eq('id', claim.id)
-      continue
-    }
-
     const lead = auction.leagues?.notify_before_minutes ?? 5
     const playerName = auction.player?.name ?? 'שחקן'
-    const payload = JSON.stringify({
-      title: `⏰ נותרו ${lead} דקות`,
-      body: `המכרז על ${playerName} עומד להיסגר`,
-      url: '/auction',
-      auctionId: auction.id,
-    })
     // A phone that was offline past the deadline should never buzz about it.
     const ttl = Math.max(0, Math.floor((new Date(auction.reveal_time).getTime() - Date.now()) / 1000))
 
-    const results = await Promise.allSettled(
-      subs.map(s => webpush.sendNotification(
-        { endpoint: s.endpoint as string, keys: { p256dh: s.p256dh as string, auth: s.auth as string } },
-        payload,
-        { TTL: ttl, urgency: 'high' },
-      ))
+    const result = await sendPushToUsers(
+      userIds,
+      {
+        title: `⏰ נותרו ${lead} דקות`,
+        body: `המכרז על ${playerName} עומד להיסגר`,
+        url: '/auction',
+        tag: `auction-${auction.id}`,
+        auctionId: auction.id,
+      },
+      ttl
     )
-
-    const dead: string[] = []
-    results.forEach((r, i) => {
-      if (r.status === 'fulfilled') { sent++; return }
-      const status = (r.reason as { statusCode?: number })?.statusCode
-      if (status === 404 || status === 410) {
-        dead.push(subs[i].endpoint as string)
-      } else if (status === 401 || status === 403) {
-        // VAPID misconfiguration — deleting here would wipe every subscription
-        // over one bad key.
-        console.error('[notify-auctions] VAPID rejected (check keys):', status)
-      } else {
-        console.error('[notify-auctions] send failed:', status ?? r.reason)
-      }
-    })
-
-    if (dead.length > 0) {
-      await admin.from('push_subscriptions').delete().in('endpoint', dead)
-      pruned += dead.length
-    }
+    sent += result.sent
+    pruned += result.pruned
 
     await admin.from('auction_notifications')
-      .update({ sent_at: new Date().toISOString(), recipients: subs.length - dead.length })
+      .update({ sent_at: new Date().toISOString(), recipients: result.recipients })
       .eq('id', claim.id)
   }
 

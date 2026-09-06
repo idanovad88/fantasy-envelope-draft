@@ -5,6 +5,7 @@ import PlayerSearch from '@/components/PlayerSearch'
 import PlayerPicker from '@/components/PlayerPicker'
 import SnakeDraftBoard from '@/components/SnakeDraftBoard'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
+import WatchStar from '@/components/WatchStar'
 import type { Player, League, Team, SnakePick } from '@/types'
 import {
   formatTime,
@@ -58,7 +59,7 @@ export default async function PlayersPage() {
 
   // ── OPEN OUTCRY DRAFT ────────────────────────────────────────────────────────
   if (typedLeague?.draft_type === 'open') {
-    return <OpenDraftPlayersPage league={typedLeague} myTeam={myTeam as Team | null} />
+    return <OpenDraftPlayersPage league={typedLeague} myTeam={myTeam as Team | null} userId={user!.id} />
   }
 
   // ── ENVELOPE DRAFT (unchanged) ───────────────────────────────────────────────
@@ -339,15 +340,17 @@ async function SnakeDraftPage({
 async function OpenDraftPlayersPage({
   league,
   myTeam,
+  userId,
 }: {
   league: League
   myTeam: Team | null
+  userId: string
 }) {
   const supabase = await createClient()
 
   await settleOpenDraft(league.id)
 
-  const [{ data: players }, { data: teams }, { data: openRows }] = await Promise.all([
+  const [{ data: players }, { data: teams }, { data: openRows }, { data: watchRows }] = await Promise.all([
     supabase.from('players')
       .select('*, drafting_team:teams!drafted_by_team_id(id, name)')
       .eq('league_id', league.id)
@@ -360,10 +363,13 @@ async function OpenDraftPlayersPage({
       .not('priority_rank', 'is', null)
       .order('priority_rank', { ascending: true }),
     supabase.from('open_auctions')
-      .select('id, current_price, leader_team_id, player:players(name, position, nba_team)')
+      .select('id, current_price, leader_team_id, player_id, player:players(name, position, nba_team)')
       .eq('league_id', league.id)
       .eq('status', 'open')
       .order('created_at', { ascending: true }),
+    // The caller's own starred players. RLS on player_watch is own-rows-only,
+    // so the cookie client is enough and nobody can read anyone else's list.
+    supabase.from('player_watch').select('player_id').eq('league_id', league.id).eq('user_id', userId),
   ])
 
   const typedPlayers = (players || []) as PlayerWithTeam[]
@@ -372,8 +378,10 @@ async function OpenDraftPlayersPage({
     id: string
     current_price: number
     leader_team_id: string | null
+    player_id: string
     player: { name: string; position: string | null; nba_team: string | null } | null
   }[]
+  const watchedIds = (watchRows ?? []).map(w => w.player_id as string)
 
   const available = typedPlayers.filter(p => p.status === 'available')
   const drafted = typedPlayers.filter(p => p.status === 'drafted')
@@ -471,11 +479,16 @@ async function OpenDraftPlayersPage({
         </div>
       </div>
 
-      {/* On the board now */}
+      {/* On the board now. The star lives here too: a nominated player leaves
+          the available list the moment he goes up (status becomes
+          'on_auction'), and this is the only place left to follow him from. */}
       {board.map(a => (
         <div key={a.id} className="card mb-3" style={{ borderColor: 'var(--warning)', borderWidth: 2 }}>
           <span className="badge badge-yellow mb-2">במכרז עכשיו · ${a.current_price}</span>
-          <p className="font-bold text-xl">{a.player?.name}</p>
+          <div className="flex items-center gap-2">
+            <p className="font-bold text-xl">{a.player?.name}</p>
+            <WatchStar playerId={a.player_id} watched={watchedIds.includes(a.player_id)} size="md" />
+          </div>
           <p className="text-sm" style={{ color: 'var(--muted)' }}>
             {[a.player?.position, a.player?.nba_team].filter(Boolean).join(' · ')}
           </p>
@@ -490,6 +503,7 @@ async function OpenDraftPlayersPage({
         actionLabel="העלה"
         askOpeningBid
         maxOpeningBid={myMaxOpening}
+        watchedIds={watchedIds}
       />
 
       {drafted.length > 0 && (

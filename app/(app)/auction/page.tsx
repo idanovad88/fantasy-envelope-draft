@@ -48,7 +48,7 @@ export default async function AuctionPage() {
   // The open board is a different page entirely — several auctions at once,
   // public bids, no reveal. Branch before any of the envelope fetching below.
   if ((league as League | null)?.draft_type === 'open') {
-    return <OpenBoardPage league={league as League} myTeam={myTeam as Team | null} />
+    return <OpenBoardPage league={league as League} myTeam={myTeam as Team | null} userId={user!.id} />
   }
 
   // Auto-activate any pending auction whose scheduled_start has passed
@@ -226,6 +226,7 @@ type OpenRow = {
   current_price: number
   leader_team_id: string | null
   deadline_at: string
+  player_id: string
   player: { name: string; position: string | null; nba_team: string | null } | null
   nominating_team: { name: string } | null
   leader_team: { name: string } | null
@@ -244,7 +245,15 @@ type OpenHistoryRow = {
   winning_team: { name: string } | null
 }
 
-async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team | null }) {
+async function OpenBoardPage({
+  league,
+  myTeam,
+  userId,
+}: {
+  league: League
+  myTeam: Team | null
+  userId: string
+}) {
   const supabase = await createClient()
 
   // Freeze/thaw the clocks and close anything already out of time, so the board
@@ -252,11 +261,11 @@ async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team 
   // catches up.
   await settleOpenDraft(league.id)
 
-  const [{ data: openRows }, { data: historyRows }, { data: teams }, { data: clock }] = await Promise.all([
+  const [{ data: openRows }, { data: historyRows }, { data: teams }, { data: clock }, { data: watchRows }] = await Promise.all([
     supabase
       .from('open_auctions')
       .select(
-        'id, current_price, leader_team_id, deadline_at, player:players(name, position, nba_team), nominating_team:teams!nominating_team_id(name), leader_team:teams!leader_team_id(name), bids:open_bids(id, team_id, amount, is_auto, created_at, team:teams(name)), passes:open_passes(team_id, reason, team:teams(name))'
+        'id, current_price, leader_team_id, deadline_at, player_id, player:players(name, position, nba_team), nominating_team:teams!nominating_team_id(name), leader_team:teams!leader_team_id(name), bids:open_bids(id, team_id, amount, is_auto, created_at, team:teams(name)), passes:open_passes(team_id, reason, team:teams(name))'
       )
       .eq('league_id', league.id)
       .eq('status', 'open')
@@ -281,6 +290,8 @@ async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team 
     // its open_frozen_since can be a minute stale in either direction, and the
     // board divides by it to show how much of each window is left.
     supabase.from('leagues').select('open_frozen_since').eq('id', league.id).maybeSingle(),
+    // Own rows only under RLS, so this is the caller's private list.
+    supabase.from('player_watch').select('player_id').eq('league_id', league.id).eq('user_id', userId),
   ])
 
   const board = (openRows ?? []) as unknown as OpenRow[]
@@ -355,6 +366,7 @@ async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team 
       <OpenAuctionBoard
         auctions={board.map(a => ({
           id: a.id,
+          playerId: a.player_id,
           playerName: a.player?.name ?? 'שחקן',
           playerPosition: a.player?.position ?? null,
           playerTeam: a.player?.nba_team ?? null,
@@ -389,6 +401,7 @@ async function OpenBoardPage({ league, myTeam }: { league: League; myTeam: Team 
         approvedTeamCount={approvedTeams.length}
         frozenReason={frozenReason}
         frozenSince={frozenReason ? clock?.open_frozen_since ?? null : null}
+        watchedPlayerIds={(watchRows ?? []).map(w => w.player_id as string)}
       />
 
       {history.length > 0 && (

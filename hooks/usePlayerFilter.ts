@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 
 export type FilterablePlayer = {
+  id: string
   name: string
   position: string | null
   ranking: number | null
@@ -46,11 +47,16 @@ function matchesPosition(position: string | null, chip: string): boolean {
  * makes the "by name" option and the position chips possible without a
  * refetch, and it keeps unranked players pinned to the bottom instead of
  * wherever Postgres happened to return them.
+ *
+ * `watchedIds` is optional and turns on the "starred only" chip. Passing it is
+ * what makes the chip exist at all — the pages that have no watchlist (snake,
+ * envelope) leave it out and get exactly the previous behaviour.
  */
-export function usePlayerFilter<T extends FilterablePlayer>(players: T[]) {
+export function usePlayerFilter<T extends FilterablePlayer>(players: T[], watchedIds?: Set<string>) {
   const [query, setQuery] = useState('')
   const [position, setPosition] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('rank')
+  const [starredOnly, setStarredOnly] = useState(false)
 
   const positions = useMemo(() => {
     const seen = new Set<string>()
@@ -69,11 +75,20 @@ export function usePlayerFilter<T extends FilterablePlayer>(players: T[]) {
     })
   }, [players])
 
+  // Counted over this list, not over the whole watchlist: a player who has
+  // already been drafted is starred but not here, and the chip must not promise
+  // rows it cannot show.
+  const starredCount = useMemo(
+    () => (watchedIds ? players.filter(p => watchedIds.has(p.id)).length : 0),
+    [players, watchedIds]
+  )
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     const out = players.filter(p =>
       (!q || p.name.toLowerCase().includes(q)) &&
-      (!position || matchesPosition(p.position, position))
+      (!position || matchesPosition(p.position, position)) &&
+      (!starredOnly || !!watchedIds?.has(p.id))
     )
     return out.sort((a, b) => {
       if (sortKey === 'name') return a.name.localeCompare(b.name)
@@ -83,7 +98,13 @@ export function usePlayerFilter<T extends FilterablePlayer>(players: T[]) {
       if (b.ranking === null) return -1
       return a.ranking - b.ranking || a.name.localeCompare(b.name)
     })
-  }, [players, query, position, sortKey])
+  }, [players, query, position, sortKey, starredOnly, watchedIds])
 
-  return { query, setQuery, position, setPosition, sortKey, setSortKey, positions, filtered }
+  return {
+    query, setQuery,
+    position, setPosition,
+    sortKey, setSortKey,
+    starredOnly, setStarredOnly, starredCount,
+    positions, filtered,
+  }
 }
