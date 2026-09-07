@@ -106,6 +106,9 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   const [adminTeamName, setAdminTeamName] = useState('')
   const [joiningDraft, setJoiningDraft] = useState(false)
   const [uploadingAvatarTeamId, setUploadingAvatarTeamId] = useState<string | null>(null)
+  const [editingNameTeamId, setEditingNameTeamId] = useState<string | null>(null)
+  const [nameEdits, setNameEdits] = useState<Record<string, string>>({})
+  const [renamingTeamId, setRenamingTeamId] = useState<string | null>(null)
   const [localVarGifUrls, setLocalVarGifUrls] = useState<string[]>(
     league?.var_gif_urls && league.var_gif_urls.length > 0
       ? league.var_gif_urls
@@ -128,6 +131,25 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
     setLocalTeams(prev => prev.map(t => t.id === teamId ? { ...t, avatar_url: json.url } : t))
     setMsg('תמונה עודכנה!')
     setUploadingAvatarTeamId(null)
+  }
+
+  // Same route the team owner uses from /teams — the admin just gets to aim it
+  // at any team in the league.
+  async function renameTeam(teamId: string) {
+    const next = (nameEdits[teamId] ?? '').trim()
+    if (!next) { setMsg('שגיאה: שם קבוצה לא תקין'); return }
+    setRenamingTeamId(teamId)
+    const res = await fetch('/api/team/rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ teamId, name: next }),
+    })
+    const json = await res.json()
+    if (!res.ok) { setMsg('שגיאה: ' + json.error); setRenamingTeamId(null); return }
+    setLocalTeams(prev => prev.map(t => t.id === teamId ? { ...t, name: json.name } : t))
+    setEditingNameTeamId(null)
+    setRenamingTeamId(null)
+    setMsg('שם הקבוצה עודכן!')
   }
 
   async function uploadLeagueLogo(file: File) {
@@ -1500,7 +1522,23 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                   )}
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-medium">{team.name}</span>
+                      {editingNameTeamId === team.id ? (
+                        <input
+                          className="input text-sm"
+                          style={{ width: 150 }}
+                          value={nameEdits[team.id] ?? team.name}
+                          maxLength={40}
+                          autoFocus
+                          disabled={renamingTeamId === team.id}
+                          onChange={e => setNameEdits(prev => ({ ...prev, [team.id]: e.target.value }))}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') renameTeam(team.id)
+                            if (e.key === 'Escape') setEditingNameTeamId(null)
+                          }}
+                        />
+                      ) : (
+                        <span className="font-medium">{team.name}</span>
+                      )}
                       {team.is_complete && <span className="badge badge-green text-xs">✅</span>}
                       {team.user_id && localAdminIds.includes(team.user_id) && <span className="badge badge-blue text-xs">מנהל</span>}
                     </div>
@@ -1510,6 +1548,36 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                   </div>
                 </div>
                 <div className="flex gap-2 items-center">
+                  {/* Rename team */}
+                  {editingNameTeamId === team.id ? (
+                    <>
+                      <button
+                        className="btn btn-primary text-xs"
+                        disabled={renamingTeamId === team.id}
+                        onClick={() => renameTeam(team.id)}
+                      >
+                        {renamingTeamId === team.id ? '...' : 'שמור'}
+                      </button>
+                      <button
+                        className="btn btn-outline text-xs"
+                        disabled={renamingTeamId === team.id}
+                        onClick={() => setEditingNameTeamId(null)}
+                      >
+                        בטל
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="btn btn-outline text-xs"
+                      title="שנה שם"
+                      onClick={() => {
+                        setNameEdits(prev => ({ ...prev, [team.id]: team.name }))
+                        setEditingNameTeamId(team.id)
+                      }}
+                    >
+                      ✏️
+                    </button>
+                  )}
                   {/* Upload avatar button */}
                   <label style={{ cursor: uploadingAvatarTeamId === team.id ? 'not-allowed' : 'pointer' }}>
                     <input

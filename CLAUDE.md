@@ -130,7 +130,7 @@ All join logic is in `app/api/join-league/route.ts` (uses admin client to bypass
 1. User must already be authenticated (Google OAuth)
 2. API finds league by name + join_code (case-insensitive)
 3. If `user_id` already has a team in this league → returns success (no duplicate)
-4. If team name already taken → error (stable identity with Google auth, no re-linking)
+4. If team name already taken → **the team is re-linked to the caller** (`user_id` overwritten), and if the previous owner held an `admin_users` row it is transferred to the caller and deleted. This is not an error path, and it means **a team name is effectively a credential**: league name + join code + team name is enough to take over a team, admin rights included. Everything under **Renaming a team** below exists to keep that from getting worse.
 5. Check capacity: `teams.count < league.num_teams`
 6. Create new team with `approved: true`
 
@@ -146,6 +146,20 @@ A team can have **one optional assistant manager** (`teams.assistant_user_id`) w
 - **Invite flow:** owner generates a link from `AssistantManager` (mounted in the "my team" card of **both** the envelope and snake dashboards) → `POST /api/team/invite` creates a `team_invites` row (service-role-only table, 7-day expiry) → recipient opens `/assist/[token]` → `POST /api/team/accept-invite` sets `assistant_user_id` and lands them in the league. Remove via `POST /api/team/remove-assistant` — allowed for the owner, the league admin/creator, **or the assistant themselves stepping down** (`AssistantManager` with `role="assistant"` renders just that button).
 - `/assist/[token]` must be reachable **logged out** — it's excluded from the redirect in `proxy.ts` (`isInvitePage`), and `AcceptInvite` signs in via Google with `?next=/assist/<token>`, which `app/auth/callback/route.ts` honors (same-origin relative paths only).
 - **DB migration:** `supabase/migration_team_assistant.sql` — adds `assistant_user_id`, the `team_invites` table (RLS-locked), and extends the three `bids` policies to include the assistant.
+
+### Renaming a team
+
+A team can be renamed at any point, **including mid-draft**, by the **owner** (`teams.user_id`) or the **league admin/creator**. One route serves both UIs: `POST /api/team/rename` (`{ teamId, name }`), built on the `remove-assistant` skeleton — `createClient()` for identity, `createAdminClient()` for the authorization reads and the write.
+
+**Not the assistant manager**, and that is a security rule rather than a style choice. Per **Join flow** above, a matching team name re-links the team to whoever types it. A rename frees the old name, so an assistant who could rename the team could then "join" under the old name and end up with a second team of their own. `/api/team/invite` draws the same line for the same family of reasons.
+
+**Renaming is safe on the data layer, and that is worth knowing before extending it.** No table stores a team-name string — the only `name TEXT` columns in the schema are on `leagues`, `teams` and `players`. `snake_picks`, `open_auctions`, `open_bids`, `open_passes`, `open_notifications`, `bids`, `trades`, `trade_assets`, `pick_overrides`, `priority_log` and `auction_notifications` all reference teams by `team_id`, the avatar is stored at `team-photos/${teamId}`, and push payloads are built at send time from `open_notify_bid_events()`, which joins `teams` live. Every display reads through a PostgREST embed, so a rename lands everywhere at once — history included. There is nothing to backfill.
+
+⚠️ **The collision check is `ilike`, not the unique constraint.** `UNIQUE(league_id, name)` is case-sensitive, but `/api/join-league` matches with `.ilike(...).maybeSingle()`. Two case variants ("Lakers" and "lakers") would pass the constraint and then make *that* route throw on two rows — breaking joins for that name. The route therefore runs its own `ilike` lookup (read as an array, not `maybeSingle()`, so a league that already holds two variants gets a clean 409 instead of a crash) and still translates a `23505` from the write as the same 409, for the exact-case race.
+
+**UI:** `components/TeamNameEditor.tsx` on the `/teams` card — deliberately *not* on the dashboard, since this is a one-off action and the "הקבוצה שלי" card is prime real estate. It is gated on `TeamsView`'s existing `isMyTeam` (`team.user_id === myUserId`), which already matches the route's owner rule exactly. The admin's copy is an inline input in the **teams tab** of `AdminPanel`, next to avatar upload and delete; it posts to the same route and updates `localTeams` optimistically, since `AdminPanel` has no `useRouter`.
+
+**No migration and no RLS change.** `teams` has only `teams_read` (SELECT), `teams_admin_write` (ALL for admins) and `teams_user_join` (INSERT). Do **not** add an owner UPDATE policy to skip the route: Postgres RLS cannot restrict *which columns* an UPDATE touches, so such a policy would also open `budget_remaining`, `priority_rank`, `is_complete` and `approved` to writes straight from the browser.
 
 ### Nomination turn logic (envelope only)
 

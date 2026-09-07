@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { Team, Player } from '@/types'
+import TeamNameEditor from './TeamNameEditor'
 
 const SLOT_ORDER = ['PG', 'SG', 'G', 'SF', 'PF', 'F', 'C', 'UTIL', 'BENCH']
 
@@ -82,7 +83,7 @@ export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTea
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h2 className="font-bold text-lg">{team.name}</h2>
+                    <TeamNameEditor teamId={team.id} name={team.name} canEdit={isMyTeam} />
                     {isMyTeam && <span className="badge badge-blue text-xs">אתה</span>}
                     {team.is_complete && <span className="badge badge-green text-xs">✅ שלם</span>}
                     {!team.approved && <span className="badge badge-yellow text-xs">ממתין לאישור</span>}
