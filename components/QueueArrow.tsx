@@ -70,14 +70,31 @@ export default function QueueArrow({ playerId, leagueId, queued, onChange, size 
         background: 'none',
         border: 'none',
         padding: 0,
-        lineHeight: 1,
+        lineHeight: 0,
         cursor: busy ? 'default' : 'pointer',
-        fontSize: size === 'md' ? '1.25rem' : '1rem',
         color: on ? 'var(--primary)' : 'var(--muted)',
         opacity: on ? 1 : 0.55,
       }}
     >
-      {on ? '⬆' : '⇧'}
+      {/* Inline SVG rather than an arrow character. U+2B06 (⬆) carries an emoji
+          presentation, so iOS and Android paint it as a colour emoji that
+          ignores `color` entirely, while its hollow counterpart is a plain text
+          glyph — the two states came out as two different icons, and the
+          selected one was never the theme colour. ★/☆ next to it are safe
+          because neither is an emoji. This is the same shape in both states,
+          filled or hollow, and currentColor always applies. */}
+      <svg
+        viewBox="0 0 24 24"
+        width={size === 'md' ? 20 : 16}
+        height={size === 'md' ? 20 : 16}
+        fill={on ? 'currentColor' : 'none'}
+        stroke="currentColor"
+        strokeWidth={1.75}
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M12 3.2 20 12h-4.4v8.8H8.4V12H4z" />
+      </svg>
     </button>
   )
 }
