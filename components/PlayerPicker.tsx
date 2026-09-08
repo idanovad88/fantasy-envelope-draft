@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { usePlayerFilter } from '@/hooks/usePlayerFilter'
 import PlayerFilterBar from './PlayerFilterBar'
 import WatchStar from './WatchStar'
+import QueueArrow from './QueueArrow'
 
 type Player = {
   id: string
@@ -43,6 +44,13 @@ interface Props {
    * envelope) renders the table exactly as before.
    */
   watchedIds?: string[]
+  /**
+   * Open outcry only: the players already in this TEAM's automatic nomination
+   * queue. Passing it turns on the arrow column, the same way {@link watchedIds}
+   * turns on the star. The two lists are deliberately separate — a star says
+   * "tell me what happens to him", an arrow says "I will spend money on him".
+   */
+  queuedIds?: string[]
 }
 
 export default function PlayerPicker({
@@ -56,6 +64,7 @@ export default function PlayerPicker({
   askOpeningBid = false,
   maxOpeningBid,
   watchedIds,
+  queuedIds,
 }: Props) {
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState('')
@@ -71,6 +80,14 @@ export default function PlayerPicker({
     setSeededFrom(serverKey)
     setWatched(new Set(watchedIds ?? []))
   }
+  // Same content-not-identity re-seed as `watched` above, for the same reason.
+  const [queued, setQueued] = useState<Set<string>>(() => new Set(queuedIds ?? []))
+  const queueKey = (queuedIds ?? []).join(',')
+  const [queueSeededFrom, setQueueSeededFrom] = useState(queueKey)
+  if (queueSeededFrom !== queueKey) {
+    setQueueSeededFrom(queueKey)
+    setQueued(new Set(queuedIds ?? []))
+  }
   // Kept as a string so the field can be emptied while typing instead of
   // snapping back to 1 on every keystroke.
   const [openingBid, setOpeningBid] = useState('1')
@@ -85,6 +102,9 @@ export default function PlayerPicker({
     (maxOpeningBid === undefined || openingBidNum <= maxOpeningBid)
 
   const showWatch = watchedIds !== undefined
+  const showQueue = queuedIds !== undefined
+  // #, name, then each optional marker column, then the action column.
+  const rowSpan = 3 + (showWatch ? 1 : 0) + (showQueue ? 1 : 0)
   const {
     query, setQuery, position, setPosition, sortKey, setSortKey,
     starredOnly, setStarredOnly, starredCount, positions, filtered,
@@ -153,6 +173,7 @@ export default function PlayerPicker({
                 <th className="text-right pb-2 pr-2 w-8">#</th>
                 <th className="text-right pb-2">שחקן</th>
                 {showWatch && <th className="pb-2 w-8"></th>}
+                {showQueue && <th className="pb-2 w-8"></th>}
                 {canPick && <th className="pb-2 w-20"></th>}
               </tr>
             </thead>
@@ -190,6 +211,23 @@ export default function PlayerPicker({
                       />
                     </td>
                   )}
+                  {showQueue && (
+                    <td className="py-2 text-center">
+                      <QueueArrow
+                        playerId={p.id}
+                        leagueId={leagueId}
+                        queued={queued.has(p.id)}
+                        onChange={next =>
+                          setQueued(prev => {
+                            const copy = new Set(prev)
+                            if (next) copy.add(p.id)
+                            else copy.delete(p.id)
+                            return copy
+                          })
+                        }
+                      />
+                    </td>
+                  )}
                   {canPick && (
                     <td className="py-2 text-center">
                       <button
@@ -208,7 +246,7 @@ export default function PlayerPicker({
                     number and the name are read together. */}
                 {canPick && askOpeningBid && pendingId === p.id && (
                   <tr style={{ background: 'var(--background)' }}>
-                    <td colSpan={showWatch ? 4 : 3} className="p-3">
+                    <td colSpan={rowSpan} className="p-3">
                       <div className="flex items-center gap-2 flex-wrap">
                         <label className="text-sm whitespace-nowrap" style={{ color: 'var(--muted)' }}>
                           הצעת פתיחה $

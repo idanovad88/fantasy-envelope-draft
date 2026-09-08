@@ -185,6 +185,25 @@ export interface OpenPass {
   team?: Team
 }
 
+/**
+ * One player on a team's automatic nomination list. Per team — an owner and
+ * their assistant share it — and private: RLS lets only that team read it.
+ * When the team's turn comes, the first entry whose player is still available
+ * and whose `opening_bid` is still affordable goes up on its own.
+ */
+export interface OpenNominationQueueEntry {
+  id: string
+  league_id: string
+  team_id: string
+  player_id: string
+  position: number
+  opening_bid: number
+  created_at: string
+  // joined
+  player?: Player
+  team?: Team
+}
+
 export interface AdminUser {
   user_id: string
   league_id: string | null

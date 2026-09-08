@@ -6,6 +6,7 @@ import PlayerPicker from '@/components/PlayerPicker'
 import SnakeDraftBoard from '@/components/SnakeDraftBoard'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
 import WatchStar from '@/components/WatchStar'
+import NominationQueue from '@/components/NominationQueue'
 import type { Player, League, Team, SnakePick } from '@/types'
 import {
   formatTime,
@@ -350,7 +351,7 @@ async function OpenDraftPlayersPage({
 
   await settleOpenDraft(league.id)
 
-  const [{ data: players }, { data: teams }, { data: openRows }, { data: watchRows }] = await Promise.all([
+  const [{ data: players }, { data: teams }, { data: openRows }, { data: watchRows }, { data: queueRows }] = await Promise.all([
     supabase.from('players')
       .select('*, drafting_team:teams!drafted_by_team_id(id, name)')
       .eq('league_id', league.id)
@@ -370,6 +371,16 @@ async function OpenDraftPlayersPage({
     // The caller's own starred players. RLS on player_watch is own-rows-only,
     // so the cookie client is enough and nobody can read anyone else's list.
     supabase.from('player_watch').select('player_id').eq('league_id', league.id).eq('user_id', userId),
+    // The team's automatic nomination queue. RLS on open_nomination_queue is
+    // own-team-only (owner or assistant), so the cookie client returns this
+    // caller's list and nothing else — a rival who could read it would know
+    // exactly whom to put up ahead of them.
+    supabase
+      .from('open_nomination_queue')
+      .select('player_id, position, opening_bid, player:players(id, name, position, status)')
+      .eq('league_id', league.id)
+      .order('position', { ascending: true })
+      .order('created_at', { ascending: true }),
   ])
 
   const typedPlayers = (players || []) as PlayerWithTeam[]
@@ -382,6 +393,26 @@ async function OpenDraftPlayersPage({
     player: { name: string; position: string | null; nba_team: string | null } | null
   }[]
   const watchedIds = (watchRows ?? []).map(w => w.player_id as string)
+
+  const typedQueue = (queueRows ?? []) as unknown as {
+    player_id: string
+    opening_bid: number
+    player: { id: string; name: string; position: string | null; status: string } | null
+  }[]
+  // A player somebody else already put up (or who has been sold) drops out of
+  // the list on sight. The row itself is left alone: it costs nothing, and if
+  // an admin cancels that auction he simply comes back.
+  const queue = typedQueue
+    .filter(q => q.player?.status === 'available')
+    .map(q => ({
+      playerId: q.player_id,
+      name: q.player!.name,
+      position: q.player!.position,
+      openingBid: q.opening_bid,
+    }))
+  // The arrow itself is fed by every row, drafted ones included — otherwise a
+  // player queued and then sold would show an empty arrow that re-adds him.
+  const queuedIds = typedQueue.map(q => q.player_id)
 
   const available = typedPlayers.filter(p => p.status === 'available')
   const drafted = typedPlayers.filter(p => p.status === 'drafted')
@@ -495,6 +526,12 @@ async function OpenDraftPlayersPage({
         </div>
       ))}
 
+      {/* Only a team can queue nominations — a spectator admin has no turn to
+          fill, and the arrow column would post as nobody. */}
+      {myTeam && (
+        <NominationQueue leagueId={league.id} rows={queue} maxOpeningBid={myMaxOpening} />
+      )}
+
       <PlayerPicker
         players={available.map(p => ({ id: p.id, name: p.name, position: p.position, nba_team: p.nba_team, ranking: p.ranking }))}
         leagueId={league.id}
@@ -504,6 +541,7 @@ async function OpenDraftPlayersPage({
         askOpeningBid
         maxOpeningBid={myMaxOpening}
         watchedIds={watchedIds}
+        queuedIds={myTeam ? queuedIds : undefined}
       />
 
       {drafted.length > 0 && (
