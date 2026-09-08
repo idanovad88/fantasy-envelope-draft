@@ -398,7 +398,7 @@ async function OpenBoardPage({
         slotsLeft={mySlotsLeft}
         extendShortMinutes={league.open_extend_short_minutes}
         extendLongMinutes={league.open_extend_long_minutes}
-        approvedTeamCount={approvedTeams.length}
+        approvedTeams={approvedTeams.map(t => ({ id: t.id, name: t.name }))}
         frozenReason={frozenReason}
         frozenSince={frozenReason ? clock?.open_frozen_since ?? null : null}
         watchedPlayerIds={(watchRows ?? []).map(w => w.player_id as string)}

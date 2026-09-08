@@ -68,7 +68,13 @@ interface Props {
    * different wording.
    */
   slotsLeft: number
-  approvedTeamCount: number
+  /**
+   * Every approved team in the league. The card subtracts the PASS rows from
+   * this to name who is still in the auction — a bare count said how many
+   * rivals were left but never which, which is the thing a manager opens the
+   * board to find out.
+   */
+  approvedTeams: { id: string; name: string }[]
   frozenReason: 'paused' | 'night' | null
   /**
    * `leagues.open_frozen_since` — the instant the clocks stopped, read after the
@@ -117,7 +123,7 @@ export default function OpenAuctionBoard({
   slotsLeft,
   extendShortMinutes,
   extendLongMinutes,
-  approvedTeamCount,
+  approvedTeams,
   frozenReason,
   frozenSince,
   watchedPlayerIds,
@@ -168,7 +174,7 @@ export default function OpenAuctionBoard({
           hardMaxBid={hardMaxBid}
           committed={committed}
           slotsLeft={slotsLeft}
-          approvedTeamCount={approvedTeamCount}
+          approvedTeams={approvedTeams}
           frozenReason={frozenReason}
           frozenSince={frozenSince}
           watched={watchedPlayerIds.includes(auction.playerId)}
@@ -185,7 +191,7 @@ function OpenAuctionCard({
   hardMaxBid,
   committed,
   slotsLeft,
-  approvedTeamCount,
+  approvedTeams,
   frozenReason,
   frozenSince,
   watched,
@@ -196,7 +202,7 @@ function OpenAuctionCard({
   hardMaxBid: number
   committed: number
   slotsLeft: number
-  approvedTeamCount: number
+  approvedTeams: { id: string; name: string }[]
   frozenReason: 'paused' | 'night' | null
   frozenSince: string | null
   watched: boolean
@@ -230,9 +236,23 @@ function OpenAuctionCard({
   const actionsBlocked = frozenReason === 'paused'
   const iLead = !!myTeamId && auction.leaderTeamId === myTeamId
   const myPass = myTeamId ? auction.passes.find(p => p.teamId === myTeamId) : undefined
-  // Everyone except the leader has to answer, so this is how many replies the
-  // auction is still waiting on before it closes.
-  const stillIn = Math.max(0, approvedTeamCount - auction.passes.length - (auction.leaderTeamId ? 1 : 0))
+  // Who is still in: every approved team that has not passed. PASS is final, so
+  // this only ever shrinks. The leader is one of them — putting a player up or
+  // outbidding everyone is a commitment, not an exit — which is why the count
+  // and the list below it are the same number: the auction closes when it
+  // reaches 1, with that last team holding the player.
+  //
+  // The leader leads the list; the rest go by name, since the `teams` rows come
+  // back from Supabase unordered and an order that reshuffles on every live
+  // refresh is unreadable.
+  const passedIds = new Set(auction.passes.map(p => p.teamId))
+  const stillIn = approvedTeams
+    .filter(t => !passedIds.has(t.id))
+    .sort((a, b) =>
+      a.id === auction.leaderTeamId ? -1
+        : b.id === auction.leaderTeamId ? 1
+        : a.name.localeCompare(b.name, 'he')
+    )
   const cannotAfford = myMaxBid < minBid
   // Blocked, but only by money parked in auctions this team is leading. It is
   // still in this auction — no automatic PASS is written for this case — and
@@ -312,7 +332,7 @@ function OpenAuctionCard({
         </div>
         <div className="flex-1 p-2 rounded-lg" style={{ background: 'var(--background)' }}>
           <p className="text-xs mb-0.5" style={{ color: 'var(--muted)' }}>עוד במכרז</p>
-          <p className="font-bold text-lg">{stillIn}</p>
+          <p className="font-bold text-lg">{stillIn.length}</p>
         </div>
       </div>
 
@@ -402,14 +422,41 @@ function OpenAuctionCard({
 
       {error && <p className="text-sm mt-2" style={{ color: 'var(--danger)' }}>{error}</p>}
 
-      {auction.passes.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mt-3">
-          {auction.passes.map(p => (
-            <span key={p.teamId} className="badge badge-gray text-xs">
-              {p.teamName} · {PASS_LABEL[p.reason]}
-            </span>
-          ))}
+      {/* Who is left, not who is gone. The teams still in the auction are what
+          a manager is deciding against; the ones that walked away are history,
+          so they keep their detail but fold out of the way. */}
+      <div className="mt-3">
+        <p className="text-xs mb-1.5" style={{ color: 'var(--muted)' }}>עדיין במכרז</p>
+        <div className="flex flex-wrap gap-1.5">
+          {stillIn.map(t => {
+            const isLeader = t.id === auction.leaderTeamId
+            return (
+              <span
+                key={t.id}
+                className={`badge text-xs ${isLeader ? 'badge-green' : 'badge-blue'}`}
+              >
+                {isLeader && '👑 '}
+                {t.name}
+                {t.id === myTeamId && ' (אתה)'}
+              </span>
+            )
+          })}
         </div>
+      </div>
+
+      {auction.passes.length > 0 && (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-sm" style={{ color: 'var(--muted)' }}>
+            יצאו מהמכרז ({auction.passes.length})
+          </summary>
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {auction.passes.map(p => (
+              <span key={p.teamId} className="badge badge-gray text-xs">
+                {p.teamName} · {PASS_LABEL[p.reason]}
+              </span>
+            ))}
+          </div>
+        </details>
       )}
 
       {auction.bids.length > 0 && (
