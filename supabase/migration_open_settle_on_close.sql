@@ -29,6 +29,11 @@
 --   1. open_close_auction() settles every other open auction in the league.
 --   2. open_draft_tick() settles the whole board once a minute, as a net.
 --
+-- The tick below is migration_open_nomination_queue.sql's body with the sweep
+-- folded in, autofill call and all. That migration is already applied, and it
+-- is newer than this one: replacing the tick with a pre-queue body would stop
+-- the board filling itself from the nomination queues.
+--
 -- Idempotent; safe to re-run. Folded into migration_open_auction_draft.sql.
 -- ============================================================================
 
@@ -121,6 +126,12 @@ $$;
 -- ---------------------------------------------------------------------------
 -- 2. open_draft_tick(): settle the whole board every minute
 -- ---------------------------------------------------------------------------
+--
+-- Verbatim the body from migration_open_nomination_queue.sql, sweep folded in.
+-- That file is the newer of the two and is already applied: its tick ends with
+-- open_autofill_board(), which is what puts the next queued player up when a
+-- slot frees. Shipping a pre-queue body here would silently stop the board
+-- filling itself, so this section must stay in step with that file.
 
 CREATE OR REPLACE FUNCTION open_draft_tick(p_league_id UUID)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER AS $$
@@ -159,50 +170,53 @@ BEGIN
       END IF;
       UPDATE leagues SET open_frozen_since = v_freeze_at WHERE id = p_league_id;
     END IF;
-    RETURN;
+  ELSE
+    IF v_league.open_frozen_since IS NOT NULL THEN
+      v_gap := NOW() - v_league.open_frozen_since;
+      UPDATE open_auctions
+      SET deadline_at = deadline_at + v_gap, updated_at = NOW()
+      WHERE league_id = p_league_id AND status = 'open';
+      UPDATE leagues SET open_frozen_since = NULL WHERE id = p_league_id;
+    END IF;
+
+    -- The net under open_close_auction()'s sweep. Whatever that had to skip
+    -- because another transaction held the row is settled here instead, so the
+    -- board can never sit waiting on a team that is out for good for longer than
+    -- a minute. Runs before the deadline loop so such an auction closes as
+    -- `all_passed` — the true reason — rather than on the clock.
+    FOR r IN
+      SELECT id FROM open_auctions
+      WHERE league_id = p_league_id AND status = 'open'
+      ORDER BY id
+      FOR UPDATE SKIP LOCKED
+    LOOP
+      PERFORM open_settle_auction(r.id);
+    END LOOP;
+
+    FOR r IN
+      SELECT id, leader_team_id FROM open_auctions
+      WHERE league_id = p_league_id AND status = 'open' AND deadline_at <= NOW()
+    LOOP
+      -- Whoever has not answered by the deadline is out. Recorded rather than
+      -- implied, so the closed auction still shows who passed and why.
+      INSERT INTO open_passes (open_auction_id, team_id, reason)
+      SELECT r.id, t.id, 'timeout'
+      FROM teams t
+      WHERE t.league_id = p_league_id
+        AND t.approved
+        AND (r.leader_team_id IS NULL OR t.id <> r.leader_team_id)
+      ON CONFLICT (open_auction_id, team_id) DO NOTHING;
+
+      PERFORM open_close_auction(r.id, 'timeout');
+    END LOOP;
   END IF;
 
-  IF v_league.open_frozen_since IS NOT NULL THEN
-    v_gap := NOW() - v_league.open_frozen_since;
-    UPDATE open_auctions
-    SET deadline_at = deadline_at + v_gap, updated_at = NOW()
-    WHERE league_id = p_league_id AND status = 'open';
-    UPDATE leagues SET open_frozen_since = NULL WHERE id = p_league_id;
+  -- Last, so the board count it reads is final for this tick: the thaw, the
+  -- settle sweep and the close loop can all free a slot. Reached in the frozen
+  -- branch too — night stops the clocks, not the nominating.
+  IF v_league.status = 'active' THEN
+    PERFORM open_autofill_board(p_league_id);
   END IF;
-
-  -- The net under open_close_auction()'s sweep. Whatever that had to skip
-  -- because another transaction held the row is settled here instead, so the
-  -- board can never sit waiting on a team that is out for good for longer than
-  -- a minute. Runs before the deadline loop so such an auction closes as
-  -- `all_passed` — the true reason — rather than on the clock.
-  --
-  -- SKIP LOCKED for the same reason as above: a row held right now belongs to a
-  -- bid or pass that settles it on its own, and this job must never block on it.
-  FOR r IN
-    SELECT id FROM open_auctions
-    WHERE league_id = p_league_id AND status = 'open'
-    ORDER BY id
-    FOR UPDATE SKIP LOCKED
-  LOOP
-    PERFORM open_settle_auction(r.id);
-  END LOOP;
-
-  FOR r IN
-    SELECT id, leader_team_id FROM open_auctions
-    WHERE league_id = p_league_id AND status = 'open' AND deadline_at <= NOW()
-  LOOP
-    -- Whoever has not answered by the deadline is out. Recorded rather than
-    -- implied, so the closed auction still shows who passed and why.
-    INSERT INTO open_passes (open_auction_id, team_id, reason)
-    SELECT r.id, t.id, 'timeout'
-    FROM teams t
-    WHERE t.league_id = p_league_id
-      AND t.approved
-      AND (r.leader_team_id IS NULL OR t.id <> r.leader_team_id)
-    ON CONFLICT (open_auction_id, team_id) DO NOTHING;
-
-    PERFORM open_close_auction(r.id, 'timeout');
-  END LOOP;
 END;
 $$;
 
