@@ -5,7 +5,6 @@ import PlayerSearch from '@/components/PlayerSearch'
 import PlayerPicker from '@/components/PlayerPicker'
 import SnakeDraftBoard from '@/components/SnakeDraftBoard'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
-import WatchStar from '@/components/WatchStar'
 import NominationQueue from '@/components/NominationQueue'
 import type { Player, League, Team, SnakePick } from '@/types'
 import {
@@ -510,21 +509,10 @@ async function OpenDraftPlayersPage({
         </div>
       </div>
 
-      {/* On the board now. The star lives here too: a nominated player leaves
-          the available list the moment he goes up (status becomes
-          'on_auction'), and this is the only place left to follow him from. */}
-      {board.map(a => (
-        <div key={a.id} className="card mb-3" style={{ borderColor: 'var(--warning)', borderWidth: 2 }}>
-          <span className="badge badge-yellow mb-2">במכרז עכשיו · ${a.current_price}</span>
-          <div className="flex items-center gap-2">
-            <p className="font-bold text-xl">{a.player?.name}</p>
-            <WatchStar playerId={a.player_id} watched={watchedIds.includes(a.player_id)} size="md" />
-          </div>
-          <p className="text-sm" style={{ color: 'var(--muted)' }}>
-            {[a.player?.position, a.player?.nba_team].filter(Boolean).join(' · ')}
-          </p>
-        </div>
-      ))}
+      {/* The players currently on the board are deliberately NOT repeated here:
+          a full-width card each pushed the pool itself off the screen. The
+          count badge above says how many are up, and המכרז shows them with
+          their price, who is still in, and the star. */}
 
       {/* Only a team can queue nominations — a spectator admin has no turn to
           fill, and the arrow column would post as nobody. */}
