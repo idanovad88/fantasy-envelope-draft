@@ -12,11 +12,15 @@
  * CLAUDE.md used to call regenerating this a browser job. That is true of
  * `WebFetch`, which cannot send the `x-fantasy-filter` header the endpoint
  * requires — but `fetch` can, so this runs unattended in ~2s.
+ *
+ * `data/rookies-<season-1>.json`, when it exists, is merged in after the fetch
+ * for the players ESPN has not ranked yet — see `withRookies()`. It is optional
+ * and season-scoped, so a season with no such file simply writes ESPN's list.
  */
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { fetchRankedPlayers, defaultSeason, seasonSlug, MIN_RANKED } from '../lib/espnPool.mjs'
+import { fetchRankedPlayers, withRookies, defaultSeason, seasonSlug, MIN_RANKED } from '../lib/espnPool.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -81,14 +85,22 @@ function readPrevious() {
     })
 }
 
-const players = await fetchRankedPlayers({ season: SEASON })
+const ranked = await fetchRankedPlayers({ season: SEASON })
 
-if (players.length < MIN_RANKED) {
+// The guard runs on ESPN's answer alone, before the rookies are merged in —
+// otherwise 60 names from a local file would paper over a truncated fetch.
+if (ranked.length < MIN_RANKED) {
   console.error(
-    `only ${players.length} ranked players came back (expected >= ${MIN_RANKED}) — not writing`
+    `only ${ranked.length} ranked players came back (expected >= ${MIN_RANKED}) — not writing`
   )
   process.exit(2)
 }
+
+const rookieFile = path.join(ROOT, 'data', `rookies-${SEASON - 1}.json`)
+const rookies = fs.existsSync(rookieFile)
+  ? JSON.parse(fs.readFileSync(rookieFile, 'utf8'))
+  : null
+const players = withRookies(ranked, rookies, SEASON)
 
 const previous = readPrevious()
 const { added, removed, moved } = previous
@@ -96,7 +108,10 @@ const { added, removed, moved } = previous
   : { added: players, removed: [], moved: [] }
 const changed = added.length > 0 || removed.length > 0 || moved.length > 0
 
-console.log(`season ${seasonSlug(SEASON).replace('_', '-')} · ${players.length} ranked players`)
+console.log(
+  `season ${seasonSlug(SEASON).replace('_', '-')} · ${ranked.length} ranked players` +
+    (players.length > ranked.length ? ` + ${players.length - ranked.length} unranked rookies` : '')
+)
 if (!previous) {
   console.log('no previous file — this is the first write')
 } else if (!changed) {
