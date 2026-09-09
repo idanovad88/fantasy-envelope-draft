@@ -345,6 +345,7 @@ DECLARE
   v_league_id UUID; v_player_id UUID; v_leader UUID;
   v_price INTEGER; v_status TEXT;
   v_approved INTEGER; v_complete INTEGER;
+  r RECORD;
 BEGIN
   SELECT league_id, player_id, leader_team_id, current_price, status
   INTO v_league_id, v_player_id, v_leader, v_price, v_status
@@ -386,6 +387,32 @@ BEGIN
   -- up (see open_nominate). And no tiebreak demotion — an open auction cannot
   -- tie, so tiebreak_rank is not part of this format at all.
 
+  -- The win just changed the winner's roster and budget, which are exactly the
+  -- two inputs to open_settle_auction()'s auto-PASS test — on every other
+  -- auction on the board, not just this one. Nothing else re-runs it there: the
+  -- other three callers all settle the auction being acted upon, so a team that
+  -- filled its roster kept its seat in every auction already open until someone
+  -- happened to bid or pass on that one specifically. Recursion terminates:
+  -- this row is already `completed`, so a sibling that closes and settles back
+  -- finds nothing to do, and each level closes a different auction out of at
+  -- most open_board_size.
+  --
+  -- SKIP LOCKED, not a plain FOR UPDATE: a locked sibling row means another
+  -- transaction is mid-bid or mid-pass on it and will settle it itself, and
+  -- waiting would invite a deadlock — that transaction may be closing an
+  -- auction and waiting on the row this one already holds. Anything skipped is
+  -- caught by the next open_draft_tick(), one minute later at worst.
+  FOR r IN
+    SELECT id FROM open_auctions
+    WHERE league_id = v_league_id AND status = 'open' AND id <> p_auction_id
+    ORDER BY id
+    FOR UPDATE SKIP LOCKED
+  LOOP
+    PERFORM open_settle_auction(r.id);
+  END LOOP;
+
+  -- Counted after that sweep: settling siblings can close them, which can fill
+  -- another roster, which can be the win that ends the draft.
   SELECT COUNT(*) FILTER (WHERE approved),
          COUNT(*) FILTER (WHERE approved AND is_complete)
   INTO v_approved, v_complete
@@ -810,6 +837,20 @@ BEGIN
     WHERE league_id = p_league_id AND status = 'open';
     UPDATE leagues SET open_frozen_since = NULL WHERE id = p_league_id;
   END IF;
+
+  -- The net under open_close_auction()'s sweep. Whatever that had to skip
+  -- because another transaction held the row is settled here instead, so the
+  -- board can never sit waiting on a team that is out for good for longer than
+  -- a minute. Runs before the deadline loop so such an auction closes as
+  -- `all_passed` — the true reason — rather than on the clock.
+  FOR r IN
+    SELECT id FROM open_auctions
+    WHERE league_id = p_league_id AND status = 'open'
+    ORDER BY id
+    FOR UPDATE SKIP LOCKED
+  LOOP
+    PERFORM open_settle_auction(r.id);
+  END LOOP;
 
   FOR r IN
     SELECT id, leader_team_id FROM open_auctions
