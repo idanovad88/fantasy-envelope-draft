@@ -24,8 +24,17 @@ self.addEventListener('push', event => {
   const title = payload.title || 'פנטזי דראפט'
   const options = {
     body: payload.body || '',
+    // `icon` is the large, full-colour image in the notification body — the
+    // logo as designed.
     icon: '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
+    // `badge` is a different thing entirely: the small mark Android puts in the
+    // status bar and overlays on the notification. Android reads ONLY its alpha
+    // channel and paints the result white, so a fully opaque PNG — which every
+    // icon derived from logo.png is — asks it to paint a solid white rectangle.
+    // That was the blank white square. badge-96.png is the same logo as a
+    // white-on-transparent silhouette; regenerate it with
+    // scripts/generate-notification-badge.mjs after any logo change.
+    badge: '/icons/badge-96.png',
     dir: 'rtl',
     lang: 'he',
     // A later push with the same tag REPLACES the earlier toast instead of
