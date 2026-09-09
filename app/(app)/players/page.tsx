@@ -8,7 +8,6 @@ import RealtimeRefresher from '@/components/RealtimeRefresher'
 import NominationQueue from '@/components/NominationQueue'
 import type { Player, League, Team, SnakePick } from '@/types'
 import {
-  formatTime,
   formatTimeSince,
   getCurrentSnakePicker,
   buildPickOverridesMap,
@@ -76,30 +75,18 @@ export default async function PlayersPage() {
         ? supabase.from('auctions').select('id, player_id').eq('league_id', league.id).eq('status', 'active').maybeSingle()
         : Promise.resolve({ data: null }),
       league
-        ? supabase.from('auctions').select('id, player_id, scheduled_start').eq('league_id', league.id).eq('status', 'pending').order('scheduled_start', { ascending: true })
+        ? supabase.from('auctions').select('player_id').eq('league_id', league.id).eq('status', 'pending')
         : Promise.resolve({ data: [] }),
     ])
 
   const typedPlayers = (players || []) as PlayerWithTeam[]
   const activeAuctionPlayerId = (activeAuction as { player_id?: string } | null)?.player_id ?? null
   const pendingPlayerIds = new Set((pendingAuctions || []).map((a: { player_id: string }) => a.player_id))
-  const pendingStartByPlayerId = Object.fromEntries(
-    (pendingAuctions || []).map((a: { player_id: string; scheduled_start: string }) => [a.player_id, a.scheduled_start])
-  )
 
   const available = typedPlayers.filter(p => p.status === 'available')
   const drafted = typedPlayers.filter(p => p.status === 'drafted')
 
-  // Order on-auction players by when they go up: the active auction first,
-  // then pending auctions by their scheduled start time — not by ranking.
-  const auctionOrder = new Map<string, number>()
-  if (activeAuctionPlayerId) auctionOrder.set(activeAuctionPlayerId, 0)
-  ;(pendingAuctions || []).forEach((a: { player_id: string }, i: number) =>
-    auctionOrder.set(a.player_id, i + 1)
-  )
-  const onAuction = typedPlayers
-    .filter(p => p.status === 'on_auction')
-    .sort((a, b) => (auctionOrder.get(a.id) ?? Infinity) - (auctionOrder.get(b.id) ?? Infinity))
+  const onAuction = typedPlayers.filter(p => p.status === 'on_auction')
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -125,21 +112,10 @@ export default async function PlayersPage() {
         </div>
       )}
 
-      {onAuction.map(p => {
-        const isPending = pendingPlayerIds.has(p.id)
-        const pendingStart = pendingStartByPlayerId[p.id]
-        return (
-          <div key={p.id} className="card mb-4" style={{ borderColor: isPending ? 'var(--muted)' : 'var(--warning)', borderWidth: 2 }}>
-            <span className={`badge ${isPending ? 'badge-gray' : 'badge-yellow'} mb-2`}>
-              {isPending && pendingStart
-                ? `מתוזמן — יפתח ב-${formatTime(pendingStart)}`
-                : 'במכרז עכשיו'}
-            </span>
-            <p className="font-bold text-xl">{p.name}</p>
-            <p className="text-sm" style={{ color: 'var(--muted)' }}>{p.position} · {p.nba_team}</p>
-          </div>
-        )
-      })}
+      {/* The auction itself — the live one and the queue behind it — is not
+          repeated here: a full-width card each pushed the pool itself off the
+          screen. The two badges above say how many are up, and המכרז shows
+          each one with its deadline. */}
 
       <PlayerSearch
         players={available.map(p => ({ id: p.id, name: p.name, position: p.position, nba_team: p.nba_team, ranking: p.ranking }))}
