@@ -1,21 +1,53 @@
 'use client'
 
 import { useState, useRef } from 'react'
+import rookieData from '@/data/rookies-2026.json'
 
 interface Props {
   leagueId: string
 }
 
-type Report = { total: number; matched: number; willUpdate: number; unmatched: string[] }
+/**
+ * `import` inserts the whole file, `update` re-ranks what is already there, and
+ * `add` inserts only the names the league is missing. They map one-to-one onto
+ * the three routes; the third exists because the first two leave a real gap —
+ * see `app/api/admin/add-missing-players/route.ts`.
+ */
+type Mode = 'import' | 'update' | 'add'
+
+type UpdateReport = { total: number; matched: number; willUpdate: number; unmatched: string[] }
+type AddReport = { inLeague: number; inFile: number; willAdd: number; names: string[] }
+
+const MODES: { value: Mode; label: string; hint: string }[] = [
+  {
+    value: 'import',
+    label: 'ייבא את כל השחקנים בקובץ',
+    hint: 'מוסיף כל שורה כשחקן חדש. מיועד לליגה ריקה — בליגה שכבר דראפטה זה ייצור עותק שני של כל שחקן.',
+  },
+  {
+    value: 'update',
+    label: 'עדכן דירוג לשחקנים קיימים (בלי להוסיף חדשים)',
+    hint: 'משדך לפי שם ומעדכן דירוג בלבד. לא נוגע במי שכבר נבחר — סטטוס, קבוצה ומחיר נשארים כמו שהם.',
+  },
+  {
+    value: 'add',
+    label: 'הוסף רק שחקנים שחסרים בליגה',
+    hint: 'משדך לפי שם ומוסיף רק את מי שאין. שחקנים קיימים לא נוגעים בהם בכלל — בטוח גם באמצע דראפט.',
+  },
+]
+
+/** The bundled draft class as a `name,pos` CSV, ready to review before adding. */
+function rookieCsv() {
+  return ['name,pos', ...rookieData.players.map(p => `${p.name},${p.position}`)].join('\n')
+}
 
 export default function ImportPlayers({ leagueId }: Props) {
   const [csvText, setCsvText] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState('')
-  // Update mode fills `ranking` on players that already exist instead of
-  // inserting new ones — the only safe way to re-rank a league mid-draft.
-  const [updateMode, setUpdateMode] = useState(false)
-  const [report, setReport] = useState<Report | null>(null)
+  const [mode, setMode] = useState<Mode>('import')
+  const [report, setReport] = useState<UpdateReport | null>(null)
+  const [addReport, setAddReport] = useState<AddReport | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -28,6 +60,7 @@ export default function ImportPlayers({ leagueId }: Props) {
 
   function reset() {
     setReport(null)
+    setAddReport(null)
     setResult('')
   }
 
@@ -95,6 +128,35 @@ export default function ImportPlayers({ leagueId }: Props) {
     setResult(`עודכנו ${data.updated} שחקנים ✓`)
   }
 
+  /** Same two-step shape as the update: report first, then commit. */
+  async function handleAdd(dryRun: boolean) {
+    setLoading(true)
+    setResult('')
+    const parsed = parseCsv()
+    if (!parsed) { setResult('CSV ריק'); setLoading(false); return }
+    const players = parsed.map(p => ({
+      name: p.name,
+      position: p.position ?? null,
+      // A file with no rank column lets the server number them from the top of
+      // this league's own list, rather than importing a foreign scale.
+      ranking: p.ranking ?? null,
+      auction_value: p.auction_value ?? null,
+    }))
+
+    const res = await fetch('/api/admin/add-missing-players', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ league_id: leagueId, players, dry_run: dryRun }),
+    })
+    const data = await res.json()
+    setLoading(false)
+
+    if (data.error) { setResult(`שגיאה: ${data.error}`); return }
+    if (dryRun) { setAddReport(data); return }
+    setAddReport(null)
+    setResult(`נוספו ${data.added} שחקנים ✓`)
+  }
+
   return (
     <div className="card mt-4">
       <h2 className="font-bold mb-2">ייבוא שחקנים (CSV)</h2>
@@ -116,6 +178,14 @@ export default function ImportPlayers({ leagueId }: Props) {
         >
           בחר קובץ CSV
         </button>
+        <button
+          type="button"
+          className="btn btn-outline text-sm"
+          onClick={() => { setCsvText(rookieCsv()); reset(); setMode('add') }}
+          title="מחזור הדראפט של 2026 — ESPN עוד לא דירגו אותם"
+        >
+          טען רוקיז 2026
+        </button>
         {csvText && (
           <button
             type="button"
@@ -135,20 +205,23 @@ export default function ImportPlayers({ leagueId }: Props) {
         dir="ltr"
       />
 
-      <label className="flex items-start gap-2 mt-3 text-sm cursor-pointer">
-        <input
-          type="checkbox"
-          className="mt-1"
-          checked={updateMode}
-          onChange={e => { setUpdateMode(e.target.checked); reset() }}
-        />
-        <span>
-          עדכן דירוג לשחקנים קיימים (בלי להוסיף חדשים)
-          <span className="block text-xs" style={{ color: 'var(--muted)' }}>
-            משדך לפי שם ומעדכן דירוג בלבד. לא נוגע במי שכבר נבחר — סטטוס, קבוצה ומחיר נשארים כמו שהם.
-          </span>
-        </span>
-      </label>
+      <div className="mt-3 flex flex-col gap-2">
+        {MODES.map(m => (
+          <label key={m.value} className="flex items-start gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="import-mode"
+              className="mt-1"
+              checked={mode === m.value}
+              onChange={() => { setMode(m.value); reset() }}
+            />
+            <span>
+              {m.label}
+              <span className="block text-xs" style={{ color: 'var(--muted)' }}>{m.hint}</span>
+            </span>
+          </label>
+        ))}
+      </div>
 
       {report && (
         <div className="mt-3 p-3 text-sm" style={{ background: 'var(--background)', borderRadius: '8px', border: '1px solid var(--border)' }}>
@@ -169,9 +242,38 @@ export default function ImportPlayers({ leagueId }: Props) {
         </div>
       )}
 
+      {addReport && (
+        <div className="mt-3 p-3 text-sm" style={{ background: 'var(--background)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+          <p>
+            בקובץ <strong>{addReport.inFile}</strong> שמות · בליגה <strong>{addReport.inLeague}</strong> שחקנים ·{' '}
+            <strong>{addReport.willAdd}</strong> יתווספו
+          </p>
+          {addReport.willAdd === 0 ? (
+            <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>
+              כל השמות בקובץ כבר קיימים בליגה — אין מה להוסיף.
+            </p>
+          ) : (
+            <>
+              <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>
+                השחקנים שיתווספו (עברו על הרשימה לפני אישור):
+              </p>
+              <p className="text-xs mt-1 overflow-y-auto" style={{ color: 'var(--muted)', maxHeight: '120px' }} dir="ltr">
+                {addReport.names.join(', ')}
+              </p>
+            </>
+          )}
+        </div>
+      )}
+
       {result && <p className="text-sm mt-2" style={{ color: result.startsWith('שגיאה') ? 'var(--danger)' : 'var(--success)' }}>{result}</p>}
 
-      {updateMode ? (
+      {mode === 'import' && (
+        <button className="btn btn-primary mt-3" onClick={handleImport} disabled={loading || !csvText.trim()}>
+          {loading ? 'מייבא...' : 'ייבא שחקנים'}
+        </button>
+      )}
+
+      {mode === 'update' && (
         <div className="flex gap-2 mt-3">
           <button className="btn btn-outline" onClick={() => handleUpdate(true)} disabled={loading || !csvText.trim()}>
             {loading ? 'בודק...' : 'בדוק התאמה'}
@@ -182,10 +284,19 @@ export default function ImportPlayers({ leagueId }: Props) {
             </button>
           )}
         </div>
-      ) : (
-        <button className="btn btn-primary mt-3" onClick={handleImport} disabled={loading || !csvText.trim()}>
-          {loading ? 'מייבא...' : 'ייבא שחקנים'}
-        </button>
+      )}
+
+      {mode === 'add' && (
+        <div className="flex gap-2 mt-3">
+          <button className="btn btn-outline" onClick={() => handleAdd(true)} disabled={loading || !csvText.trim()}>
+            {loading ? 'בודק...' : 'בדוק מה חסר'}
+          </button>
+          {addReport && (
+            <button className="btn btn-primary" onClick={() => handleAdd(false)} disabled={loading || addReport.willAdd === 0}>
+              {loading ? 'מוסיף...' : `אשר והוסף ${addReport.willAdd}`}
+            </button>
+          )}
+        </div>
       )}
     </div>
   )
