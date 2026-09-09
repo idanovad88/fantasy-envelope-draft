@@ -90,11 +90,14 @@ export async function POST(req: NextRequest) {
 
   const missing = [...byKey.values()]
 
-  // A league's ranking scale is its own — the live pool was re-ranked from a
-  // 387-row ESPN list, an older one may run to 294 — so a player arriving
-  // without a rank is numbered from the top of *this* league's list rather
-  // than from whatever the source file happened to call him. Everything
-  // unranked still sorts below him, and every ranked player above.
+  // A league's ranking scale is whatever file it was last ranked from, which
+  // is not the same as how many of its players are ranked: the live open
+  // league has 265 ranked rows but drew them from a 387-row ESPN list, so its
+  // top rank is near 387. Reading MAX(ranking) off the league is what makes
+  // that difference stop mattering — a player arriving without a rank is
+  // numbered from the top of *this* league's list rather than from whatever
+  // the source file happened to call him. Everything unranked still sorts
+  // below him, and every ranked player above.
   let nextRank = existing.reduce((max, p) => Math.max(max, p.ranking ?? 0), 0)
 
   const rows = missing.map(p => ({
