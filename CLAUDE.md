@@ -461,6 +461,17 @@ Read `player.draftRanksByRankType.STANDARD.{rank,auctionValue}`; `eligibleSlots`
 
 `node scripts/fetch-espn-ranks.mjs --check` writes nothing and exits 1 when the ranks actually moved — that is what the weekly scheduled task runs.
 
+⚠️ **That task is real automation with no trace in this repo**, the same trap as the pg_cron jobs under **Scheduled jobs** below — reading the codebase will never reveal that something rewrites these two files on its own. It is a Claude Code scheduled task, `espn-ranks-weekly`, set up 2026-09-04:
+
+| | |
+|---|---|
+| lives at | `C:\Users\idan\.claude\scheduled-tasks\espn-ranks-weekly\SKILL.md` (outside the repo, one machine only) |
+| runs | Mondays ~08:53 local, **only while the desktop app is open** — otherwise on next launch |
+| does | `--check`; on exit 1 regenerates both files and commits locally. Never pushes, never deploys, never re-ranks an existing league. |
+| says | one push notification, and **only when the ranks actually moved** — a quiet week is silent by design |
+
+So an unexplained recent commit touching only `nba_players_<season>.csv` and `data/nba-pool.json` is that task, not a person. The schedule is **not** stored in `SKILL.md` — editing that file changes the instructions only; the cadence lives in the app's task store, so change it through the scheduled-task tools or the sidebar's Scheduled section.
+
 ⚠️ **Break the ties deterministically or the diff is worthless.** ESPN's ranks contain ties — 7 of them today, covering 14 players — and **the order it returns tied players in is not stable between calls.** Renumbering 1..N in response order therefore produced a different file every run: two calls minutes apart swapped Mobley/Adebayo, Okongwu/Lillard and two more pairs, all four with identical auction values. The sort is `rank ASC → auctionValue DESC → name ASC` before renumbering, and the JSON's keys are written field by field rather than spread, because key order is part of the file the diff compares. Two consecutive runs must be byte-identical; that is the one test worth re-running after touching this.
 
 **A new league seeds itself.** `POST /api/create-league` fetches the pool live (8s timeout, `maxDuration = 30`), falls back to the bundled JSON, and inserts all 387 rows — the row shape copied from `/api/import-players`, `nba_team` left NULL. **A seeding failure must never 500**: the league row already exists, so the route returns `{ success: true, seeded, seedSource }` and the page tells the creator to import by hand when `seeded` is 0. Live-first means a league created today has today's ranks without waiting for a deploy; the bundled file only has to be current enough to be a net.
@@ -548,7 +559,7 @@ The open format sent nothing until now, which with a 30-minute soft-close window
 
 **A user is never told twice about one bid.** The bidder's own managers are excluded outright, and a user who was both outbid and following the player gets only "עקפו אותך" — the stronger of the two. Every push for an auction carries the same `tag`, so a later raise **replaces** the earlier toast instead of stacking a stale price on top of it. `public/sw.js` reads `payload.tag`, falling back to the older `payload.auctionId` form for service workers installed before it existed.
 
-**Starring a player** is `player_watch`, per **user** (an owner and their assistant each keep their own) and private under own-rows-only RLS — which is what lets the server components read it with the cookie client. Writes go through `POST /api/players/watch`, which additionally checks league membership. The star is rendered in three places, and the third is not optional: a nominated player becomes `on_auction` and **leaves the players page's available list**, so the star is repeated on the board cards there and on every card of `OpenAuctionBoard`. The dashboard's "רשימת המעקב שלי" card is the one view that follows a starred player all the way from pool to sale.
+**Starring a player** is `player_watch`, per **user** (an owner and their assistant each keep their own) and private under own-rows-only RLS — which is what lets the server components read it with the cookie client. Writes go through `POST /api/players/watch`, which additionally checks league membership. The star is rendered on the players page's available list and on every card of `OpenAuctionBoard`. It used to be repeated on a per-auction card on the players page as well — a nominated player becomes `on_auction` and **leaves the available list**, so that was the only way to star him from there. Those cards were removed — they pushed the pool itself off the screen, and the envelope page's equivalent (the live auction plus the pending queue) went with them for the same reason. Starring a player who is already up now happens in המכרז, where the same auction is shown anyway. The dashboard's "רשימת המעקב שלי" card is the one view that follows a starred player all the way from pool to sale.
 
 **⚠️ The baseline matters.** `migration_open_notifications.sql` ends by claiming everything already true — every current turn and the latest bid of every open auction — so switching this on mid-draft does not fire a backlog at a live league. Re-running the migration re-baselines and will swallow anything pending at that moment.
 
@@ -556,7 +567,7 @@ The open format sent nothing until now, which with a 30-minute soft-close window
 
 ### Scheduled jobs (pg_cron)
 
-**Four** jobs run every minute, all created by hand, all living only in the database. Nothing in the app imports them and `cron.job` is the only place they exist:
+**Four** jobs run every minute, all created by hand, all living only in the database. Nothing in the app imports them and `cron.job` is the only place they exist (a fifth piece of invisible automation, the weekly `espn-ranks-weekly` task, is not a cron at all — see **Player pool: ranking and import** above):
 
 | Job | Runs | Costs Vercel? |
 |---|---|---|
@@ -623,6 +634,17 @@ Paths that bypass the auth redirect inside the `proxy` function itself (not the 
 - `public/apple-touch-icon.png` — iOS fallback at root
 - `public/favicon.ico` — browser tab favicon
 - `public/logo.png` — full-size logo (used in Navbar)
+- `public/icons/badge-96.png` — 96×96 **monochrome** notification badge, see below
+
+⚠️ **A notification's `badge` is not an icon, and pointing it at one paints a solid white square.** Android reads only the **alpha channel** of `badge` and fills the result white — it is a stencil, not a picture. Every icon in the list above is derived from `logo.png`, which has **no alpha channel at all** (`channels=3`, `hasAlpha=false`), so `badge: '/icons/icon-192.png'` asked Android to paint the whole 192×192 rectangle: the blank white square users reported, in the status bar and overlaid on the notification itself. `public/sw.js` now points `badge` at `badge-96.png`, a white-on-transparent silhouette of the same logo, and leaves `icon` — the large, full-colour image in the notification body — on `icon-192.png`. The two fields are different images on purpose; do not point them at the same file again.
+
+```bash
+node scripts/generate-notification-badge.mjs   # rerun after any logo.png change
+```
+
+That script derives the silhouette from `logo.png` rather than shipping a hand-drawn mark, so the two cannot drift. It widens every knockout line before downscaling (the seams the logo draws, plus a gap where the ball meets the envelope) — without that the mark closes up into one blob at 24dp, and the ball, being the same white as the envelope behind it, vanishes into it. Verify a regenerated badge with `hasAlpha=true` and an alpha bounding box filling ~80% of the frame.
+
+**iOS ignores both fields.** Safari web push always draws the installed web app's own icon, so nothing in `sw.js` changes what an iPhone shows — that one comes from `app/manifest.ts`.
 
 Icons were generated with `sharp` from `public/logo.png`. To regenerate:
 ```bash
