@@ -24,7 +24,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const selectedLeague = league as { draft_type?: DraftType; name?: string; logo_url?: string | null } | null
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-dvh">
       <Navbar
         isAdmin={!!adminRow || !!createdLeague}
         draftType={selectedLeague?.draft_type}

@@ -15,7 +15,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     .maybeSingle()
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-dvh">
       <Navbar isAdmin={!!adminRow} />
       <main className="flex-1 p-4 md:p-6 pb-20 md:pb-6 max-w-5xl w-full">
         {children}

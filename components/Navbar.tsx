@@ -39,7 +39,7 @@ export default function Navbar({ isAdmin, draftType, leagueName, leagueLogo }: N
   return (
     <>
       {/* Desktop sidebar */}
-      <nav className="hidden md:flex flex-col gap-1 p-4 h-screen sticky top-0 w-56 border-l" style={{ borderColor: 'var(--border)', background: 'var(--card)' }}>
+      <nav className="hidden md:flex flex-col gap-1 p-4 h-dvh sticky top-0 w-56 border-l" style={{ borderColor: 'var(--border)', background: 'var(--card)' }}>
         <div className="flex items-center gap-2 px-3 py-4 mb-4">
           {/* Inside a league, its own logo and name identify which league is open. */}
           {leagueName ? (

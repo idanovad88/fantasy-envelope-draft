@@ -37,7 +37,7 @@ export default async function AssistInvitePage({ params }: { params: Promise<{ t
   const user = await getAuthUser(supabase)
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--background)' }}>
+    <div className="min-h-dvh flex items-center justify-center px-4" style={{ background: 'var(--background)' }}>
       <div className="card w-full max-w-sm text-center">
         <div className="text-4xl mb-3">🏀</div>
         {invalidReason ? (

@@ -761,6 +761,10 @@ The app shipped for months with no `error.tsx` anywhere, which meant any throw u
 
 Tailwind CSS v4 with CSS variables for theming (`var(--primary)`, `var(--muted)`, `var(--success)`, `var(--danger)`, `var(--warning)`, `var(--border)`, `var(--text)`). Custom utility classes: `card`, `badge`, `badge-green`, `badge-yellow`, `badge-gray`, `badge-red`, `badge-blue`, `input`, `btn`, `btn-primary`, `pulse-glow`.
 
+⚠️ **Never use `vh` here — `100vh` is what made the page bounce back to the top on an iPhone.** On iOS Safari `100vh` is the *large* viewport, the height the page would have if the URL bar were already hidden. `min-h-screen` on the app shell therefore made **every page in every tab** at least ~60–90px taller than what the phone was actually showing, even an empty one. A swipe scrolled into that slack, Safari collapsed the URL bar, the visible viewport grew to exactly `100vh`, the slack vanished — and Safari clamped `scrollTop` back to 0 and put the bar back. From the manager's side that reads as "I scroll down and it throws me back up", on every tab, iPhone only. Android and desktop never show it: their toolbars don't resize the viewport the same way, and scroll anchoring covers the rest — **Safari supports no scroll anchoring at all**, which is why nothing put the position back.
+
+`dvh` is the dynamic viewport unit: it tracks the height the phone is showing *right now*, so the document is never taller than the screen by construction. The whole shell is on it — `body` (`min-h-dvh`, root layout), the `(app)` flex row, the desktop sidebar (`h-dvh`), `/login`, `/assist/[token]` and `app/global-error.tsx`. `html` carries **no height at all** any more; `html { height: 100% }` + `body { min-height: 100% }` was the other half of the same trap, since a percentage there resolves against a viewport that moves under it. Supported since iOS 15.4. Applied 2026-09-10.
+
 **RTL note:** The app is Hebrew/RTL. For icon positioning inside inputs (e.g. eye button), use inline `style={{ position: 'absolute', left: '10px' }}` — do NOT use Tailwind `left-*` utilities as they may be reinterpreted in RTL context.
 
 ### Admin

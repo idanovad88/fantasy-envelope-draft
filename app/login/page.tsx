@@ -79,7 +79,7 @@ export default function LandingPage() {
   // ── Create league (admin) screen ────────────────────────────
   if (createMode) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--background)' }}>
+      <div className="min-h-dvh flex items-center justify-center px-4" style={{ background: 'var(--background)' }}>
         <div className="card w-full max-w-sm">
           <div className="text-center mb-6">
             <div className="text-3xl mb-2">🏀</div>
@@ -141,7 +141,7 @@ export default function LandingPage() {
   // ── Landing screen ───────────────────────────────────────────
   return (
     <div
-      className="min-h-screen flex flex-col items-center justify-center gap-8 px-4"
+      className="min-h-dvh flex flex-col items-center justify-center gap-8 px-4"
       style={{ background: 'var(--background)' }}
     >
       <div className="text-center">
