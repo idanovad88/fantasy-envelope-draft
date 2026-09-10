@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { withScrollAnchor } from '@/lib/scrollAnchor'
 
 // One logical event writes to several of the tables below — resolving an
 // auction updates `auctions` and then every affected row in `teams`; approving
@@ -37,7 +38,13 @@ export default function RealtimeRefresher({
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => {
         timer = null
-        router.refresh()
+        // Nobody asked for this render — it is somebody else's bid landing — so
+        // it must not move the page under whoever is reading it. Next does not
+        // scroll on a refresh (`ScrollBehavior.NoScroll`); what moves is the
+        // content itself, when an auction card or a table row above the
+        // viewport disappears. See lib/scrollAnchor.ts for why Safari needs
+        // that compensated by hand and every other browser does not.
+        withScrollAnchor(() => router.refresh())
       }, REFRESH_DEBOUNCE_MS)
     }
 
