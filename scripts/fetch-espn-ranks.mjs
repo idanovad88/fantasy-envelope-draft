@@ -16,11 +16,24 @@
  * `data/rookies-<season-1>.json`, when it exists, is merged in after the fetch
  * for the players ESPN has not ranked yet — see `withRookies()`. It is optional
  * and season-scoped, so a season with no such file simply writes ESPN's list.
+ *
+ * A second, cheap request then appends every *other* unranked player people are
+ * actually rostering — see `fetchRosteredExtras()`. Without it the pool held
+ * only ESPN's 387 ranked names, and real NBA players (Day'Ron Sharpe, Cedric
+ * Coward, Ajay Mitchell) were simply absent from every league.
  */
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { fetchRankedPlayers, withRookies, defaultSeason, seasonSlug, MIN_RANKED } from '../lib/espnPool.mjs'
+import {
+  fetchRankedPlayers,
+  fetchRosteredExtras,
+  withRookies,
+  withExtras,
+  defaultSeason,
+  seasonSlug,
+  MIN_RANKED,
+} from '../lib/espnPool.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -100,7 +113,8 @@ const rookieFile = path.join(ROOT, 'data', `rookies-${SEASON - 1}.json`)
 const rookies = fs.existsSync(rookieFile)
   ? JSON.parse(fs.readFileSync(rookieFile, 'utf8'))
   : null
-const players = withRookies(ranked, rookies, SEASON)
+const extras = await fetchRosteredExtras({ season: SEASON })
+const players = withExtras(withRookies(ranked, rookies, SEASON), extras)
 
 const previous = readPrevious()
 const { added, removed, moved } = previous
@@ -110,7 +124,7 @@ const changed = added.length > 0 || removed.length > 0 || moved.length > 0
 
 console.log(
   `season ${seasonSlug(SEASON).replace('_', '-')} · ${ranked.length} ranked players` +
-    (players.length > ranked.length ? ` + ${players.length - ranked.length} unranked rookies` : '')
+    (players.length > ranked.length ? ` + ${players.length - ranked.length} unranked` : '')
 )
 if (!previous) {
   console.log('no previous file — this is the first write')

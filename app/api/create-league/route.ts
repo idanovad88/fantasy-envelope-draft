@@ -1,7 +1,14 @@
 import { NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { getAuthUser } from '@/lib/supabase/auth'
-import { fetchRankedPlayers, withRookies, defaultSeason, MIN_RANKED } from '@/lib/espnPool.mjs'
+import {
+  fetchRankedPlayers,
+  fetchRosteredExtras,
+  withRookies,
+  withExtras,
+  defaultSeason,
+  MIN_RANKED,
+} from '@/lib/espnPool.mjs'
 import bundledPool from '@/data/nba-pool.json'
 import rookies from '@/data/rookies-2026.json'
 
@@ -31,20 +38,43 @@ const ESPN_TIMEOUT_MS = 8000
  * newer rookie file still seeds a complete pool. `MIN_RANKED` is checked on
  * ESPN's answer *before* the merge, so 60 local names can never disguise a
  * truncated fetch.
+ *
+ * `fetchRosteredExtras()` runs *alongside* the ranked fetch rather than after
+ * it — it is a 180KB request against 15.5MB, so in parallel it costs no wall
+ * clock at all, and the route has 8s. It is also the one part of seeding
+ * allowed to fail quietly: a league short of Day'Ron Sharpe is worth having,
+ * a league with no players is not. The bundled file already carries the
+ * supplement, so the fallback path needs nothing extra.
  */
 async function loadPool(): Promise<{ players: PoolPlayer[]; source: 'espn' | 'fallback' }> {
   const season = defaultSeason()
-  try {
-    const live = (await fetchRankedPlayers({ timeoutMs: ESPN_TIMEOUT_MS })) as PoolPlayer[]
+  const [rankedRes, extrasRes] = await Promise.allSettled([
+    fetchRankedPlayers({ timeoutMs: ESPN_TIMEOUT_MS }),
+    fetchRosteredExtras({ timeoutMs: ESPN_TIMEOUT_MS }),
+  ])
+  if (extrasRes.status === 'rejected') {
+    console.error('create-league: ESPN ownership fetch failed — seeding ranked players only', extrasRes.reason)
+  }
+  const extras = extrasRes.status === 'fulfilled' ? extrasRes.value : []
+
+  if (rankedRes.status === 'rejected') {
+    console.error('create-league: ESPN fetch failed — using the bundled pool', rankedRes.reason)
+  } else {
+    const live = rankedRes.value as PoolPlayer[]
     if (live.length >= MIN_RANKED) {
-      return { players: withRookies(live, rookies, season) as PoolPlayer[], source: 'espn' }
+      return {
+        players: withExtras(withRookies(live, rookies, season), extras) as PoolPlayer[],
+        source: 'espn',
+      }
     }
     console.error(`create-league: ESPN returned only ${live.length} ranked players — using the bundled pool`)
-  } catch (err) {
-    console.error('create-league: ESPN fetch failed — using the bundled pool', err)
   }
+
   return {
-    players: withRookies(bundledPool as PoolPlayer[], rookies, season) as PoolPlayer[],
+    players: withExtras(
+      withRookies(bundledPool as PoolPlayer[], rookies, season),
+      extras
+    ) as PoolPlayer[],
     source: 'fallback',
   }
 }

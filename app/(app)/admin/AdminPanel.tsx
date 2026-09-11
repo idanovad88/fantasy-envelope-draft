@@ -288,6 +288,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   const [newPlayerName, setNewPlayerName] = useState('')
   const [newPlayerPos, setNewPlayerPos] = useState('PG')
   const [playerFilter, setPlayerFilter] = useState('')
+  const [selectedPlayerIds, setSelectedPlayerIds] = useState<Set<string>>(new Set())
 
   // Admin management state
   const [adminEmail, setAdminEmail] = useState('')
@@ -435,6 +436,45 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
       setMsg('שגיאה: ' + error); setLoading(''); return
     }
     setMsg(`${availableCount} שחקנים הוסרו`)
+    setLoading('')
+    window.location.reload()
+  }
+
+  function togglePlayerSelected(playerId: string) {
+    setSelectedPlayerIds(prev => {
+      const next = new Set(prev)
+      if (next.has(playerId)) next.delete(playerId)
+      else next.add(playerId)
+      return next
+    })
+  }
+
+  /**
+   * Deletes the ticked players in one request.
+   *
+   * Sits between the two buttons that were already here — one player at a
+   * time, or the whole pool — because the actual job is neither: trimming a
+   * seeded pool means removing a few dozen names, and the search box is what
+   * finds them. Only `available` players get a checkbox, and the route
+   * re-applies that filter on the server.
+   */
+  async function removeSelectedPlayers() {
+    if (!league) return
+    const ids = players.filter(p => selectedPlayerIds.has(p.id) && p.status === 'available').map(p => p.id)
+    if (!ids.length) { setMsg('לא נבחרו שחקנים'); return }
+    if (!confirm(`למחוק ${ids.length} שחקנים מהרשימה? לא ניתן לבטל פעולה זו.`)) return
+    setLoading('remove_selected')
+    const res = await fetch('/api/admin/delete-player', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ league_id: league.id, player_ids: ids }),
+    })
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: 'שגיאה' }))
+      setMsg('שגיאה: ' + error); setLoading(''); return
+    }
+    const { deleted } = await res.json().catch(() => ({ deleted: ids.length }))
+    setMsg(`${deleted} שחקנים הוסרו`)
     setLoading('')
     window.location.reload()
   }
@@ -1443,53 +1483,120 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
           )}
 
           {/* Player list */}
-          <div className="card">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-bold">רשימת שחקנים ({players.length})</h2>
-              <div className="flex items-center gap-2">
-                <input
-                  className="input text-sm w-40"
-                  placeholder="חיפוש..."
-                  value={playerFilter}
-                  onChange={e => setPlayerFilter(e.target.value)}
-                  dir="ltr"
-                />
-                <button
-                  className="btn btn-danger text-xs"
-                  onClick={removeAllPlayers}
-                  disabled={!!loading || players.filter(p => p.status === 'available').length === 0}
-                >
-                  {loading === 'remove_all' ? '...' : 'הסר הכל'}
-                </button>
-              </div>
-            </div>
-            <div className="flex flex-col gap-1 max-h-[500px] overflow-y-auto">
-              {players
-                .filter(p => !playerFilter || p.name.toLowerCase().includes(playerFilter.toLowerCase()))
-                .map(p => (
-                  <div key={p.id} className="flex items-center justify-between px-3 py-2 rounded" style={{ background: 'var(--background)' }}>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium" dir="ltr">{p.name}</span>
-                      {p.position && <span className="badge badge-blue text-xs">{p.position}</span>}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`badge text-xs ${p.status === 'available' ? 'badge-green' : p.status === 'on_auction' ? 'badge-yellow' : 'badge-gray'}`}>
-                        {p.status === 'available' ? 'זמין' : p.status === 'on_auction' ? 'במכרז' : 'נדרפט'}
-                      </span>
-                      {p.status === 'available' && (
-                        <button
-                          className="btn btn-danger text-xs py-0.5 px-2"
-                          onClick={() => removePlayer(p.id, p.name)}
-                          disabled={loading === 'remove_' + p.id}
-                        >
-                          הסר
-                        </button>
-                      )}
-                    </div>
+          {(() => {
+            const shownPlayers = players.filter(
+              p => !playerFilter || p.name.toLowerCase().includes(playerFilter.toLowerCase())
+            )
+            // "Select all" means every *shown* available player, so the search
+            // box doubles as the selector: type "Curry", tick the header, delete.
+            const selectableShown = shownPlayers.filter(p => p.status === 'available')
+            const allShownSelected =
+              selectableShown.length > 0 && selectableShown.every(p => selectedPlayerIds.has(p.id))
+            const selectedCount = players.filter(
+              p => selectedPlayerIds.has(p.id) && p.status === 'available'
+            ).length
+
+            return (
+              <div className="card">
+                <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                  <h2 className="font-bold">רשימת שחקנים ({players.length})</h2>
+                  <div className="flex items-center gap-2">
+                    <input
+                      className="input text-sm w-40"
+                      placeholder="חיפוש..."
+                      value={playerFilter}
+                      onChange={e => setPlayerFilter(e.target.value)}
+                      dir="ltr"
+                    />
+                    <button
+                      className="btn btn-danger text-xs"
+                      onClick={removeAllPlayers}
+                      disabled={!!loading || players.filter(p => p.status === 'available').length === 0}
+                    >
+                      {loading === 'remove_all' ? '...' : 'הסר הכל'}
+                    </button>
                   </div>
-                ))}
-            </div>
-          </div>
+                </div>
+
+                <div
+                  className="flex items-center justify-between gap-2 flex-wrap px-3 py-2 mb-2 rounded"
+                  style={{ background: 'var(--background)' }}
+                >
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4"
+                      checked={allShownSelected}
+                      disabled={selectableShown.length === 0}
+                      onChange={() =>
+                        setSelectedPlayerIds(prev => {
+                          const next = new Set(prev)
+                          for (const p of selectableShown) {
+                            if (allShownSelected) next.delete(p.id)
+                            else next.add(p.id)
+                          }
+                          return next
+                        })
+                      }
+                    />
+                    <span>סמן את כל המוצגים ({selectableShown.length})</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    {selectedCount > 0 && (
+                      <button
+                        className="btn btn-outline text-xs py-0.5 px-2"
+                        onClick={() => setSelectedPlayerIds(new Set())}
+                      >
+                        נקה בחירה
+                      </button>
+                    )}
+                    <button
+                      className="btn btn-danger text-xs"
+                      onClick={removeSelectedPlayers}
+                      disabled={!!loading || selectedCount === 0}
+                    >
+                      {loading === 'remove_selected' ? '...' : `מחק נבחרים (${selectedCount})`}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1 max-h-[500px] overflow-y-auto">
+                  {shownPlayers.map(p => (
+                    <div key={p.id} className="flex items-center justify-between px-3 py-2 rounded" style={{ background: 'var(--background)' }}>
+                      <div className="flex items-center gap-2">
+                        {p.status === 'available' ? (
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4"
+                            checked={selectedPlayerIds.has(p.id)}
+                            onChange={() => togglePlayerSelected(p.id)}
+                          />
+                        ) : (
+                          <span className="w-4" />
+                        )}
+                        <span className="text-sm font-medium" dir="ltr">{p.name}</span>
+                        {p.position && <span className="badge badge-blue text-xs">{p.position}</span>}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`badge text-xs ${p.status === 'available' ? 'badge-green' : p.status === 'on_auction' ? 'badge-yellow' : 'badge-gray'}`}>
+                          {p.status === 'available' ? 'זמין' : p.status === 'on_auction' ? 'במכרז' : 'נדרפט'}
+                        </span>
+                        {p.status === 'available' && (
+                          <button
+                            className="btn btn-danger text-xs py-0.5 px-2"
+                            onClick={() => removePlayer(p.id, p.name)}
+                            disabled={loading === 'remove_' + p.id}
+                          >
+                            הסר
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
 
           {league && <ImportPlayers leagueId={league.id} />}
         </div>
