@@ -682,6 +682,19 @@ Any row is an auction the resolver has been failing on; the warning text is in S
 
 **`notify-auctions`** is covered under **Push notifications** above — note especially that its schedule is guarded and why.
 
+⚠️ **It carried the literal string `CRON_SECRET` — the variable name, not its value — from 2026-07-27 until 2026-09-11**, so every call it made returned 401. It sent no push reminder and activated no pending auction in that window. Nothing surfaced it: the `secret_placeholder_left` check in `cron_notify_auctions.sql` looked for `<CRON_SECRET>` *with* angle brackets, and the job's own guard had been holding for weeks because every envelope league was `completed`, so it was not even calling Vercel to get the 401. Found while rotating the secret, by a fingerprint query rather than by anything failing.
+
+**Check the token itself, not just the placeholders.** All three HTTP jobs share one secret, so their fingerprints must match and the length must be 48:
+
+```sql
+SELECT jobname,
+       length(substring(command from 'Bearer ([^"]*)'))       AS token_length,
+       left(md5(substring(command from 'Bearer ([^"]*)')), 8) AS token_fingerprint
+FROM cron.job WHERE command LIKE '%http_post%' ORDER BY jobid;
+```
+
+A short `token_length` is a word somebody typed. Rotating the secret is the same query shape — `regexp_replace(command, 'Bearer [^"]*', 'Bearer <new>')` fed back through `cron.schedule(jobname, schedule, command)`, which rewrites only the token and leaves each job's guard, schedule and URL exactly as they are in the database. That matters more than it sounds: re-running the repo's `cron_*.sql` files instead would silently revert any guard that was tweaked live and never written back.
+
 **`open-draft-tick`** (`supabase/cron_open_draft_tick.sql`) drives the open outcry board: freeze/thaw around pauses and night hours, then close any auction past its deadline. Pure SQL, so no guard is needed. Its per-league failures are swallowed into `RAISE WARNING` the same way — the query that finds a stuck auction is in that file.
 
 **`top-up-pools`** (`supabase/cron_top_up_pools.sql`) keeps every unfinished league's player pool current — see **Topping up a league that is already running** above. Daily rather than per-minute: ESPN's ranks move weekly at most and a player joins a roster once. Its guard is `EXISTS (SELECT 1 FROM leagues WHERE status IN (…))`, mirroring `OPEN_STATUSES` in the route; ⚠️ widening what the route acts on means widening the guard, or the new work silently never runs.

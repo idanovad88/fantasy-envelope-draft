@@ -63,9 +63,28 @@ SELECT cron.schedule(
 -- ── Verify after applying ────────────────────────────────────────────────────
 -- 1. Both must come back false. If either is true, step 3 above was missed.
 --
---   SELECT command LIKE '%<production-domain>%' AS domain_placeholder_left,
---          command LIKE '%<CRON_SECRET>%'       AS secret_placeholder_left
+--   SELECT command LIKE '%<production-domain>%'                   AS domain_placeholder_left,
+--          command LIKE '%<CRON_SECRET>%'                         AS secret_placeholder_left,
+--          length(substring(command from 'Bearer ([^"]*)'))       AS token_length,
+--          left(md5(substring(command from 'Bearer ([^"]*)')), 8) AS token_fingerprint
 --   FROM cron.job WHERE jobname = 'top-up-pools';
+--
+-- ⚠️ The two placeholder flags are NOT enough, and this is not hypothetical.
+-- `notify-auctions` shipped on 2026-07-27 carrying the literal string
+-- CRON_SECRET — the variable *name*, pasted in place of its value. No angle
+-- brackets, so both flags read false, and the job returned 401 for 46 days
+-- without one push ever going out. It went unnoticed because every envelope
+-- league was `completed`, so its guard held and it never called Vercel at all.
+--
+-- `token_length` is what catches that shape: the real secret is 48 characters
+-- and anything much shorter is a word somebody typed. Compare
+-- `token_fingerprint` across all three HTTP jobs — they must match each other,
+-- since they share one secret:
+--
+--   SELECT jobname,
+--          length(substring(command from 'Bearer ([^"]*)'))       AS token_length,
+--          left(md5(substring(command from 'Bearer ([^"]*)')), 8) AS token_fingerprint
+--   FROM cron.job WHERE command LIKE '%http_post%' ORDER BY jobid;
 --
 -- 2. What actually left the database. A 401 means CRON_SECRET does not match
 --    Vercel's env var; a populated error_msg means the URL never resolved.
