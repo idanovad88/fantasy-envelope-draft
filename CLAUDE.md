@@ -525,11 +525,27 @@ Three import routes, and the third one exists because the first two leave a gap:
 
 **UI:** the third radio in `ImportPlayers` ("הוסף רק שחקנים שחסרים בליגה"), with the same dry-run-then-confirm shape as the update mode — except the report **lists every name it would add**, since this one inserts rows rather than editing them. Next to "בחר קובץ CSV" there is a **"טען רוקיז 2026"** button: it fills the textarea from the bundled rookie file as `name,pos` and switches to that mode, so the admin reviews the actual names before anything is written. That is the path for putting the rookies into a league that already exists — including the live one, which has to be done by hand from the admin panel; nothing backfills it.
 
-**A league is only complete on the day it is created — unless someone tops it up.** Seeding runs once, and the pool moves afterwards: ESPN ranks more players as the season starts, and someone nobody rostered in September is rostered in November. **"טען מאגר עדכני"** in `ImportPlayers` closes that, and it is the answer to "do existing leagues get the fix too" — they do not, on their own.
+#### Topping up a league that is already running
+
+**A league is only complete on the day it is created — unless something tops it up.** Seeding runs once, and the pool moves afterwards: ESPN ranks more players as the season starts, and someone nobody rostered in September is rostered in November. **"טען מאגר עדכני"** in `ImportPlayers` closes that, and it is the answer to "do existing leagues get the fix too" — they do not, on their own.
 
 `GET /api/admin/pool` hands the panel the same `loadPool()` the seeder uses — extracted to `lib/pool.ts` for exactly that reason, since a league seeded in September and one topped up in November must end up with the same names. The button fills the textarea and switches to "add missing"; what follows is the ordinary dry-run report, listing every name it would add. It deliberately **loads rather than writes**: this is pointed at running drafts, and a button that silently changes the pool under one is not something to hand an admin.
 
 ⚠️ **The CSV it returns carries no `rank` column, on purpose.** `add-missing-players` numbers a player who arrives without one from `MAX(ranking) + 1` *of that league*. A league's ranking scale is its own — the live pool runs to 474, an older league to 265 — so passing ESPN's number would drop a new player into the middle of a scale that means something else entirely.
+
+**And the same thing runs nightly on its own.** `GET /api/cron/top-up-pools`, daily at 04:00 UTC, sweeps every league that is not `completed` and adds whatever the pool has gained. The button above is now the manual override rather than the only path.
+
+**Both call `topUpLeague()` in `lib/topUp.ts`, and that sharing is the safety property** — not a tidiness one. The nightly job writes to live drafts with nobody watching, so it must behave exactly as the reviewed path an admin can dry-run first. `add-missing-players` was reduced to auth plus a call into it. Three things make it safe unattended:
+
+- **It only ever INSERTs.** A name already in the league is skipped whatever its rank or position says; `status`, `drafted_by_team_id`, `draft_price` and `roster_slot` are never written.
+- **It is idempotent**, so a quiet day costs one ESPN fetch and a read per league, and a double invocation adds nothing twice.
+- ⚠️ **It refuses to write from the bundled fallback.** `loadPool()` returns `source: 'fallback'` when ESPN is unreachable, and the bundle is a snapshot of a *past* fetch — replaying it into a running draft would be acting on stale data for no gain. A day ESPN is down changes nothing; the next run picks it up. This is the one behavioural difference from the manual button, which may legitimately use the bundle because a human asked it to.
+
+Leagues are processed independently and one failing does not stop the rest — the next run retries whatever was missed. Every added name goes to the Vercel runtime log as `[top-up-pools] <league>: added N — …`.
+
+⚠️ **`?dry=1` reports what it would add and writes nothing.** Use it to check the schedule is wired up before letting it run, and to see what tonight is about to do to a live league. The SQL for both is at the bottom of `supabase/cron_top_up_pools.sql`.
+
+⚠️ **`setup` counts as unfinished**, so a stale test league gets topped up along with everything else — "Test League" was 286 players behind when this shipped. That is correct behaviour applied to a league nobody wants; complete or delete such a league rather than narrowing the filter.
 
 **A new league seeds itself.** `POST /api/create-league` fetches the pool live (8s timeout, `maxDuration = 30`), falls back to the bundled JSON, and inserts all 474 rows (387 ESPN-ranked + 60 appended rookies + 27 rostered-unranked) — the row shape copied from `/api/import-players`, `nba_team` left NULL. **A seeding failure must never 500**: the league row already exists, so the route returns `{ success: true, seeded, seedSource }` and the page tells the creator to import by hand when `seeded` is 0. Live-first means a league created today has today's ranks without waiting for a deploy; the bundled file only has to be current enough to be a net.
 
@@ -624,7 +640,7 @@ The open format sent nothing until now, which with a 30-minute soft-close window
 
 ### Scheduled jobs (pg_cron)
 
-**Four** jobs run every minute, all created by hand, all living only in the database. Nothing in the app imports them and `cron.job` is the only place they exist (a fifth piece of invisible automation, the weekly `espn-ranks-weekly` task, is not a cron at all — see **Player pool: ranking and import** above):
+**Five** jobs, all created by hand, all living only in the database — four every minute and one daily. Nothing in the app imports them and `cron.job` is the only place they exist (a fifth piece of invisible automation, the weekly `espn-ranks-weekly` task, is not a cron at all — see **Player pool: ranking and import** above):
 
 | Job | Runs | Costs Vercel? |
 |---|---|---|
@@ -632,6 +648,7 @@ The open format sent nothing until now, which with a 30-minute soft-close window
 | `notify-auctions` | `net.http_post` → `/api/cron/notify-auctions` | Yes, and it is guarded |
 | `open-draft-tick` | `SELECT open_draft_tick_all()` — pure SQL | No |
 | `notify-open-draft` | `net.http_post` → `/api/cron/notify-open` | Yes, and it is guarded |
+| `top-up-pools` | `net.http_post` → `/api/cron/top-up-pools`, **daily at 04:00 UTC** | Yes, and it is guarded |
 
 ```sql
 SELECT jobid, jobname, schedule, active, command FROM cron.job ORDER BY jobid;
@@ -651,6 +668,8 @@ Any row is an auction the resolver has been failing on; the warning text is in S
 **`notify-auctions`** is covered under **Push notifications** above — note especially that its schedule is guarded and why.
 
 **`open-draft-tick`** (`supabase/cron_open_draft_tick.sql`) drives the open outcry board: freeze/thaw around pauses and night hours, then close any auction past its deadline. Pure SQL, so no guard is needed. Its per-league failures are swallowed into `RAISE WARNING` the same way — the query that finds a stuck auction is in that file.
+
+**`top-up-pools`** (`supabase/cron_top_up_pools.sql`) keeps every unfinished league's player pool current — see **Topping up a league that is already running** above. Daily rather than per-minute: ESPN's ranks move weekly at most and a player joins a roster once. Its guard is `EXISTS (SELECT 1 FROM leagues WHERE status IN (…))`, mirroring `OPEN_STATUSES` in the route; ⚠️ widening what the route acts on means widening the guard, or the new work silently never runs.
 
 **`notify-open-draft`** (`supabase/cron_notify_open.sql`) is the open-outcry half of push — see **Open outcry notifications** below. Its guard cannot drift from what the route does, because both call the same two functions.
 
