@@ -25,9 +25,17 @@ Push notifications (see **Push notifications** below) — all four required for 
 - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` — must be `NEXT_PUBLIC_`; read by `components/PushSubscribe.tsx` in the browser
 - `VAPID_PRIVATE_KEY` — server only
 - `VAPID_SUBJECT` — e.g. `mailto:you@example.com`. Push services reject a missing/invalid subject
-- `CRON_SECRET` — bearer token for `/api/cron/notify-auctions`. The route 500s if unset (never open)
+- `CRON_SECRET` — bearer token for all three cron routes (`notify-auctions`, `notify-open`, `top-up-pools`). Each route 500s if it is unset, so a missing value never leaves one open
 
 ⚠️ **VAPID keys are permanent.** Regenerating the public key invalidates every row in `push_subscriptions` — all sends start returning 403 and every user must re-opt-in. Generate once (`npx web-push generate-vapid-keys`) and store durably.
+
+**`CRON_SECRET`, by contrast, is rotatable — but it lives in two places that must move together**, and one of them is the database. Rotated once, 2026-09-11, after the value appeared in a screenshot. The order, and why:
+
+1. `.env.local` and Vercel (**both** `production` and `preview` — `vercel env rm CRON_SECRET production` removes the variable outright when one row covers both, so re-add each target separately).
+2. `npx vercel --prod`. Vercel snapshots env vars at deploy time; without this the functions keep checking the old value.
+3. Rewrite the token inside the pg_cron jobs — see **Scheduled jobs** for the `regexp_replace` shape that preserves each job's guard.
+
+Between 2 and 3 the crons get 401. There is no way to avoid that window short of teaching the routes to accept two secrets, so pick a moment when no draft is live: with every league `completed` or `paused` the guarded jobs are not even calling Vercel. Verify both ends — the old secret must return 401 and the new one 200 — before touching the database.
 
 Dev only (`.env.local` only, never in production):
 - `NEXT_PUBLIC_DEV_MODE=true` — currently read by nothing. The quick-login buttons it used to gate were removed from the login page.
@@ -551,16 +559,20 @@ Leagues are processed independently and one failing does not stop the rest — t
 
 ⚠️ **The nightly job would otherwise undo an admin's curation, overnight, with no trace.** This was caught by the `?dry=1` run before the job was ever scheduled: the live league had been trimmed from 474 players to 317 by hand that same hour — deep-bench names from rank 123 down — and the job was about to put all 157 back at 04:00. "Missing from the league" and "new to the pool" are not the same set, and only the second one is the job's business.
 
-`league_player_exclusions (league_id, name_key, name, excluded_at)` records what was removed. `supabase/migration_player_exclusions.sql` — **run it before scheduling the cron.** RLS on with no policies, service-role only (the `push_subscriptions` / `team_invites` pattern), and `name_key` is `normalizePlayerName()` computed app-side, so the code that writes a key and the code that matches on it are the same one rather than a SQL copy that can drift.
+`league_player_exclusions (league_id, name_key, name, excluded_at)` records what was removed, and `lib/exclusions.ts` is the only thing that reads or writes it. `supabase/migration_player_exclusions.sql` — **run it before scheduling the cron.** RLS on with no policies, service-role only (the `push_subscriptions` / `team_invites` pattern), and `name_key` is `normalizePlayerName()` computed app-side, so the code that writes a key and the code that matches on it are the same one rather than a SQL copy that can drift.
 
 - **`/api/admin/delete-player` records on all three of its forms** — one player, `player_ids`, `all_available` — and it must read the names *before* the DELETE, since a deleted row can no longer say what it was called. `recordExclusions()` never throws: failing to remember must not fail the delete the admin asked for.
 - **Adding a player back clears the exclusion.** Both `add-player` and `add-missing-players` do it. Without that, a player removed and later re-added by hand would be treated as unwanted forever — harmless while he is in the league, a trap the day he is removed for an unrelated reason.
 - **Only the timer honours exclusions** (`skipExcluded`). An admin pasting a list and confirming a dry run is overruling an earlier removal on purpose; the report warns first ("מתוכם N שהסרת בעבר מהליגה — אישור יחזיר אותם") and the write then clears them.
 - ⚠️ **A missing table is fatal to the timer and survivable for the admin.** `topUpLeague()` rethrows the load error under `skipExcluded` and carries on with an empty set otherwise: proceeding blind is exactly how the job re-adds trimmed players, but the migration not being applied must not break a button that worked before the table existed.
 
-**The baseline matters**, exactly as it does for `migration_open_notifications.sql`. Switching the sweep on mid-season has to claim what is already true, or the first run fires a backlog — every player ever trimmed, plus every player a league simply predates (Test League was 286 behind, having been seeded from an older list). `npm run baseline-pool` records, per unfinished league, every pool player it does not currently have; dry by default, `--write` to commit. ⚠️ It only ever *adds* exclusions, so run it once the pool is trimmed the way you want it.
+**The baseline matters**, exactly as it does for `migration_open_notifications.sql`. Switching the sweep on mid-season has to claim what is already true, or the first run fires a backlog — every player ever trimmed, plus every player a league simply predates (Test League was 286 behind, having been seeded from an older list). `npm run baseline-pool` (`scripts/baseline-pool-exclusions.mjs`) records, per unfinished league, every pool player it does not currently have; dry by default, `-- --write` to commit. ⚠️ It only ever *adds* exclusions, so run it once the pool is trimmed the way you want it.
 
 **Order of deployment: migration → deploy → `npm run baseline-pool --write` → `cron.schedule`.** Scheduling before the baseline is the one ordering that actively damages a league.
+
+**Exclusions are per league, never global**, and that is load-bearing rather than incidental: a player who is not worth a roster spot in a 12-team league is a real pick in a 20×15 one. The primary key is `(league_id, name_key)`, `loadExclusions()` filters on `league_id`, and `create-league` seeds from the full pool without consulting the table at all — so a league opened tomorrow starts complete no matter what was trimmed out of any other. Copying a trim between leagues is *not* possible today; a new league of the same size has to be trimmed again by hand.
+
+**State as of 2026-09-11**, since none of it is derivable from the code: `migration_player_exclusions.sql` applied, baseline written — 257 rows for "רק דראפט ראש השנה" (trimmed from 474 players to 217 by hand, nothing above rank 100 touched) and 286 for the stale "Test League". `top-up-pools` scheduled and active. A dry run at that point reported `added: 0` for both leagues, which is the check worth repeating after any change here.
 
 **A new league seeds itself.** `POST /api/create-league` fetches the pool live (8s timeout, `maxDuration = 30`), falls back to the bundled JSON, and inserts all 474 rows (387 ESPN-ranked + 60 appended rookies + 27 rostered-unranked) — the row shape copied from `/api/import-players`, `nba_team` left NULL. **A seeding failure must never 500**: the league row already exists, so the route returns `{ success: true, seeded, seedSource }` and the page tells the creator to import by hand when `seeded` is 0. Live-first means a league created today has today's ranks without waiting for a deploy; the bundled file only has to be current enough to be a net.
 
@@ -684,7 +696,7 @@ Any row is an auction the resolver has been failing on; the warning text is in S
 
 ⚠️ **It carried the literal string `CRON_SECRET` — the variable name, not its value — from 2026-07-27 until 2026-09-11**, so every call it made returned 401. It sent no push reminder and activated no pending auction in that window. Nothing surfaced it: the `secret_placeholder_left` check in `cron_notify_auctions.sql` looked for `<CRON_SECRET>` *with* angle brackets, and the job's own guard had been holding for weeks because every envelope league was `completed`, so it was not even calling Vercel to get the 401. Found while rotating the secret, by a fingerprint query rather than by anything failing.
 
-**Check the token itself, not just the placeholders.** All three HTTP jobs share one secret, so their fingerprints must match and the length must be 48:
+**Check the token itself, not just the placeholders.** All three HTTP jobs share one secret, so their fingerprints must match and the length must be 48 — `md5` rather than the value keeps the secret out of a screenshot, which is how it leaked in the first place:
 
 ```sql
 SELECT jobname,
