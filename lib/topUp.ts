@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizePlayerName, matchPlayerName } from '@/lib/utils'
+import { loadExclusions } from '@/lib/exclusions'
 
 export type IncomingPlayer = {
   name: string
@@ -15,6 +16,12 @@ export type TopUpResult = {
   names: string[]
   /** Rows actually written. 0 on a dry run. */
   added: number
+  /**
+   * How many of the candidates an admin had previously removed from this
+   * league. Skipped entirely when `skipExcluded`; otherwise counted so the
+   * admin panel can say so before anyone confirms putting them back.
+   */
+  previouslyRemoved: number
 }
 
 /** Big enough to keep the round trips down, small enough to stay under any payload limit. */
@@ -47,6 +54,14 @@ const INSERT_CHUNK = 200
  * stored ones (`Nikola Joki?`, from a Latin-1 CSV read as UTF-8), and matching
  * the other way round would re-add Jokić and Dončić as duplicates.
  *
+ * ⚠️ `skipExcluded` is what stops the nightly job undoing an admin's work. A
+ * player removed from a league by hand is recorded in
+ * `league_player_exclusions`, and the timer must never put him back — the live
+ * league was trimmed from 474 players to 317 on 2026-09-11 and a dry run of the
+ * job showed it about to restore all 157 the following morning. The manual path
+ * leaves it off on purpose: an admin pasting a list and confirming a dry run is
+ * overruling that decision deliberately, and clears the exclusion as it writes.
+ *
  * @param supabase must be the service-role client; `players` has no policy for
  *   an admin INSERT from the browser.
  */
@@ -54,7 +69,7 @@ export async function topUpLeague(
   supabase: SupabaseClient,
   leagueId: string,
   players: IncomingPlayer[],
-  opts: { dryRun?: boolean } = {}
+  opts: { dryRun?: boolean; skipExcluded?: boolean } = {}
 ): Promise<TopUpResult> {
   // Page around the 1000-row PostgREST cap. A truncated read here would look
   // like "those players are missing" and insert duplicates of every one of them.
@@ -83,7 +98,27 @@ export async function topUpLeague(
     if (hit) byKey.delete(hit)
   }
 
-  const missing = [...byKey.values()]
+  // What is left is "in the list, not in the league". Some of it is there
+  // because an admin took it out, which is a decision and not a gap.
+  //
+  // A missing `league_player_exclusions` table — the migration not applied yet
+  // — is fatal to the *timer* and survivable for the *admin*: proceeding blind
+  // is exactly how the job would re-add trimmed players, but it must not break
+  // a button that worked before the table existed.
+  let excluded: Set<string>
+  try {
+    excluded = await loadExclusions(supabase, leagueId)
+  } catch (err) {
+    if (opts.skipExcluded) throw err
+    console.error('[topUp] exclusions unavailable — proceeding, admin-initiated', err)
+    excluded = new Set()
+  }
+  const candidates = [...byKey.entries()]
+  const previouslyRemoved = candidates.filter(([k]) => excluded.has(k)).length
+  const missing = (opts.skipExcluded
+    ? candidates.filter(([k]) => !excluded.has(k))
+    : candidates
+  ).map(([, p]) => p)
 
   // A league's ranking scale is its own — the live pool runs to 474, an older
   // one to 265 — so a player arriving without a rank is numbered from the top
@@ -110,6 +145,7 @@ export async function topUpLeague(
     willAdd: rows.length,
     names: rows.map(r => r.name),
     added: 0,
+    previouslyRemoved,
   }
   if (opts.dryRun) return result
 

@@ -545,7 +545,22 @@ Leagues are processed independently and one failing does not stop the rest — t
 
 ⚠️ **`?dry=1` reports what it would add and writes nothing.** Use it to check the schedule is wired up before letting it run, and to see what tonight is about to do to a live league. The SQL for both is at the bottom of `supabase/cron_top_up_pools.sql`.
 
-⚠️ **`setup` counts as unfinished**, so a stale test league gets topped up along with everything else — "Test League" was 286 players behind when this shipped. That is correct behaviour applied to a league nobody wants; complete or delete such a league rather than narrowing the filter.
+⚠️ **`setup` counts as unfinished**, so a stale test league gets topped up along with everything else. That is correct behaviour applied to a league nobody wants; complete or delete such a league rather than narrowing the filter.
+
+##### A deletion is a decision, and the timer has to be able to see it
+
+⚠️ **The nightly job would otherwise undo an admin's curation, overnight, with no trace.** This was caught by the `?dry=1` run before the job was ever scheduled: the live league had been trimmed from 474 players to 317 by hand that same hour — deep-bench names from rank 123 down — and the job was about to put all 157 back at 04:00. "Missing from the league" and "new to the pool" are not the same set, and only the second one is the job's business.
+
+`league_player_exclusions (league_id, name_key, name, excluded_at)` records what was removed. `supabase/migration_player_exclusions.sql` — **run it before scheduling the cron.** RLS on with no policies, service-role only (the `push_subscriptions` / `team_invites` pattern), and `name_key` is `normalizePlayerName()` computed app-side, so the code that writes a key and the code that matches on it are the same one rather than a SQL copy that can drift.
+
+- **`/api/admin/delete-player` records on all three of its forms** — one player, `player_ids`, `all_available` — and it must read the names *before* the DELETE, since a deleted row can no longer say what it was called. `recordExclusions()` never throws: failing to remember must not fail the delete the admin asked for.
+- **Adding a player back clears the exclusion.** Both `add-player` and `add-missing-players` do it. Without that, a player removed and later re-added by hand would be treated as unwanted forever — harmless while he is in the league, a trap the day he is removed for an unrelated reason.
+- **Only the timer honours exclusions** (`skipExcluded`). An admin pasting a list and confirming a dry run is overruling an earlier removal on purpose; the report warns first ("מתוכם N שהסרת בעבר מהליגה — אישור יחזיר אותם") and the write then clears them.
+- ⚠️ **A missing table is fatal to the timer and survivable for the admin.** `topUpLeague()` rethrows the load error under `skipExcluded` and carries on with an empty set otherwise: proceeding blind is exactly how the job re-adds trimmed players, but the migration not being applied must not break a button that worked before the table existed.
+
+**The baseline matters**, exactly as it does for `migration_open_notifications.sql`. Switching the sweep on mid-season has to claim what is already true, or the first run fires a backlog — every player ever trimmed, plus every player a league simply predates (Test League was 286 behind, having been seeded from an older list). `npm run baseline-pool` records, per unfinished league, every pool player it does not currently have; dry by default, `--write` to commit. ⚠️ It only ever *adds* exclusions, so run it once the pool is trimmed the way you want it.
+
+**Order of deployment: migration → deploy → `npm run baseline-pool --write` → `cron.schedule`.** Scheduling before the baseline is the one ordering that actively damages a league.
 
 **A new league seeds itself.** `POST /api/create-league` fetches the pool live (8s timeout, `maxDuration = 30`), falls back to the bundled JSON, and inserts all 474 rows (387 ESPN-ranked + 60 appended rookies + 27 rostered-unranked) — the row shape copied from `/api/import-players`, `nba_team` left NULL. **A seeding failure must never 500**: the league row already exists, so the route returns `{ success: true, seeded, seedSource }` and the page tells the creator to import by hand when `seeded` is 0. Live-first means a league created today has today's ranks without waiting for a deploy; the bundled file only has to be current enough to be a net.
 

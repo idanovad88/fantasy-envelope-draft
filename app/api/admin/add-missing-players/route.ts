@@ -1,6 +1,7 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { getAuthUser } from '@/lib/supabase/auth'
 import { topUpLeague, type IncomingPlayer } from '@/lib/topUp'
+import { clearExclusions } from '@/lib/exclusions'
 import { NextRequest, NextResponse } from 'next/server'
 
 /**
@@ -39,6 +40,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // `skipExcluded` stays off here: an admin pasting a list and confirming a
+    // dry run is overruling an earlier removal on purpose. The count is
+    // reported so the panel can say so before they confirm.
     const r = await topUpLeague(supabase, league_id, players, { dryRun: !!dry_run })
     if (dry_run) {
       return NextResponse.json({
@@ -46,10 +50,20 @@ export async function POST(req: NextRequest) {
         inLeague: r.inLeague,
         inFile: r.inList,
         willAdd: r.willAdd,
+        previouslyRemoved: r.previouslyRemoved,
         names: r.names,
       })
     }
-    return NextResponse.json({ inLeague: r.inLeague, inFile: r.inList, added: r.added })
+    // Adding a player back is the decision that supersedes having removed him;
+    // leaving the exclusion behind would make the nightly job treat him as
+    // unwanted forever, which only bites later and silently.
+    await clearExclusions(supabase, league_id, r.names)
+    return NextResponse.json({
+      inLeague: r.inLeague,
+      inFile: r.inList,
+      added: r.added,
+      previouslyRemoved: r.previouslyRemoved,
+    })
   } catch (err) {
     const added = (err as { added?: number }).added ?? 0
     return NextResponse.json({ error: (err as Error).message, added }, { status: 500 })

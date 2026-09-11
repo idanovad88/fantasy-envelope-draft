@@ -92,7 +92,7 @@ export async function GET(req: Request) {
   let total = 0
   for (const l of leagues) {
     try {
-      const r = await topUpLeague(supabase, l.id, pool.players, { dryRun })
+      const r = await topUpLeague(supabase, l.id, pool.players, { dryRun, skipExcluded: true })
       const n = dryRun ? r.willAdd : r.added
       total += n
       results.push({ league: l.name, status: l.status, added: n, ...(n ? { names: r.names } : {}) })

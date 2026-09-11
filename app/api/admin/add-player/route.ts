@@ -1,5 +1,6 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { getAuthUser } from '@/lib/supabase/auth'
+import { clearExclusions } from '@/lib/exclusions'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(req: NextRequest) {
@@ -29,6 +30,10 @@ export async function POST(req: NextRequest) {
     stats: {},
   })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // Adding a player by hand supersedes having removed him, so the nightly
+  // top-up must stop treating him as unwanted — see lib/exclusions.ts.
+  await clearExclusions(supabase, league_id, [name.trim()])
 
   return NextResponse.json({ ok: true })
 }

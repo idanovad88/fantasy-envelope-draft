@@ -16,7 +16,7 @@ interface Props {
 type Mode = 'import' | 'update' | 'add'
 
 type UpdateReport = { total: number; matched: number; willUpdate: number; unmatched: string[] }
-type AddReport = { inLeague: number; inFile: number; willAdd: number; names: string[] }
+type AddReport = { inLeague: number; inFile: number; willAdd: number; previouslyRemoved?: number; names: string[] }
 
 const MODES: { value: Mode; label: string; hint: string }[] = [
   {
@@ -291,6 +291,14 @@ export default function ImportPlayers({ leagueId }: Props) {
           <p>
             בקובץ <strong>{addReport.inFile}</strong> שמות · בליגה <strong>{addReport.inLeague}</strong> שחקנים ·{' '}
             <strong>{addReport.willAdd}</strong> יתווספו
+            {!!addReport.previouslyRemoved && (
+              <>
+                {' '}·{' '}
+                <span style={{ color: 'var(--warning)' }}>
+                  מתוכם <strong>{addReport.previouslyRemoved}</strong> שהסרת בעבר מהליגה — אישור יחזיר אותם
+                </span>
+              </>
+            )}
           </p>
           {addReport.willAdd === 0 ? (
             <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>

@@ -5,6 +5,13 @@
 -- nothing in the repo that will tell you it is running. See CLAUDE.md
 -- ("Scheduled jobs") before assuming the feature is unscheduled.
 --
+-- ⚠️ ORDER MATTERS. Scheduling this before the baseline exists will re-add
+-- every player an admin has trimmed out of a league, overnight, silently:
+--   1. supabase/migration_player_exclusions.sql
+--   2. deploy
+--   3. npm run baseline-pool -- --write
+--   4. this file
+--
 -- Prerequisites:
 --   1. Supabase Dashboard → Database → Extensions → `pg_cron` and `pg_net`.
 --   2. The app must already be deployed — the URL below has to be live.
