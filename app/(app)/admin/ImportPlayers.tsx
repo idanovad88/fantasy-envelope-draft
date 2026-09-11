@@ -48,7 +48,42 @@ export default function ImportPlayers({ leagueId }: Props) {
   const [mode, setMode] = useState<Mode>('import')
   const [report, setReport] = useState<UpdateReport | null>(null)
   const [addReport, setAddReport] = useState<AddReport | null>(null)
+  const [poolLoading, setPoolLoading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  /**
+   * Fills the textarea with the *current* pool and switches to "add missing".
+   *
+   * The gap this closes: `create-league` seeds a league from the live pool, so
+   * a league is complete on the day it is created and never again. ESPN ranks
+   * more players as the season starts, and a player nobody rostered in
+   * September is rostered in November — but nothing topped an existing league
+   * up, and the admin's only route was finding a CSV somewhere and pasting it.
+   *
+   * It loads rather than writes on purpose: what follows is the same dry-run
+   * report as any other paste, listing every name it would add, so this stays
+   * a review step and not a button that silently changes a running draft.
+   */
+  async function loadCurrentPool() {
+    setPoolLoading(true)
+    const res = await fetch('/api/admin/pool')
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: 'שגיאה' }))
+      setResult('שגיאה: ' + error)
+      setPoolLoading(false)
+      return
+    }
+    const { csv, count, source } = await res.json()
+    setCsvText(csv)
+    reset()
+    setMode('add')
+    setResult(
+      source === 'espn'
+        ? `נטענו ${count} שחקנים מ-ESPN. לחץ "בדוק מה חסר" כדי לראות מי חסר בליגה.`
+        : `ESPN לא הגיבה — נטענו ${count} שחקנים מהמאגר המצורף. לחץ "בדוק מה חסר".`
+    )
+    setPoolLoading(false)
+  }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -177,6 +212,15 @@ export default function ImportPlayers({ leagueId }: Props) {
           onClick={() => fileRef.current?.click()}
         >
           בחר קובץ CSV
+        </button>
+        <button
+          type="button"
+          className="btn btn-outline text-sm"
+          onClick={loadCurrentPool}
+          disabled={poolLoading}
+          title="מושך את המאגר העדכני מ-ESPN ומכין הוספה של מי שחסר בליגה הזו"
+        >
+          {poolLoading ? '...' : 'טען מאגר עדכני'}
         </button>
         <button
           type="button"
