@@ -27,6 +27,35 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 
 type State = 'loading' | 'unsupported' | 'ios-not-installed' | 'denied' | 'subscribed' | 'idle'
 
+// How long a successful /api/push/subscribe stands before the next mount
+// re-sends it. The endpoint is the identity of the registration, so a change to
+// it is re-sent immediately whatever this says; the interval only bounds how
+// long a subscription row deleted server-side (pruned on a 404/410 from the
+// push service) can stay missing while the browser still holds the endpoint.
+const SUBSCRIPTION_SYNC_TTL_MS = 24 * 60 * 60 * 1000
+const SYNC_KEY = 'push-subscription-synced'
+
+// localStorage can throw outright (Safari private browsing, blocked site data),
+// and a throw here must not cost the user their notifications — fall back to
+// sending, which is exactly the old behaviour.
+function shouldSyncSubscription(endpoint: string): boolean {
+  try {
+    const raw = window.localStorage.getItem(SYNC_KEY)
+    if (!raw) return true
+    const { endpoint: seen, at } = JSON.parse(raw) as { endpoint?: string; at?: number }
+    if (seen !== endpoint || typeof at !== 'number') return true
+    return Date.now() - at > SUBSCRIPTION_SYNC_TTL_MS
+  } catch {
+    return true
+  }
+}
+
+function markSubscriptionSynced(endpoint: string): void {
+  try {
+    window.localStorage.setItem(SYNC_KEY, JSON.stringify({ endpoint, at: Date.now() }))
+  } catch {}
+}
+
 /**
  * Ask the browser for a push subscription, and try a second time on failure
  * with whatever subscription it is already holding thrown away.
@@ -105,12 +134,21 @@ export default function PushSubscribe({ label = '🔔 הפעל התראות לפ
         const sub = await reg.pushManager.getSubscription()
         if (sub) {
           // Silently re-POST: self-heals a rotated endpoint, and the upsert
-          // makes it free.
-          await fetch('/api/push/subscribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(sub.toJSON()),
-          })
+          // makes it free on the database. It is not free on Vercel — this
+          // component is mounted in the "my team" card of two dashboards, so
+          // an unconditional POST here was a function invocation (two, with
+          // the proxy) on every single dashboard load, for every manager, all
+          // day. Send it only when it can tell us something new: a changed
+          // endpoint, or once a day so a row pruned at the other end still
+          // heals on its own.
+          if (shouldSyncSubscription(sub.endpoint)) {
+            const res = await fetch('/api/push/subscribe', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(sub.toJSON()),
+            })
+            if (res.ok) markSubscriptionSynced(sub.endpoint)
+          }
           setState('subscribed')
         } else {
           setState('idle')
@@ -148,6 +186,7 @@ export default function PushSubscribe({ label = '🔔 הפעל התראות לפ
         const json = await res.json().catch(() => ({}))
         throw new Error(json.error ?? 'שגיאה בשמירת ההרשמה')
       }
+      markSubscriptionSynced(sub.endpoint)
       setState('subscribed')
     } catch (e) {
       const err = e as { name?: string; message?: string }

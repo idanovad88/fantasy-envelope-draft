@@ -99,7 +99,7 @@ export default async function DraftBoardPage() {
             {typedLeague.name} · {completedCount}/{totalPicks} בחירות בוצעו
           </p>
         </div>
-        <Link href="/" className="btn btn-outline text-sm">← חזרה לדשבורד</Link>
+        <Link href="/" prefetch={false} className="btn btn-outline text-sm">← חזרה לדשבורד</Link>
       </div>
 
       <div className="card">

@@ -7,6 +7,17 @@ import { Home, Users, ShoppingBag, List, Settings, Trophy, ArrowLeftRight } from
 import LeagueLogo from './LeagueLogo'
 import type { DraftType } from '@/types'
 
+// ⚠️ Every Link below carries `prefetch={false}`, and so does every Link on the
+// dashboard. That is a billing decision, not a performance one, and it costs
+// nothing: all of these routes are `force-dynamic` with no `loading.tsx`, and
+// Next does not prefetch such a route's payload (docs: "Prefetching static vs.
+// dynamic routes"). The browser still asked — two `?_rsc=` requests per
+// distinct href in the viewport, on every page load — and got back a response
+// the server rendered nothing for, with no JS chunk warmed either. Measured in
+// a production build with a real browser: the requests vanish with this flag
+// and navigation is unchanged, because there was never a cached payload to
+// lose. The Navbar is on every page, so this was the app's largest single
+// source of Vercel function invocations. See the matching guard in proxy.ts.
 const NAV = [
   { href: '/', label: 'בית', icon: Home },
   { href: '/auction', label: 'מכרז', icon: ShoppingBag },
@@ -59,6 +70,7 @@ export default function Navbar({ isAdmin, draftType, leagueName, leagueLogo }: N
           <Link
             key={href}
             href={href}
+            prefetch={false}
             className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
               pathname === href
                 ? 'text-white' : 'hover:text-white'
@@ -76,6 +88,7 @@ export default function Navbar({ isAdmin, draftType, leagueName, leagueLogo }: N
         {isAdmin && (
           <Link
             href="/admin"
+            prefetch={false}
             className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
             style={pathname.startsWith('/admin')
               ? { background: 'var(--primary)', color: 'white' }
@@ -94,6 +107,7 @@ export default function Navbar({ isAdmin, draftType, leagueName, leagueLogo }: N
           <Link
             key={href}
             href={href}
+            prefetch={false}
             className="flex-1 flex flex-col items-center py-3 gap-1 text-xs"
             style={{ color: pathname === href ? 'var(--primary)' : 'var(--muted)' }}
           >
@@ -104,6 +118,7 @@ export default function Navbar({ isAdmin, draftType, leagueName, leagueLogo }: N
         {isAdmin && (
           <Link
             href="/admin"
+            prefetch={false}
             className="flex-1 flex flex-col items-center py-3 gap-1 text-xs"
             style={{ color: pathname.startsWith('/admin') ? 'var(--primary)' : 'var(--muted)' }}
           >

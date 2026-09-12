@@ -56,6 +56,29 @@ export async function proxy(request: NextRequest) {
 // check before the route skipped auth anyway. (That check is now a local
 // signature verification rather than a round trip — see lib/supabase/auth.ts —
 // but skipping it outright is still free.)
+//
+// ⚠️ `missing: next-router-prefetch` is a billing guard, not a routing one, and
+// it is the single largest one in the app. Every page here is `force-dynamic`
+// with no `loading.tsx`, and Next refuses to prefetch such a route's payload
+// (docs: "Prefetching static vs. dynamic routes" — Dynamic, no loading.js →
+// not prefetched). The browser asks anyway: each distinct href in the viewport
+// fires two `?_rsc=` requests on every page load, the server renders nothing,
+// and no JS chunk is warmed either — measured, in a production build, with a
+// real browser. Pure waste, and it ran the proxy twice per link. The dashboard
+// alone puts ~8 distinct hrefs on screen between its own buttons and the
+// Navbar, so one dashboard view was paying for ~16 proxy invocations on top of
+// the 2 it actually needed.
+//
+// Links carry `prefetch={false}` as well, which stops the request at the
+// browser. This clause is the net under that: it covers a link added later
+// without one, and any prefetch Next issues on its own. Skipping the proxy on
+// a prefetch is safe precisely because nothing is rendered for it — there is no
+// page to protect and no session to refresh.
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|api/cron|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'],
+  matcher: [
+    {
+      source: '/((?!_next/static|_next/image|api/cron|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+      missing: [{ type: 'header', key: 'next-router-prefetch' }],
+    },
+  ],
 }

@@ -732,14 +732,76 @@ In Next.js 16, the middleware file is **`proxy.ts`** (root of the project), not 
 The middleware refreshes the Supabase session and redirects unauthenticated users to `/login`. The matcher **excludes** static assets so they remain publicly accessible:
 
 ```ts
-matcher: ['/((?!_next/static|_next/image|api/cron|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)']
+matcher: [
+  {
+    source: '/((?!_next/static|_next/image|api/cron|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    missing: [{ type: 'header', key: 'next-router-prefetch' }],
+  },
+]
 ```
+
+It is the **object** form of a matcher entry, not the bare string it used to be, purely so `missing` can drop RSC prefetch requests — see **Prefetch is the app's largest invocation cost** below. A bare string cannot express a header condition.
 
 **Important:** Any new public routes (PWA assets, open API endpoints, etc.) must be added to this matcher exclusion list, otherwise they will be blocked with a 307 redirect to `/login`. Note `sw\\.js` — the service worker is a `.js` file, and `.js` is *not* covered by the extension group above.
 
 Note `api/cron` in the matcher: the middleware resolves the caller on every request it matches, and the cron carries no session, so every tick paid for an auth check the route then skipped. (That check is now a local signature verification rather than a network round trip — see **Resolving the caller** — but skipping it outright is still free.) It is excluded outright *and* still bypassed inside the `proxy` function, so dropping the matcher entry degrades cost, not correctness.
 
 Paths that bypass the auth redirect inside the `proxy` function itself (not the matcher): `/login`, `/api/public/*`, `/assist/*` (logged-out invite pages), and `/api/cron/*` (pg_cron carries no session cookie; those routes authenticate with `CRON_SECRET` instead). Both kinds of exclusion fail *silently* as a 307 to `/login` — assert `401`, not a redirect, when testing.
+
+### Vercel function invocations
+
+The Hobby plan includes **1,000,000 function invocations a month**, and exceeding it *pauses the project* — there is no overage billing on Hobby. The first alert lands at 75%. Three things in this app cost invocations, and they are not the three you would guess:
+
+| | Counts as |
+|---|---|
+| A page load | **2** — `proxy.ts` runs as its own function, then the page renders |
+| An `<Link>` prefetch | **2 per distinct href in the viewport**, and it buys nothing (below) |
+| `router.refresh()` from `RealtimeRefresher` | 2, **per connected client**, per debounced burst |
+| A `net.http_post` cron tick | 1 (no proxy — `api/cron` is out of the matcher) |
+| Static assets, `_next/static`, images | 0 — CDN, and out of the matcher |
+
+⚠️ **In Next.js 16 the proxy runs on the Node.js runtime, not the Edge** ("Proxy defaults to using the Node.js runtime", and the `runtime` option is not available — setting it throws). On Vercel that makes it a billable function invocation on **every matched request**, not a cheap edge hop. It is the reason a page load costs two invocations rather than one, and the reason the matcher exclusions above are a cost control as much as a correctness one.
+
+#### Prefetch is the app's largest invocation cost, and it was buying nothing
+
+Every page in this app is `force-dynamic` and **there is no `loading.tsx` anywhere**. Next does not prefetch such a route's payload — the docs table under *Prefetching static vs. dynamic routes* reads "Dynamic page → Prefetched: No, unless `loading.js`". The browser asks anyway.
+
+Measured in a production build (`next build && next start`) driven by a real Chromium, with a log line in `proxy.ts` and in each page component:
+
+- each **distinct** href in the viewport fired **two** `?_rsc=` requests on load — three `<Link>`s to the same href still fired two, so it is per href, not per link;
+- the server **rendered nothing** for them (no page log) and returned a 207-byte routing stub;
+- **no JS chunk was warmed either** — the prefetch pulled no `_next/static` at all;
+- with `prefetch={false}` the requests did not happen at all.
+
+So it was pure waste, and it scaled with how many links a page shows. The dashboard puts ~8 distinct hrefs on screen between its own buttons and the Navbar: **~16 invocations of overhead on a page that needs 2.**
+
+Two independent fixes, both applied:
+
+1. **`prefetch={false}` on every `<Link>`** — Navbar (4), dashboard (14), draft board (1). Stops the request in the browser. Navigation is unchanged, because there was never a cached payload to lose.
+2. **`missing: [{ type: 'header', key: 'next-router-prefetch' }]` on the proxy matcher** — the net under that, for a link added later without the flag and for any prefetch Next issues on its own.
+
+⚠️ **Do not "fix" this by adding a `loading.tsx`.** That makes the prefetch *succeed* rather than stop — the payload then really is fetched and cached, which means more invocations, not fewer.
+
+Skipping the proxy on a prefetch leaks nothing, and that is verified rather than assumed: a prefetch of `/teams` with no session returns the 207-byte routing stub, never team data, because Next refuses to render dynamic content for a prefetch in the first place. The auth redirect on a normal request is untouched — `GET /` with no session is still a 307 to `/login`.
+
+#### The other two
+
+**`PushSubscribe` used to POST on every mount.** It is in the "my team" card of two dashboards, so every dashboard load by every manager re-sent a subscription that had not changed. It now sends only on a changed endpoint or once every 24h (`SUBSCRIPTION_SYNC_TTL_MS`, tracked in `localStorage`), which keeps the self-healing property the unconditional POST existed for — a row pruned server-side on a 404/410 comes back within a day — at roughly 1% of the calls. Both `localStorage` accessors are wrapped: a throw falls back to sending, i.e. the old behaviour.
+
+**`RealtimeRefresher` fan-out is inherent, not a bug.** One bid in a live open draft is one `open_auctions` UPDATE, which refreshes *every* connected client — N clients means 2N invocations. The 500ms debounce already collapses a burst into one; there is nothing further to win without making the board stale. This is the cost of the format, and it is the number that grows with league size.
+
+#### Where the real breakdown is
+
+None of the above is guesswork you should repeat — Vercel reports it per route. **Observability → Functions**, grouped by path, over the billing period. A route that is not a page and not a cron appearing near the top is a bug. To check what the crons are actually spending, the count of ticks that got past their guard is in the database, not in Vercel:
+
+```sql
+SELECT j.jobname, d.return_message, count(*)
+FROM cron.job_run_details d JOIN cron.job j USING (jobid)
+WHERE d.start_time > now() - interval '24 hours'
+GROUP BY 1, 2 ORDER BY 1, 3 DESC;
+```
+
+`0 rows` is the guard holding (no Vercel call); `1 row` is an invocation. Two per-minute HTTP jobs fully unguarded would be ~86k/month between them, so they are worth reading before assuming they are innocent — but they cannot reach the volumes the prefetch multiplier did.
 
 ### PWA / App icons
 

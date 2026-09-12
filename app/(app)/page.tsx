@@ -189,7 +189,7 @@ export default async function DashboardPage() {
                   סיבוב {Math.ceil(currentPickNumber / typedLeague.num_teams)} / {typedLeague.players_per_team}
                 </p>
                 {isMyTurn && (
-                  <Link href="/players" className="btn btn-primary mt-2 text-sm">בחר שחקן</Link>
+                  <Link href="/players" prefetch={false} className="btn btn-primary mt-2 text-sm">בחר שחקן</Link>
                 )}
               </div>
             </div>
@@ -217,7 +217,7 @@ export default async function DashboardPage() {
                     </p>
                   </div>
                 </div>
-                <Link href="/teams" className="btn btn-outline w-full mt-3 text-sm">צפה בקבוצה</Link>
+                <Link href="/teams" prefetch={false} className="btn btn-outline w-full mt-3 text-sm">צפה בקבוצה</Link>
                 {(isTeamOwner || isTeamAssistant) && (
                   <AssistantManager
                     teamId={typedMyTeam.id}
@@ -231,7 +231,7 @@ export default async function DashboardPage() {
               <div>
                 <p className="font-bold text-xl mb-1">מנהל הליגה</p>
                 <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>{createdLeague.name}</p>
-                <Link href="/admin" className="btn btn-primary w-full mt-3 text-sm">פאנל ניהול</Link>
+                <Link href="/admin" prefetch={false} className="btn btn-primary w-full mt-3 text-sm">פאנל ניהול</Link>
               </div>
             ) : (
               <div className="py-2">
@@ -263,6 +263,7 @@ export default async function DashboardPage() {
         {/* Full draft board — prominent entry point */}
         <Link
           href="/draft-board"
+          prefetch={false}
           className="card mt-4 flex items-center justify-between gap-3 transition-colors"
           style={{ borderColor: 'var(--primary)', borderWidth: 2, background: 'rgba(99,102,241,0.06)' }}
         >
@@ -499,7 +500,7 @@ export default async function DashboardPage() {
         <div className="card mb-4">
           <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
             <h2 className="font-bold">הלוח ({board.length}/{typedLeague.open_board_size})</h2>
-            <Link href="/auction" className="btn btn-primary text-sm">לוח המכרזים</Link>
+            <Link href="/auction" prefetch={false} className="btn btn-primary text-sm">לוח המכרזים</Link>
           </div>
           {board.length === 0 ? (
             <p className="text-sm" style={{ color: 'var(--muted)' }}>אין שחקנים על הלוח כרגע</p>
@@ -571,7 +572,7 @@ export default async function DashboardPage() {
                     <p className="font-bold text-lg">${Math.max(myMaxBid, 0)}</p>
                   </div>
                 </div>
-                <Link href="/teams" className="btn btn-outline w-full mt-3 text-sm">צפה בקבוצה</Link>
+                <Link href="/teams" prefetch={false} className="btn btn-outline w-full mt-3 text-sm">צפה בקבוצה</Link>
                 {(isTeamOwner || isTeamAssistant) && (
                   <AssistantManager
                     teamId={typedMyTeam.id}
@@ -588,7 +589,7 @@ export default async function DashboardPage() {
               <div>
                 <p className="font-bold text-xl mb-1">מנהל הליגה</p>
                 <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>{createdLeague.name}</p>
-                <Link href="/admin" className="btn btn-primary w-full mt-3 text-sm">פאנל ניהול</Link>
+                <Link href="/admin" prefetch={false} className="btn btn-primary w-full mt-3 text-sm">פאנל ניהול</Link>
               </div>
             ) : (
               <div className="py-2">
@@ -623,7 +624,7 @@ export default async function DashboardPage() {
           <div className="card mb-4">
             <div className="flex items-center justify-between gap-3 mb-3">
               <h2 className="font-bold">⭐ רשימת המעקב שלי ({watchlist.length})</h2>
-              <Link href="/players" className="text-sm" style={{ color: 'var(--primary)' }}>לכל השחקנים</Link>
+              <Link href="/players" prefetch={false} className="text-sm" style={{ color: 'var(--primary)' }}>לכל השחקנים</Link>
             </div>
             <div className="flex flex-col">
               {watchlist.map(p => (
@@ -727,7 +728,7 @@ export default async function DashboardPage() {
           <div className="card">
             <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
               <h2 className="font-bold">סדר העלאות</h2>
-              {myTurn && <Link href="/players" className="btn btn-primary text-sm">העלה שחקן</Link>}
+              {myTurn && <Link href="/players" prefetch={false} className="btn btn-primary text-sm">העלה שחקן</Link>}
             </div>
             <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
               {typedLeague.open_board_size - board.length > 0
@@ -979,7 +980,7 @@ export default async function DashboardPage() {
                   isNominator={typedFeatured.nominating_team_id === typedMyTeam.id}
                 />
               ) : (
-                <Link href="/auction" className="btn btn-outline w-full text-sm">
+                <Link href="/auction" prefetch={false} className="btn btn-outline w-full text-sm">
                   לוח המכרזים
                 </Link>
               )}
@@ -988,7 +989,7 @@ export default async function DashboardPage() {
             <div className="text-center py-6" style={{ color: 'var(--muted)' }}>
               <p className="text-3xl mb-2">🏀</p>
               <p>אין מכרז פעיל כרגע</p>
-              <Link href="/auction" className="btn btn-outline mt-3 text-sm">
+              <Link href="/auction" prefetch={false} className="btn btn-outline mt-3 text-sm">
                 לוח המכרזים
               </Link>
             </div>
@@ -1014,7 +1015,7 @@ export default async function DashboardPage() {
                   </p>
                 </div>
               </div>
-              <Link href="/teams" className="btn btn-outline w-full mt-3 text-sm">
+              <Link href="/teams" prefetch={false} className="btn btn-outline w-full mt-3 text-sm">
                 צפה בקבוצה
               </Link>
               {(isTeamOwner || isTeamAssistant) && (
@@ -1041,7 +1042,7 @@ export default async function DashboardPage() {
                   <p className="font-bold text-lg capitalize">{createdLeague.status}</p>
                 </div>
               </div>
-              <Link href="/admin" className="btn btn-primary w-full mt-3 text-sm">פאנל ניהול</Link>
+              <Link href="/admin" prefetch={false} className="btn btn-primary w-full mt-3 text-sm">פאנל ניהול</Link>
             </div>
           ) : (
             <div className="py-2">
@@ -1050,7 +1051,7 @@ export default async function DashboardPage() {
               {isWhitelisted && (
                 <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
                   <p className="text-sm mb-2" style={{ color: 'var(--muted)' }}>או</p>
-                  <Link href="/create-league" className="btn btn-outline w-full">הקם ליגה חדשה</Link>
+                  <Link href="/create-league" prefetch={false} className="btn btn-outline w-full">הקם ליגה חדשה</Link>
                 </div>
               )}
             </div>
