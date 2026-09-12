@@ -801,7 +801,19 @@ WHERE d.start_time > now() - interval '24 hours'
 GROUP BY 1, 2 ORDER BY 1, 3 DESC;
 ```
 
-`0 rows` is the guard holding (no Vercel call); `1 row` is an invocation. Two per-minute HTTP jobs fully unguarded would be ~86k/month between them, so they are worth reading before assuming they are innocent — but they cannot reach the volumes the prefetch multiplier did.
+`0 rows` is the guard holding (no Vercel call); `1 row` is an invocation. Two per-minute HTTP jobs fully unguarded would be ~86k/month between them, so they are worth reading before assuming they are innocent.
+
+**Measured 2026-09-12**, over 24 hours, with the live open draft running and every envelope league `completed`:
+
+| Job | `0 rows` | `1 row` | Vercel invocations |
+|---|---|---|---|
+| `auto-resolve-expired-auctions` | — | 1440 | **0** — pure SQL, the row is the `SELECT` returning |
+| `open-draft-tick` | — | 1440 | **0** — same |
+| `notify-auctions` | 1440 | 0 | **0** — guard held all day |
+| `notify-open-draft` | 1308 | 132 | **132** |
+| `top-up-pools` | — | 1 | **1** |
+
+**133 a day, ~4,000 a month — 0.4% of the Hobby allowance.** So when this alert fires, the crons are almost certainly not it: read them once to rule them out, then go straight to browser traffic. Two of those rows are worth recognising as *healthy* rather than broken — `notify-auctions` holding 1440/1440 is correct when no envelope league is live, and `notify-open-draft` at 132 is the open draft genuinely sending turn/outbid/starred pushes.
 
 ### PWA / App icons
 
