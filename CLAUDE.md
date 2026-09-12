@@ -841,9 +841,11 @@ Icons were generated with `sharp` from `public/logo.png`. To regenerate:
 node -e "const sharp = require('sharp'); const src = './public/logo.png'; Promise.all([sharp(src).resize(192,192).png().toFile('./public/icons/icon-192.png'), sharp(src).resize(512,512).png().toFile('./public/icons/icon-512.png'), sharp(src).resize(180,180).png().toFile('./public/icons/apple-touch-icon.png'), sharp(src).resize(180,180).png().toFile('./public/apple-touch-icon.png'), sharp(src).resize(32,32).png().toFile('./public/favicon.ico')]).then(()=>console.log('Done'))"
 ```
 
-**Vercel deploy:** GitHub auto-deploy is NOT connected. Run `npx vercel --prod` to deploy manually.
+**Vercel deploy: GitHub auto-deploy IS connected — pushing is deploying.** A push to `main` builds and promotes a **Production** deployment on its own; a push to any other branch builds a **Preview**. Verified 2026-09-12 in the dashboard: `a2d8f2e` on `main` went to Production ~30s after the push, with the two branch pushes sitting above it as Previews.
 
-⚠️ `vercel --prod` uploads the **local working directory**, not a git ref. Merging a PR on GitHub therefore ships nothing, and deploying from a stale checkout silently reverts whatever the last deploy contained. Before deploying, run `git fetch && git status` and make sure local main is not behind `origin/main`.
+⚠️ **This section said the exact opposite until 2026-09-12** ("auto-deploy is NOT connected, run `npx vercel --prod`"), which cost a real detour: `npx vercel --prod` was run twice, failed both times with `No existing credentials found` (the CLI is not logged in on that machine), and the change was declared un-deployed while it had in fact been live for minutes. If a deploy seems not to have happened, **read the Deployments tab before deploying by hand** — the answer is usually that it already did.
+
+⚠️ `vercel --prod` still exists as the manual path, and it uploads the **local working directory**, not a git ref. That is now a *hazard* rather than the normal route: running it from a stale checkout overwrites a perfectly good auto-deploy with whatever happens to be on disk. Prefer pushing. If it must be run by hand, `git fetch && git status` first and confirm local `main` is not behind `origin/main` — and note it needs `npx vercel login` on a machine that has never authenticated.
 
 ### Supabase clients
 
