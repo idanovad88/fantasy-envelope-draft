@@ -13,6 +13,16 @@ import { withScrollAnchor } from '@/lib/scrollAnchor'
 // of latency nobody notices and cuts the server work by the size of the burst.
 const REFRESH_DEBOUNCE_MS = 500
 
+// How long a tab may sit hidden before we stop trusting what is on it.
+//
+// Supabase Realtime does not replay `postgres_changes` after a reconnect, and a
+// backgrounded tab — a phone especially — gets its socket suspended. So a tab
+// that comes back after a while may have missed events with nothing to say so,
+// and today that showed as an old price on a live board: the manager returns,
+// reads a stale number, and bids against it. Refreshing once on return, whether
+// or not we saw an event, closes that.
+const STALE_AFTER_HIDDEN_MS = 60_000
+
 export default function RealtimeRefresher({
   leagueId,
   openBoard = false,
@@ -34,19 +44,65 @@ export default function RealtimeRefresher({
     const supabase = createClient()
 
     let timer: ReturnType<typeof setTimeout> | null = null
+    // An event arrived while nobody was looking, so the page on screen is out of
+    // date and owes one refresh the moment it is looked at again.
+    let missedEvent = false
+    let hiddenSince: number | null =
+      document.visibilityState === 'hidden' ? Date.now() : null
+
+    const run = () => {
+      // Nobody asked for this render — it is somebody else's bid landing — so
+      // it must not move the page under whoever is reading it. Next does not
+      // scroll on a refresh (`ScrollBehavior.NoScroll`); what moves is the
+      // content itself, when an auction card or a table row above the
+      // viewport disappears. See lib/scrollAnchor.ts for why Safari needs
+      // that compensated by hand and every other browser does not.
+      withScrollAnchor(() => router.refresh())
+    }
+
     const refresh = () => {
+      // ⚠️ A hidden tab is not a reader, and a refresh it cannot see still
+      // costs a full server render — two Vercel function invocations, the
+      // proxy and the page, measured. A manager who leaves the board open in a
+      // background tab was paying for every bid in the league, all day. Defer
+      // instead: the tab owes exactly one refresh whenever it is looked at
+      // again, however many events land in the meantime.
+      if (document.visibilityState === 'hidden') {
+        missedEvent = true
+        return
+      }
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => {
         timer = null
-        // Nobody asked for this render — it is somebody else's bid landing — so
-        // it must not move the page under whoever is reading it. Next does not
-        // scroll on a refresh (`ScrollBehavior.NoScroll`); what moves is the
-        // content itself, when an auction card or a table row above the
-        // viewport disappears. See lib/scrollAnchor.ts for why Safari needs
-        // that compensated by hand and every other browser does not.
-        withScrollAnchor(() => router.refresh())
+        run()
       }, REFRESH_DEBOUNCE_MS)
     }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenSince = Date.now()
+        // A refresh already queued is owed to a reader who has just left. Drop
+        // the timer and remember the debt rather than rendering into the dark.
+        if (timer) {
+          clearTimeout(timer)
+          timer = null
+          missedEvent = true
+        }
+        return
+      }
+
+      const hiddenFor = hiddenSince === null ? 0 : Date.now() - hiddenSince
+      hiddenSince = null
+      if (missedEvent || hiddenFor > STALE_AFTER_HIDDEN_MS) {
+        missedEvent = false
+        // Straight to the render, not through the debounce: somebody is
+        // looking at a stale page right now and half a second of coalescing
+        // buys nothing here — there is only ever one of these.
+        run()
+      }
+    }
+
+    document.addEventListener('visibilitychange', onVisibilityChange)
 
     let channel = supabase
       .channel('realtime-' + leagueId)
@@ -83,6 +139,7 @@ export default function RealtimeRefresher({
     channel.subscribe()
 
     return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange)
       if (timer) clearTimeout(timer)
       supabase.removeChannel(channel)
     }

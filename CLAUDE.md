@@ -57,7 +57,7 @@ All pages under `app/(app)/` are React Server Components that fetch directly fro
 
 Client-side interactivity is handled by small `'use client'` leaf components (`BidForm`, `NominateButton`, `Countdown`, `RealtimeRefresher`). Real-time updates use Supabase Realtime → `router.refresh()` via `RealtimeRefresher`.
 
-`RealtimeRefresher` **debounces that refresh by 500ms** (`REFRESH_DEBOUNCE_MS`), and every subscription shares the one debounced handler. One logical event writes to several of the tables it watches — resolving an auction updates `auctions` and then `teams`; approving a trade touches `trades`, `pick_overrides` and `teams` — so an immediate refresh per write meant several full server re-renders per event, multiplied by every connected client. Keep new subscriptions on the shared handler rather than calling `router.refresh()` directly. `Countdown` refreshes on its own when it hits zero; that one is not debounced and shouldn't be.
+`RealtimeRefresher` **debounces that refresh by 500ms** (`REFRESH_DEBOUNCE_MS`) **and skips it entirely while the tab is hidden** (see **A hidden tab is not a reader** below), and every subscription shares the one debounced handler. One logical event writes to several of the tables it watches — resolving an auction updates `auctions` and then `teams`; approving a trade touches `trades`, `pick_overrides` and `teams` — so an immediate refresh per write meant several full server re-renders per event, multiplied by every connected client. Keep new subscriptions on the shared handler rather than calling `router.refresh()` directly. `Countdown` refreshes on its own when it hits zero; that one is not debounced and shouldn't be.
 
 **That refresh must not move the page under whoever is reading it**, which is why it goes through `withScrollAnchor()` in `lib/scrollAnchor.ts` rather than calling `router.refresh()` bare. Next.js is not the thing that scrolls — a refresh is dispatched with `ScrollBehavior.NoScroll`, verified in `refresh-reducer.js`. What moves is the *content*: nobody asked for this render, it is somebody else's bid landing, and when an auction card closes or a table row leaves the pool **above** the viewport, everything below it slides up. Chrome, Edge and Firefox compensate on their own with scroll anchoring; **Safari implements none of it** (`overflow-anchor` is unsupported on every version), so this is the same shape of iPhone-only complaint as the `vh` trap under **Styling**.
 
@@ -788,7 +788,19 @@ Skipping the proxy on a prefetch leaks nothing, and that is verified rather than
 
 **`PushSubscribe` used to POST on every mount.** It is in the "my team" card of two dashboards, so every dashboard load by every manager re-sent a subscription that had not changed. It now sends only on a changed endpoint or once every 24h (`SUBSCRIPTION_SYNC_TTL_MS`, tracked in `localStorage`), which keeps the self-healing property the unconditional POST existed for — a row pruned server-side on a 404/410 comes back within a day — at roughly 1% of the calls. Both `localStorage` accessors are wrapped: a throw falls back to sending, i.e. the old behaviour.
 
-**`RealtimeRefresher` fan-out is inherent, not a bug.** One bid in a live open draft is one `open_auctions` UPDATE, which refreshes *every* connected client — N clients means 2N invocations. The 500ms debounce already collapses a burst into one; there is nothing further to win without making the board stale. This is the cost of the format, and it is the number that grows with league size.
+**`RealtimeRefresher` fan-out is real and grows with the league.** One bid in a live open draft is one `open_auctions` UPDATE, which refreshes *every* connected client. Measured the same way as the prefetch above: one `router.refresh()` is one `?_rsc=` request, which is **exactly 2 invocations** — the proxy and the page render, no prefetch amplification. So an event burst costs **2 × connected clients**.
+
+#### A hidden tab is not a reader
+
+⚠️ **The fan-out used to include tabs nobody was looking at.** A manager who leaves the board open in a background tab — the normal state of a draft that runs for days — re-rendered the page on every bid in the league, all day, at 2 invocations a time, for a render no human would ever see.
+
+`RealtimeRefresher` now checks `document.visibilityState`. A hidden tab records that it owes a refresh and renders nothing; it settles that debt with exactly **one** refresh when it is looked at again, however many events landed meanwhile. Verified in a production build with a real browser, faking `visibilitychange`: visible + 1 event → 1 request; hidden + 5 events → **0**; on becoming visible → exactly 1; hide and show again with no events → 0, so tab-switching alone never costs anything.
+
+**It also fixes a staleness bug, which is why the rule is not purely "refresh if we skipped one".** Supabase Realtime does not replay `postgres_changes` after a reconnect, and a backgrounded tab gets its socket suspended — a phone especially. So a tab could come back having missed events with nothing to say so, showing an old price on a live board to a manager about to bid against it. A tab hidden longer than `STALE_AFTER_HIDDEN_MS` (60s) therefore refreshes on return whether or not it saw an event.
+
+Two details worth keeping if it is touched: a refresh already queued when the tab goes hidden is **cancelled and converted into the debt** rather than rendering into the dark; and the refresh on becoming visible goes **straight to the render**, not through the 500ms debounce, because somebody is looking at a stale page right now and there is only ever one of these.
+
+`Countdown` still refreshes on its own at zero and is deliberately not gated — it fires once, and the auction it closes is the thing the reader came for.
 
 #### Where the real breakdown is
 
