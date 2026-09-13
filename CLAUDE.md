@@ -719,6 +719,30 @@ A short `token_length` is a word somebody typed. Rotating the secret is the same
 
 **`notify-open-draft`** (`supabase/cron_notify_open.sql`) is the open-outcry half of push — see **Open outcry notifications** below. Its guard cannot drift from what the route does, because both call the same two functions.
 
+### Draft results export (`npm run export-drafts`)
+
+Every player sold and the price he went for, across every league that has **finished** drafting, as one CSV and one Excel workbook at the repo root (`draft_results_all_leagues.csv` / `.xlsx`, both gitignored). Sheet per league plus a combined "כל הליגות" sheet carrying a league column; the CSV is that combined sheet.
+
+`scripts/export-draft-results.mjs` reads only — service-role key from `.env.local`, no writes to the database.
+
+- **What is in:** `status = 'completed'` and `draft_type` in (`envelope`, `open`). Snake has no prices, which is the point of the export; an `active` league is out because it is not a result yet, and including it would rewrite the file on every bid.
+- **The auction row is the source, not `players.draft_price`** — the nominator, the runner-up bid and the closing time then come from the same record as the price. The two formats keep those in different tables (`auctions`/`bids` vs `open_auctions`/`open_bids`), read separately and flattened to one row shape. They agreed on all 480 rows when this was written.
+- **"תאריך פתיחת דראפט" is the first player going up**, not `leagues.created_at` (the gap runs to ten days) and not `draft_start_time`, which is a snake field and is NULL in every envelope/open league.
+- ⚠️ **`--check` compares the CSV only, and exits 1 when it would change.** A workbook carries a creation timestamp, so its bytes differ every run and would report a change every time. The CSV is deterministic by construction — leagues sorted by opening date, rows by closing time then player name — which is what makes the check meaningful.
+- ⚠️ **The workbook is built by `scripts/xlsx_styled.py` (openpyxl), not by SheetJS.** The community build of SheetJS writes no cell styles and no `rightToLeft` sheet view at all — verified, it emits a bare `<sheetView workbookViewId="0"/>` — so a Hebrew workbook comes out left-to-right and unformatted. Node falls back to a plain SheetJS workbook when Python or openpyxl is missing, and the last line of output says which path ran.
+- The `bids` read goes through an embedded `!inner` join rather than `.in(ids)`, and pages past the 1000-row cap — both traps are under **Row limits** above, and this one query hits both.
+
+⚠️ **A scheduled task regenerates these files, and like `espn-ranks-weekly` it has no trace in this repo** — same warning as under **Player pool: ranking and import**.
+
+| | |
+|---|---|
+| lives at | `C:\Users\idan\.claude\scheduled-tasks\draft-results-export\SKILL.md` (outside the repo, one machine only) |
+| runs | daily ~09:07 local, **only while the desktop app is open** — otherwise on next launch |
+| does | `--check`; on exit 1 regenerates both files. Never commits, never pushes, never deploys. |
+| says | one push notification, and **only when a draft actually closed** — a quiet day is silent by design |
+
+The cadence is **not** stored in `SKILL.md`; editing that file changes the instructions only. Change the schedule through the scheduled-task tools or the sidebar's Scheduled section.
+
 ### Auction activation (`lib/auctions.ts`)
 
 A queued auction stays `pending` until something notices `scheduled_start` has passed — the `auto-resolve-expired-auctions` job **closes** auctions on a timer but never opens one (it filters `status = 'active'`), so activation has no DB-side timer at all. `activateOverduePendingAuctions(leagueId)` is the single implementation, and **every caller must use it** rather than re-rolling the query: the auction page (`app/(app)/auction/page.tsx`, on load), `POST /api/admin/activate-pending-auction`, and the notify cron. The per-league guarded version is the correct one: it refuses to activate a second auction while one is live, because activating a second would run two sealed-bid auctions at once.

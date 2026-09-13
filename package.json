@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "ranks": "node scripts/fetch-espn-ranks.mjs",
-    "baseline-pool": "node scripts/baseline-pool-exclusions.mjs"
+    "baseline-pool": "node scripts/baseline-pool-exclusions.mjs",
+    "export-drafts": "node scripts/export-draft-results.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",
