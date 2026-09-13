@@ -849,9 +849,17 @@ node -e "const sharp = require('sharp'); const src = './public/logo.png'; Promis
 
 **Vercel deploy: GitHub auto-deploy IS connected — pushing is deploying.** A push to `main` builds and promotes a **Production** deployment on its own; a push to any other branch builds a **Preview**. Verified 2026-09-12 in the dashboard: `a2d8f2e` on `main` went to Production ~30s after the push, with the two branch pushes sitting above it as Previews.
 
-⚠️ **This section said the exact opposite until 2026-09-12** ("auto-deploy is NOT connected, run `npx vercel --prod`"), which cost a real detour: `npx vercel --prod` was run twice, failed both times with `No existing credentials found` (the CLI is not logged in on that machine), and the change was declared un-deployed while it had in fact been live for minutes. If a deploy seems not to have happened, **read the Deployments tab before deploying by hand** — the answer is usually that it already did.
+⚠️ **This section said the exact opposite until 2026-09-12** ("auto-deploy is NOT connected, run `npx vercel --prod`"), which cost a real detour: `npx vercel --prod` was run twice, failed both times with `No existing credentials found`, and the change was declared un-deployed while it had in fact been live for minutes. If a deploy seems not to have happened, **check the deployment list before deploying by hand** — the answer is usually that it already did.
 
-⚠️ `vercel --prod` still exists as the manual path, and it uploads the **local working directory**, not a git ref. That is now a *hazard* rather than the normal route: running it from a stale checkout overwrites a perfectly good auto-deploy with whatever happens to be on disk. Prefer pushing. If it must be run by hand, `git fetch && git status` first and confirm local `main` is not behind `origin/main` — and note it needs `npx vercel login` on a machine that has never authenticated.
+**The CLI is authenticated on this machine; it just needs `--scope idanovad88s-projects`.** That is what the "no credentials" failure above actually was — without the scope the CLI cannot resolve the team and reports it as an auth problem. So checking a deploy needs no browser and no dashboard:
+
+```bash
+npx vercel ls --scope idanovad88s-projects
+```
+
+The newest row is the one to read: `target` must be `Production` and `status` `● Ready`. `npx vercel inspect <url> --scope idanovad88s-projects` then confirms it holds the production aliases — `fantasy-envelope-draft.vercel.app` **and** `…-git-main-…`, which together mean it came from a push to `main` and is what the domain currently serves. ⚠️ Neither command prints the commit sha (and `--json` is not supported), so the sha is matched by timing against `git log -1` plus `git ls-remote origin refs/heads/main` — a build starting within a minute of the commit, on the `-git-main-` alias, is that commit. Verified this way for `7c370f7` on 2026-09-13.
+
+⚠️ `vercel --prod` still exists as the manual path, and it uploads the **local working directory**, not a git ref. That is now a *hazard* rather than the normal route: running it from a stale checkout overwrites a perfectly good auto-deploy with whatever happens to be on disk. Prefer pushing. If it must be run by hand, `git fetch && git status` first and confirm local `main` is not behind `origin/main` — and note it needs `npx vercel login` on a machine that has never authenticated (this one has — see the scope flag above).
 
 ### Supabase clients
 
