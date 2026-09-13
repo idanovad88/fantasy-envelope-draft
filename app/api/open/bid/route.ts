@@ -17,6 +17,7 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => ({}))
   const auctionId: string | undefined = body?.auction_id
+  const teamId: string | undefined = body?.team_id
   const amount = Number(body?.amount)
 
   if (!auctionId) return NextResponse.json({ error: 'חסר מזהה מכרז' }, { status: 400 })
@@ -27,9 +28,11 @@ export async function POST(req: Request) {
   const leagueId = await leagueOfOpenAuction(auctionId)
   if (!leagueId) return NextResponse.json({ error: 'המכרז לא נמצא' }, { status: 404 })
 
-  // No admin-on-behalf here: bidding for someone else is putting words in their
-  // mouth, unlike PASS, which an admin needs to unblock a stalled auction.
-  const actor = await resolveOpenActor(user.id, leagueId)
+  // `team_id` is the admin-on-behalf path, for a manager who cannot reach the
+  // board — resolveOpenActor refuses it for everyone else. The bid it writes is
+  // an ordinary bid: nothing records that an admin typed it, so an admin who
+  // uses this is speaking for the team and had better have been asked to.
+  const actor = await resolveOpenActor(user.id, leagueId, teamId)
   if (!actor.ok) return NextResponse.json({ error: actor.error }, { status: actor.status })
 
   const admin = createAdminClient()

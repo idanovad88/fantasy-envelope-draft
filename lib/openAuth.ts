@@ -39,7 +39,8 @@ async function loadLeagueAndAdmin(userId: string, leagueId: string) {
  * Resolve the team a draft action runs as.
  *
  * `requestedTeamId` is the admin-on-behalf path (nominate for a team whose turn
- * it is, mark a team PASS) and is refused for everyone else. Otherwise the team
+ * it is, bid for a manager who cannot reach the board, mark a team PASS) and is
+ * refused for everyone else. Otherwise the team
  * is the caller's own, resolved with {@link myTeamOr} so an assistant manager
  * counts as the team — assistants act on draft actions, never on trades.
  */

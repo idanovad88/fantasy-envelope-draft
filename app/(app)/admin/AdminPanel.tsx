@@ -244,6 +244,10 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   // String, so the field can be emptied while typing rather than snapping to 1.
   const [openNominateBid, setOpenNominateBid] = useState('1')
   const [openPassTeamByAuction, setOpenPassTeamByAuction] = useState<Record<string, string>>({})
+  const [openBidTeamByAuction, setOpenBidTeamByAuction] = useState<Record<string, string>>({})
+  // Strings for the same reason as openNominateBid — an emptied field must stay
+  // empty while the admin retypes it.
+  const [openBidAmountByAuction, setOpenBidAmountByAuction] = useState<Record<string, string>>({})
   const SLOT_TYPES = ['PG', 'SG', 'G', 'SF', 'PF', 'F', 'C', 'UTIL', 'BENCH'] as const
   const [rosterSlots, setRosterSlots] = useState<Record<string, number>>(
     league?.roster_slots ?? {}
@@ -1790,9 +1794,35 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 <div className="flex flex-col gap-3">
                   {openAuctions.map(a => {
                     const passedIds = new Set(a.passes.map(p => p.team_id))
-                    const canPass = teams.filter(
+                    // Everyone still in the auction: approved, not the current
+                    // leader, has not passed. That is exactly the set that may
+                    // bid and exactly the set that may PASS — open_place_bid()
+                    // and open_pass() draw the same two lines.
+                    const stillIn = teams.filter(
                       t => t.approved && t.id !== a.leader_team_id && !passedIds.has(t.id)
                     )
+                    const bidTeamId = openBidTeamByAuction[a.id] ?? ''
+                    const bidTeam = teams.find(t => t.id === bidTeamId)
+                    // Display only — open_team_max_bid() re-derives this and
+                    // rejects anything over it. The team is never this auction's
+                    // leader (stillIn excludes it), so nothing is double-counted.
+                    const bidLeading = bidTeam
+                      ? leadingByTeam.get(bidTeam.id) ?? { sum: 0, count: 0 }
+                      : { sum: 0, count: 0 }
+                    const bidMax = bidTeam
+                      ? getOpenMaxBid(
+                          bidTeam.budget_remaining,
+                          bidTeam.player_count,
+                          league.players_per_team,
+                          bidLeading.sum,
+                          bidLeading.count
+                        )
+                      : 0
+                    const minBid = a.current_price + 1
+                    const bidAmount = openBidAmountByAuction[a.id] ?? String(minBid)
+                    const bidNum = Number(bidAmount)
+                    const bidValid =
+                      !!bidTeamId && Number.isInteger(bidNum) && bidNum >= minBid && bidNum <= bidMax
                     return (
                       <div key={a.id} className="p-3 rounded-lg" style={{ background: 'var(--background)' }}>
                         <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
@@ -1834,32 +1864,80 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                             </button>
                           </div>
                         </div>
-                        {canPass.length > 0 && (
-                          <div className="flex gap-2 items-center">
-                            <select
-                              className="input flex-1"
-                              style={{ padding: '4px 8px', fontSize: '0.8rem' }}
-                              value={openPassTeamByAuction[a.id] ?? ''}
-                              onChange={e => setOpenPassTeamByAuction(prev => ({ ...prev, [a.id]: e.target.value }))}
-                            >
-                              <option value="">סמן PASS עבור קבוצה...</option>
-                              {canPass.map(t => (
-                                <option key={t.id} value={t.id}>{t.name}</option>
-                              ))}
-                            </select>
-                            <button
-                              className="btn"
-                              style={{ fontSize: '0.75rem', padding: '4px 10px' }}
-                              disabled={!!loading || !openPassTeamByAuction[a.id]}
-                              onClick={() => openBoardAction(
-                                '/api/open/pass',
-                                { auction_id: a.id, team_id: openPassTeamByAuction[a.id] },
-                                'open_pass_' + a.id,
-                                `לסמן PASS עבור ${teamName(openPassTeamByAuction[a.id])}? הפעולה סופית.`
+                        {stillIn.length > 0 && (
+                          <div className="flex flex-col gap-2">
+                            {/* Bid on behalf of a team. The bid it writes is an
+                                ordinary bid — nothing marks it as the admin's —
+                                so this is for a manager who asked, not a way to
+                                play the draft for them. */}
+                            <div className="flex gap-2 items-center flex-wrap">
+                              <select
+                                className="input flex-1"
+                                style={{ padding: '4px 8px', fontSize: '0.8rem', minWidth: 140 }}
+                                value={bidTeamId}
+                                onChange={e => setOpenBidTeamByAuction(prev => ({ ...prev, [a.id]: e.target.value }))}
+                              >
+                                <option value="">הצע בשם קבוצה...</option>
+                                {stillIn.map(t => (
+                                  <option key={t.id} value={t.id}>{t.name} (${t.budget_remaining})</option>
+                                ))}
+                              </select>
+                              <input
+                                className="input"
+                                style={{ width: 84, padding: '4px 8px', fontSize: '0.8rem' }}
+                                type="number"
+                                min={minBid}
+                                max={bidMax}
+                                value={bidAmount}
+                                onChange={e => setOpenBidAmountByAuction(prev => ({ ...prev, [a.id]: e.target.value }))}
+                                dir="ltr"
+                              />
+                              <button
+                                className="btn btn-primary"
+                                style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                                disabled={!!loading || !bidValid}
+                                onClick={() => openBoardAction(
+                                  '/api/open/bid',
+                                  { auction_id: a.id, team_id: bidTeamId, amount: bidNum },
+                                  'open_bid_' + a.id,
+                                  `להציע $${bidNum} בשם ${teamName(bidTeamId)}? ההצעה תיכנס כאילו הקבוצה הציעה בעצמה.`
+                                )}
+                              >
+                                {loading === 'open_bid_' + a.id ? '...' : 'הצע'}
+                              </button>
+                              {bidTeam && (
+                                <span className="text-xs" style={{ color: 'var(--muted)' }}>
+                                  מינימום ${minBid} · מקסימום ${Math.max(bidMax, 0)}
+                                </span>
                               )}
-                            >
-                              PASS
-                            </button>
+                            </div>
+
+                            <div className="flex gap-2 items-center">
+                              <select
+                                className="input flex-1"
+                                style={{ padding: '4px 8px', fontSize: '0.8rem' }}
+                                value={openPassTeamByAuction[a.id] ?? ''}
+                                onChange={e => setOpenPassTeamByAuction(prev => ({ ...prev, [a.id]: e.target.value }))}
+                              >
+                                <option value="">סמן PASS עבור קבוצה...</option>
+                                {stillIn.map(t => (
+                                  <option key={t.id} value={t.id}>{t.name}</option>
+                                ))}
+                              </select>
+                              <button
+                                className="btn"
+                                style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                                disabled={!!loading || !openPassTeamByAuction[a.id]}
+                                onClick={() => openBoardAction(
+                                  '/api/open/pass',
+                                  { auction_id: a.id, team_id: openPassTeamByAuction[a.id] },
+                                  'open_pass_' + a.id,
+                                  `לסמן PASS עבור ${teamName(openPassTeamByAuction[a.id])}? הפעולה סופית.`
+                                )}
+                              >
+                                PASS
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
