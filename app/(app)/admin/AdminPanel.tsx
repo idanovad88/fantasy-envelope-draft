@@ -1621,8 +1621,13 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
           </div>
           <div className="flex flex-col gap-2">
             {localTeams.map(team => (
-              <div key={team.id} className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--background)' }}>
-                <div className="flex items-center gap-3">
+              <div key={team.id} className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg" style={{ background: 'var(--background)' }}>
+                {/* flex-wrap + basis-48 + min-w-0, same shape as /leagues: the three
+                    controls on the right are ~206px of .btn (and ~293px mid-rename),
+                    against ~300px of card on a phone. Without the wrap the row has no
+                    way to give, so it spilled out of the card and took the page's
+                    width with it — main is flex-1, whose min-width is auto. */}
+                <div className="flex items-center gap-3 min-w-0 grow basis-48">
                   {/* Team avatar */}
                   {team.avatar_url ? (
                     <img src={team.avatar_url} alt={team.name} style={{ width: 40, height: 40, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
@@ -1631,8 +1636,8 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                       {team.name[0]}
                     </div>
                   )}
-                  <div>
-                    <div className="flex items-center gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
                       {editingNameTeamId === team.id ? (
                         <input
                           className="input text-sm"
@@ -1648,7 +1653,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                           }}
                         />
                       ) : (
-                        <span className="font-medium">{team.name}</span>
+                        <span className="font-medium truncate">{team.name}</span>
                       )}
                       {team.is_complete && <span className="badge badge-green text-xs">✅</span>}
                       {team.user_id && localAdminIds.includes(team.user_id) && <span className="badge badge-blue text-xs">מנהל</span>}
@@ -1658,7 +1663,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                     </p>
                   </div>
                 </div>
-                <div className="flex gap-2 items-center">
+                <div className="flex gap-2 items-center flex-wrap">
                   {/* Rename team */}
                   {editingNameTeamId === team.id ? (
                     <>
@@ -1689,26 +1694,31 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                       ✏️
                     </button>
                   )}
-                  {/* Upload avatar button */}
-                  <label style={{ cursor: uploadingAvatarTeamId === team.id ? 'not-allowed' : 'pointer' }}>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      style={{ display: 'none' }}
-                      disabled={!!uploadingAvatarTeamId}
-                      onChange={e => {
-                        const file = e.target.files?.[0]
-                        if (file) uploadTeamAvatar(team.id, file)
-                        e.target.value = ''
-                      }}
-                    />
-                    <span
-                      className="btn btn-outline text-xs"
-                      style={{ opacity: uploadingAvatarTeamId === team.id ? 0.5 : 1, pointerEvents: 'none' }}
-                    >
-                      {uploadingAvatarTeamId === team.id ? '...' : '📷'}
-                    </span>
-                  </label>
+                  {/* Upload avatar button — envelope only. BidRevealOverlay is the
+                      one place a team photo is ever shown, and that overlay is the
+                      envelope reveal; in snake and open the upload had no viewer. An
+                      existing photo still renders on the row. */}
+                  {isEnvelope && (
+                    <label style={{ cursor: uploadingAvatarTeamId === team.id ? 'not-allowed' : 'pointer' }}>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        disabled={!!uploadingAvatarTeamId}
+                        onChange={e => {
+                          const file = e.target.files?.[0]
+                          if (file) uploadTeamAvatar(team.id, file)
+                          e.target.value = ''
+                        }}
+                      />
+                      <span
+                        className="btn btn-outline text-xs"
+                        style={{ opacity: uploadingAvatarTeamId === team.id ? 0.5 : 1, pointerEvents: 'none' }}
+                      >
+                        {uploadingAvatarTeamId === team.id ? '...' : '📷'}
+                      </span>
+                    </label>
+                  )}
                   <button
                     className="btn text-xs"
                     style={{ background: 'var(--danger)', color: 'white', opacity: deletingTeamId === team.id ? 0.5 : 1 }}
