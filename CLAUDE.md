@@ -171,7 +171,7 @@ A team can be renamed at any point, **including mid-draft**, by the **owner** (`
 
 ⚠️ **The collision check is `ilike`, not the unique constraint.** `UNIQUE(league_id, name)` is case-sensitive, but `/api/join-league` matches with `.ilike(...).maybeSingle()`. Two case variants ("Lakers" and "lakers") would pass the constraint and then make *that* route throw on two rows — breaking joins for that name. The route therefore runs its own `ilike` lookup (read as an array, not `maybeSingle()`, so a league that already holds two variants gets a clean 409 instead of a crash) and still translates a `23505` from the write as the same 409, for the exact-case race.
 
-**UI:** `components/TeamNameEditor.tsx` on the `/teams` card — deliberately *not* on the dashboard, since this is a one-off action and the "הקבוצה שלי" card is prime real estate. It is gated on `TeamsView`'s existing `isMyTeam` (`team.user_id === myUserId`), which already matches the route's owner rule exactly. The admin's copy is an inline input in the **teams tab** of `AdminPanel`, next to avatar upload and delete; it posts to the same route and updates `localTeams` optimistically, since `AdminPanel` has no `useRouter`.
+**UI:** `components/TeamNameEditor.tsx` on the `/teams` card — deliberately *not* on the dashboard, since this is a one-off action and the "הקבוצה שלי" card is prime real estate. It is gated on `TeamsView`'s existing `isMyTeam` (`team.user_id === myUserId`), which already matches the route's owner rule exactly. The admin's copy is an inline input in the **teams tab** of `AdminPanel`, next to delete (and avatar upload, in envelope leagues only — see **Admin**); it posts to the same route and updates `localTeams` optimistically, since `AdminPanel` has no `useRouter`.
 
 **No migration and no RLS change.** `teams` has only `teams_read` (SELECT), `teams_admin_write` (ALL for admins) and `teams_user_join` (INSERT). Do **not** add an owner UPDATE policy to skip the route: Postgres RLS cannot restrict *which columns* an UPDATE touches, so such a policy would also open `budget_remaining`, `priority_rank`, `is_complete` and `approved` to writes straight from the browser.
 
@@ -965,6 +965,18 @@ Tailwind CSS v4 with CSS variables for theming (`var(--primary)`, `var(--muted)`
 
 `dvh` is the dynamic viewport unit: it tracks the height the phone is showing *right now*, so the document is never taller than the screen by construction. The whole shell is on it — `body` (`min-h-dvh`, root layout), the `(app)` flex row, the desktop sidebar (`h-dvh`), `/login`, `/assist/[token]` and `app/global-error.tsx`. `html` carries **no height at all** any more; `html { height: 100% }` + `body { min-height: 100% }` was the other half of the same trap, since a percentage there resolves against a viewport that moves under it. Supported since iOS 15.4. Applied 2026-09-10 and confirmed fixed on the managers’ own iPhones — so this is the diagnosis, not a plausible one.
 
+⚠️ **A Tailwind utility cannot override `card`, `btn`, `input` or `badge`.** Those classes are declared in `globals.css` *after* `@import "tailwindcss"` but outside any `@layer`, and Tailwind v4 emits every utility inside `@layer utilities`. Unlayered CSS beats layered CSS regardless of order or specificity, so a utility that sets a property the custom class also sets is silently dropped. Verified in the production build output: `.btn` and `.card` unlayered, `.text-xs`, `.flex-wrap` and `.min-w-0` inside `utilities`. In practice:
+
+- `btn text-xs` renders at 14px with 20px of padding a side — a button holding a single emoji is 61px wide. **47 buttons** carry a `text-xs`/`text-sm` that does nothing.
+- `card p-3` keeps the class's 1.25rem.
+- `input w-24` stays `width: 100%`, which is why input widths in this codebase are inline `style`.
+
+When a custom class needs overriding, use inline `style`. **Do not "fix" this by moving those classes into `@layer components`** without a visual pass over the whole app: every dead utility above would come alive at once and resize buttons everywhere.
+
+⚠️ **A row that cannot wrap widens the whole page, not just its card.** `main` in the `(app)` layout is `flex-1`, and a flex item's `min-width` is `auto`, so a child wider than the screen stretches `main` rather than being clipped — the page scrolls sideways and each row spills by a different amount, which managers describe as the screen being "smeared". The admin teams tab shipped this way and was fixed 2026-09-14: `flex justify-between` with no wrap, three `.btn` controls worth 206px (293px mid-rename) against ~300px of card on a phone — 213px of overflow at a 375px viewport. It tipped over when the rename pencil became the third control.
+
+A row of name + action buttons takes the shape `/leagues` already uses: `flex flex-wrap gap-3` on the row, `min-w-0 grow basis-48` on the name side, `truncate` on the name. On a phone the buttons drop to their own line; on desktop the row stays on one line. Check at 375px and 320px that `document.documentElement.scrollWidth === document.documentElement.clientWidth`.
+
 **RTL note:** The app is Hebrew/RTL. For icon positioning inside inputs (e.g. eye button), use inline `style={{ position: 'absolute', left: '10px' }}` — do NOT use Tailwind `left-*` utilities as they may be reinterpreted in RTL context.
 
 ### Admin
@@ -982,6 +994,10 @@ Admin API routes under `app/api/admin/`:
 The admin UI is at `app/(app)/admin/` (page + AdminPanel client component).
 
 The players tab carries a checkbox per **available** player plus a "סמן את כל המוצגים" header, so the search box doubles as the selector — type a name, tick the header, "מחק נבחרים". It sits between the two buttons that were already there (one player at a time, or the whole pool) because the actual job is neither: trimming a seeded pool means removing a few dozen names. Drafted and on-auction players get no checkbox, and the route re-applies that filter server-side.
+
+**Team photos are envelope-only.** The teams tab's 📷 upload (`POST /api/admin/upload-team-avatar` → `teams.avatar_url`) renders only when `isEnvelope`, because `BidRevealOverlay` — the envelope bid reveal — is the one component in the app that displays `avatar_url`. In snake and open leagues the upload had nobody to show the photo to, so it was removed there on 2026-09-14 at the league owner's request. A photo already uploaded still renders on the admin row itself.
+
+The gate is UI-only: the route checks admin rights, not draft type. If a team photo is ever shown somewhere format-independent (for example `/teams`), lift the `isEnvelope` gate at the same time.
 
 **Admin panel tabs:**
 - Envelope: overview, auction, players, teams, lottery, league settings
