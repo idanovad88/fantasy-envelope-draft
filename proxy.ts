@@ -51,11 +51,13 @@ export async function proxy(request: NextRequest) {
   return supabaseResponse
 }
 
-// `api/cron` is excluded, not just bypassed inside the proxy above: the cron
-// runs on a schedule with no session, so every hit was paying for a full auth
-// check before the route skipped auth anyway. (That check is now a local
-// signature verification rather than a round trip — see lib/supabase/auth.ts —
-// but skipping it outright is still free.)
+// `api/cron` and `api/public` are excluded, not just bypassed inside the proxy
+// above: both are called with no session cookie (pg_cron; an external
+// server-to-server integration), so every hit was paying for a full auth check
+// before the route skipped auth anyway. (That check is now a local signature
+// verification rather than a round trip — see lib/supabase/auth.ts — but
+// skipping it outright is still free.) `api/public` authenticates itself with
+// EXTERNAL_API_KEYS instead, the same shape as the cron's CRON_SECRET.
 //
 // ⚠️ `missing: next-router-prefetch` is a billing guard, not a routing one, and
 // it is the single largest one in the app. Every page here is `force-dynamic`
@@ -77,7 +79,7 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     {
-      source: '/((?!_next/static|_next/image|api/cron|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+      source: '/((?!_next/static|_next/image|api/cron|api/public|favicon.ico|manifest\\.webmanifest|apple-touch-icon\\.png|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
       missing: [{ type: 'header', key: 'next-router-prefetch' }],
     },
   ],

@@ -27,6 +27,9 @@ Push notifications (see **Push notifications** below) — all four required for 
 - `VAPID_SUBJECT` — e.g. `mailto:you@example.com`. Push services reject a missing/invalid subject
 - `CRON_SECRET` — bearer token for all three cron routes (`notify-auctions`, `notify-open`, `top-up-pools`). Each route 500s if it is unset, so a missing value never leaves one open
 
+Read-only public API (see **Public read API** below):
+- `EXTERNAL_API_KEYS` — comma-separated bearer tokens for `app/api/public/v1/*`, one per external integration. 500s if unset, same reasoning as `CRON_SECRET`
+
 ⚠️ **VAPID keys are permanent.** Regenerating the public key invalidates every row in `push_subscriptions` — all sends start returning 403 and every user must re-opt-in. Generate once (`npx web-push generate-vapid-keys`) and store durably.
 
 **`CRON_SECRET`, by contrast, is rotatable — but it lives in two places that must move together**, and one of them is the database. Rotated once, 2026-09-11, after the value appeared in a screenshot. The order, and why:
@@ -742,6 +745,27 @@ Every player sold and the price he went for, across every league that has **fini
 | says | one push notification, and **only when a draft actually closed** — a quiet day is silent by design |
 
 The cadence is **not** stored in `SKILL.md`; editing that file changes the instructions only. Change the schedule through the scheduled-task tools or the sidebar's Scheduled section.
+
+### Public read API (`app/api/public/v1/`)
+
+A read-only mirror for external tools — first client is a Python FastAPI app that already syncs from Yahoo and Fantrax and wants to follow this app's leagues too. **No route under here may write to the database.** Auth and the auth-user email lookup are shared in `lib/publicApi.ts`; every route stays thin (auth check → `createAdminClient()` reads → shape the JSON).
+
+**Auth is the `CRON_SECRET` pattern, not a session.** `EXTERNAL_API_KEYS` (comma-separated opaque tokens, so one integration's key can be revoked without rotating everyone else's) — `Authorization: Bearer <token>`, 401 on any mismatch, 500 if the env var is unset so a missing value never leaves the routes open. `proxy.ts` bypasses `/api/public` inside the `proxy` function *and* excludes it from the matcher outright, the same double exclusion `api/cron` gets and for the same reason: these routes carry no session cookie, so running the auth check first would only pay for a redirect the route ignores.
+
+Every response carries `Cache-Control: no-store` (`noStore()` in `lib/publicApi.ts`) — a mirror tool is polling for live draft state, and a cached 200 would show it a stale board.
+
+**Team names are editable mid-draft (see Renaming a team), so `team.id` and `owner_email` are the stable identifiers** — every route that surfaces a team includes both, never the name alone. Emails aren't in any public table; `emailsForUserIds()` resolves `teams.user_id` / `assistant_user_id` through one `supabase.auth.admin.listUsers({ perPage: 1000 })` call, the same shape `app/api/admin/add-admin` already uses. Null when a team has no owner (a spectator-admin's team, or a still-open roster slot).
+
+- **`GET /leagues/{leagueId}`** — league shape (`id, name, draft_type, status, num_teams, players_per_team, budget_per_team, min_bid, roster_slots, snake_round_config, draft_start_time`) plus `teams`, sorted `priority_rank` ASC nulls last, each with `owner_email`/`assistant_email` resolved.
+- **`GET /leagues/{leagueId}/picks`** — every player drafted so far, oldest first. Source of truth per draft type, exactly `scripts/export-draft-results.mjs`'s split: `auctions` (envelope) / `open_auctions` (open) read `winning_team_id`/`winning_bid`/`updated_at`; `snake_picks` (no price — `price` is `null`, never `0`) reads `overall_pick_number`/`round`/`pick_in_round`/`picked_at`. **Cross-checked against `players`**: a row is only emitted when the player is still `status = 'drafted'` with a matching `drafted_by_team_id`, so an open-outcry undo or an admin reset — which clear the player row but leave the closed auction/pick row in place — never surface as a ghost pick. Paged with `.range()` past the 1000-row cap (see **Row limits**) even though a league is ~156 picks today, same reasoning as the export script.
+- **`GET /leagues/{leagueId}/schedule`** — snake only, **409 on any other `draft_type`**. Remaining picks per team with trades applied, via the same `getCurrentSnakePicker` / `resolvePickOwner` / `pick_overrides` path `draft-board/page.tsx` uses, so a traded future pick shows its current owner. Only `overall > completed_picks`.
+- **`GET /leagues/{leagueId}/players`** — the full pool for name mapping, sorted `ranking` ASC nulls last.
+
+All four 404 on an unknown `leagueId` before doing anything else.
+
+⚠️ **A `.select()` string built by concatenation (`'a, b, ' + 'c'`) defeats supabase-js's embed-shape inference** and the TypeScript compile fails with the row type collapsing to `GenericStringError[]`, even though the query itself is correct and runs fine. `app/api/public/v1/leagues/[leagueId]/picks/route.ts` hits this because the table name (`auctions` vs `open_auctions`) is chosen at runtime — it casts the query chain to the row type it actually reads rather than fighting the inference. A single-literal select string (no `+`) avoids the problem entirely and is the simpler fix where the table name is already a literal, which is why `leagues/[leagueId]/route.ts` uses that instead.
+
+Verify with curl against a throwaway league (no dev database — see above): no `Authorization` header and a wrong token must both 401; a real league id with the right token must 200.
 
 ### Auction activation (`lib/auctions.ts`)
 
