@@ -44,6 +44,14 @@ export default async function TeamsPage() {
   ])
 
   const typedTeams = (teams || []) as Team[]
+
+  // Auction trades: the owner's team only — assistant managers never trade.
+  const typedLeague = league as League | null
+  const ownTeam = typedTeams.find(t => t.user_id === user?.id)
+  const tradesOpen = !!typedLeague && (typedLeague.draft_type === 'envelope' || typedLeague.draft_type === 'open')
+    && typedLeague.auction_trades_enabled
+    && (typedLeague.status === 'active' || typedLeague.status === 'paused')
+  const trade = tradesOpen && ownTeam?.approved ? { leagueId: typedLeague!.id, myTeamId: ownTeam.id } : null
   const typedPlayers = (players || []) as Player[]
 
   const pickNumbers = ((snakePicks || []) as { player_id: string; overall_pick_number: number }[])
@@ -69,6 +77,7 @@ export default async function TeamsPage() {
         isSnake={isSnake}
         isOpen={isOpen}
         pickNumbers={pickNumbers}
+        trade={trade}
       />
     </div>
   )

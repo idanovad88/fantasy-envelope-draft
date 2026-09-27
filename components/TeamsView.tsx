@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { Team, Player } from '@/types'
 import TeamNameEditor from './TeamNameEditor'
+import AuctionTradeModal from './AuctionTradeModal'
 
 const SLOT_ORDER = ['PG', 'SG', 'G', 'SF', 'PF', 'F', 'C', 'UTIL', 'BENCH']
 
@@ -16,10 +17,21 @@ interface Props {
   isSnake?: boolean
   isOpen?: boolean
   pickNumbers?: Record<string, number>
+  /**
+   * Auction trades are open to the viewer: set only when the league has them
+   * on, the draft is running, and the viewer OWNS a team (assistants never
+   * trade). A player on any other team's card then opens the offer window.
+   */
+  trade?: { leagueId: string; myTeamId: string } | null
 }
 
-export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTeam, playersPerTeam, rosterSlots, isSnake, isOpen, pickNumbers = {} }: Props) {
+type OnPick = ((p: Player) => void) | undefined
+
+export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTeam, playersPerTeam, rosterSlots, isSnake, isOpen, pickNumbers = {}, trade = null }: Props) {
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
+  const [tradeFor, setTradeFor] = useState<{ teamId: string; playerId: string } | null>(null)
+  const myTradeTeam = trade ? teams.find(t => t.id === trade.myTeamId) ?? null : null
+  const tradeTarget = tradeFor ? teams.find(t => t.id === tradeFor.teamId) ?? null : null
 
   const visibleTeams = selectedTeamId ? teams.filter(t => t.id === selectedTeamId) : teams
 
@@ -72,6 +84,9 @@ export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTea
         {visibleTeams.map(team => {
           const roster = playersByTeam[team.id] || []
           const isMyTeam = team.user_id === myUserId
+          const onPick: OnPick = myTradeTeam && team.id !== myTradeTeam.id && team.approved
+            ? (p: Player) => setTradeFor({ teamId: team.id, playerId: p.id })
+            : undefined
 
           return (
             <div
@@ -121,23 +136,48 @@ export default function TeamsView({ teams, playersByTeam, myUserId, budgetPerTea
                 </div>
               )}
 
+              {onPick && roster.length > 0 && (
+                <p className="text-xs mb-2" style={{ color: 'var(--muted)' }}>🔄 לחץ על שחקן כדי להציע טרייד</p>
+              )}
+
               {/* Roster */}
               {rosterSlots ? (
-                <RosterBySlots roster={roster} rosterSlots={rosterSlots} pickNumbers={pickNumbers} isSnake={isSnake} />
+                <RosterBySlots roster={roster} rosterSlots={rosterSlots} pickNumbers={pickNumbers} isSnake={isSnake} onPick={onPick} />
               ) : (
-                <SimpleRoster roster={roster} playersPerTeam={playersPerTeam} pickNumbers={pickNumbers} isSnake={isSnake} />
+                <SimpleRoster roster={roster} playersPerTeam={playersPerTeam} pickNumbers={pickNumbers} isSnake={isSnake} onPick={onPick} />
               )}
             </div>
           )
         })}
       </div>
+
+      {trade && myTradeTeam && tradeFor && tradeTarget && (
+        <AuctionTradeModal
+          leagueId={trade.leagueId}
+          myTeam={myTradeTeam}
+          myRoster={playersByTeam[myTradeTeam.id] || []}
+          otherTeam={tradeTarget}
+          otherRoster={playersByTeam[tradeTarget.id] || []}
+          initialPlayerId={tradeFor.playerId}
+          playersPerTeam={playersPerTeam}
+          onClose={() => setTradeFor(null)}
+        />
+      )}
     </>
   )
 }
 
-function PlayerRow({ player, slotLabel, pickNumber, isSnake }: { player: Player; slotLabel?: string; pickNumber?: number; isSnake?: boolean }) {
+function PlayerRow({ player, slotLabel, pickNumber, isSnake, onPick }: { player: Player; slotLabel?: string; pickNumber?: number; isSnake?: boolean; onPick?: OnPick }) {
+  const clickable = !!onPick
   return (
-    <div className="flex items-center justify-between text-sm py-1.5 px-2 rounded" style={{ background: 'var(--background)' }}>
+    <div
+      className="flex items-center justify-between text-sm py-1.5 px-2 rounded"
+      style={{ background: 'var(--background)', cursor: clickable ? 'pointer' : undefined }}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onClick={clickable ? () => onPick!(player) : undefined}
+      onKeyDown={clickable ? e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick!(player) } } : undefined}
+    >
       <div className="flex items-center gap-2">
         <span className="badge badge-blue text-xs" style={{ minWidth: '2.5rem', textAlign: 'center' }} dir="ltr">
           {slotLabel ?? player.position ?? '—'}
@@ -167,7 +207,7 @@ function EmptySlotRow({ label }: { label: string }) {
   )
 }
 
-function RosterBySlots({ roster, rosterSlots, pickNumbers, isSnake }: { roster: Player[]; rosterSlots: Record<string, number>; pickNumbers: Record<string, number>; isSnake?: boolean }) {
+function RosterBySlots({ roster, rosterSlots, pickNumbers, isSnake, onPick }: { roster: Player[]; rosterSlots: Record<string, number>; pickNumbers: Record<string, number>; isSnake?: boolean; onPick?: OnPick }) {
   const slots = SLOT_ORDER.filter(s => (rosterSlots[s] ?? 0) > 0)
   // Everything the slot rows below won't draw: no slot assigned, or a slot this
   // league doesn't have. assign_roster_slot() falls back to BENCH when no
@@ -186,7 +226,7 @@ function RosterBySlots({ roster, rosterSlots, pickNumbers, isSnake }: { roster: 
 
         return (
           <div key={slot}>
-            {inSlot.map(p => <PlayerRow key={p.id} player={p} slotLabel={slot} pickNumber={pickNumbers[p.id]} isSnake={isSnake} />)}
+            {inSlot.map(p => <PlayerRow key={p.id} player={p} slotLabel={slot} pickNumber={pickNumbers[p.id]} isSnake={isSnake} onPick={onPick} />)}
             {Array.from({ length: Math.max(0, empty) }).map((_, i) => (
               <EmptySlotRow key={`${slot}-empty-${i}`} label={slot} />
             ))}
@@ -196,14 +236,14 @@ function RosterBySlots({ roster, rosterSlots, pickNumbers, isSnake }: { roster: 
       {unassigned.length > 0 && (
         <div className="mt-1 pt-1 flex flex-col gap-1" style={{ borderTop: '1px dashed var(--border)' }}>
           <p className="text-xs" style={{ color: 'var(--muted)' }}>ללא עמדה מתאימה</p>
-          {unassigned.map(p => <PlayerRow key={p.id} player={p} pickNumber={pickNumbers[p.id]} isSnake={isSnake} />)}
+          {unassigned.map(p => <PlayerRow key={p.id} player={p} pickNumber={pickNumbers[p.id]} isSnake={isSnake} onPick={onPick} />)}
         </div>
       )}
     </div>
   )
 }
 
-function SimpleRoster({ roster, playersPerTeam, pickNumbers, isSnake }: { roster: Player[]; playersPerTeam: number; pickNumbers: Record<string, number>; isSnake?: boolean }) {
+function SimpleRoster({ roster, playersPerTeam, pickNumbers, isSnake, onPick }: { roster: Player[]; playersPerTeam: number; pickNumbers: Record<string, number>; isSnake?: boolean; onPick?: OnPick }) {
   if (roster.length === 0) {
     return (
       <p className="text-sm text-center py-4" style={{ color: 'var(--muted)' }}>
@@ -213,7 +253,7 @@ function SimpleRoster({ roster, playersPerTeam, pickNumbers, isSnake }: { roster
   }
   return (
     <div className="flex flex-col gap-1">
-      {roster.map(p => <PlayerRow key={p.id} player={p} pickNumber={pickNumbers[p.id]} isSnake={isSnake} />)}
+      {roster.map(p => <PlayerRow key={p.id} player={p} pickNumber={pickNumbers[p.id]} isSnake={isSnake} onPick={onPick} />)}
       {Array.from({ length: playersPerTeam - roster.length }).map((_, i) => (
         <div key={i} className="flex items-center justify-between text-sm py-1 px-2 rounded" style={{ background: 'var(--background)', opacity: 0.3 }}>
           <span style={{ color: 'var(--muted)' }}>— ריק —</span>

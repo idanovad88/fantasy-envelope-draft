@@ -54,6 +54,8 @@ interface InternalPick {
   team_id: string
   team_name: string
   team_user_id: string | null
+  /** Who holds the player now — differs from team_id once he has been traded. */
+  current_team_id: string
   price: number | null
   overall_pick: number | null
   round: number | null
@@ -64,9 +66,10 @@ interface InternalPick {
 
 // Source of truth per draft type, the same tables scripts/export-draft-results.mjs
 // reads. Cross-checked against `players`: only emit a row whose player is still
-// `status = 'drafted'` with a matching `drafted_by_team_id`, so an open-outcry
-// undo or an admin reset — which clear the player row but leave the closed
-// auction/pick row in place — never surface as a ghost pick.
+// `status = 'drafted'`, so an open-outcry undo or an admin reset — which clear
+// the player row but leave the closed auction/pick row in place — never surface
+// as a ghost pick. A traded player stays: `team_id` is the team that drafted
+// him, `current_team_id` the one that holds him now.
 async function envelopeOrOpenPicks(
   admin: AdminClient,
   leagueId: string,
@@ -92,7 +95,7 @@ async function envelopeOrOpenPicks(
   )
 
   return rows
-    .filter(r => r.player?.status === 'drafted' && r.player.drafted_by_team_id === r.winning_team_id && r.team)
+    .filter(r => r.player?.status === 'drafted' && r.player.drafted_by_team_id && r.team)
     .map(r => ({
       player_id: r.player_id,
       player_name: r.player!.name,
@@ -102,6 +105,7 @@ async function envelopeOrOpenPicks(
       team_id: r.winning_team_id,
       team_name: r.team!.name,
       team_user_id: r.team!.user_id,
+      current_team_id: r.player!.drafted_by_team_id!,
       price: r.winning_bid,
       overall_pick: null,
       round: null,
@@ -129,7 +133,7 @@ async function snakePicks(admin: AdminClient, leagueId: string): Promise<Interna
   )
 
   return rows
-    .filter(r => r.player?.status === 'drafted' && r.player.drafted_by_team_id === r.team_id && r.team)
+    .filter(r => r.player?.status === 'drafted' && r.player.drafted_by_team_id && r.team)
     .map(r => ({
       player_id: r.player_id,
       player_name: r.player!.name,
@@ -139,6 +143,7 @@ async function snakePicks(admin: AdminClient, leagueId: string): Promise<Interna
       team_id: r.team_id,
       team_name: r.team!.name,
       team_user_id: r.team!.user_id,
+      current_team_id: r.player!.drafted_by_team_id!,
       price: null,
       overall_pick: r.overall_pick_number,
       round: r.round,

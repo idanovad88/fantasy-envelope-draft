@@ -19,8 +19,8 @@ export type AdminTradeView = {
   rejection_reason: string | null
   proposingName: string
   targetName: string
-  proposingGives: { type: 'pick' | 'player'; label: string }[]
-  targetGives: { type: 'pick' | 'player'; label: string }[]
+  proposingGives: { type: 'pick' | 'player' | 'cash'; label: string }[]
+  targetGives: { type: 'pick' | 'player' | 'cash'; label: string }[]
 }
 
 type AdminTab = 'overview' | 'teams' | 'auction' | 'players' | 'lottery' | 'league' | 'draft' | 'trades' | 'board'
@@ -72,6 +72,8 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   // `!isSnake` — an open-outcry league is neither, and has no tiebreak at all
   // (an ascending auction cannot end in a tie).
   const isEnvelope = !isSnake && !isOpen
+  // The trades tab: always in snake; in an auction league once switched on.
+  const hasTradesTab = isSnake || !!league?.auction_trades_enabled
   // Reset draft is creator-only (route re-checks server-side; this gates the UI).
   const isCreator = !!league && league.created_by === currentUserId
   // In snake mode the pick-order lottery may run only once. Once any approved
@@ -94,6 +96,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
       : isOpen
         ? ['overview', 'board', 'players', 'teams', 'lottery', 'league']
         : ['overview', 'auction', 'players', 'teams', 'lottery', 'league']
+    if (hasTradesTab) available.push('trades')
     return available.includes(initialTab) ? initialTab : 'overview'
   })
   const [loading, setLoading] = useState('')
@@ -231,6 +234,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
   const [auctionDurationHours, setAuctionDurationHours] = useState(league?.auction_duration_hours ?? 1.5)
   const [notifyBeforeMinutes, setNotifyBeforeMinutes] = useState(league?.notify_before_minutes ?? 1)
   const [revealMode, setRevealMode] = useState<RevealMode>(league?.reveal_mode ?? 'random')
+  const [auctionTradesEnabled, setAuctionTradesEnabled] = useState(league?.auction_trades_enabled ?? false)
   // Open outcry. draft_start_hour / draft_end_hour have been on `leagues` since
   // the original schema and were never read by anything until this format.
   const [openBoardSize, setOpenBoardSize] = useState(league?.open_board_size ?? 4)
@@ -536,6 +540,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
         pick_timeout_minutes: isNaN(timeout) || pickTimeoutMinutes === '' ? null : timeout,
         snake_round_config: snakeRoundConfig,
       } : isOpen ? {
+        auction_trades_enabled: auctionTradesEnabled,
         open_board_size: openBoardSize,
         open_pass_timeout_minutes: openPassTimeoutMinutes,
         open_extend_short_minutes: openExtendShort,
@@ -545,6 +550,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
       } : {
         notify_before_minutes: notifyBeforeMinutes,
         reveal_mode: revealMode,
+        auction_trades_enabled: auctionTradesEnabled,
       }),
       updated_at: new Date().toISOString(),
     }
@@ -911,6 +917,8 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
           { id: 'lottery', label: 'הגרלה' },
           { id: 'league', label: 'הגדרות' },
         ]
+  // Auction leagues with trades on get the tab right after the board/auction.
+  if (!isSnake && hasTradesTab) TABS.splice(2, 0, { id: 'trades', label: 'טריידים' })
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -1365,7 +1373,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
       })()}
 
       {/* TRADES */}
-      {tab === 'trades' && isSnake && (() => {
+      {tab === 'trades' && hasTradesTab && (() => {
         const STATUS_LABEL: Record<string, string> = {
           pending_target: 'ממתין לתגובת היריבה',
           pending_admin: 'ממתין לאישורך',
@@ -1386,7 +1394,7 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
         const renderAssets = (gives: { type: string; label: string }[]) =>
           gives.length === 0
             ? <span style={{ color: 'var(--muted)' }}>—</span>
-            : gives.map((a, i) => <span key={i} dir={a.type === 'player' ? 'ltr' : 'rtl'} className="block">{a.label}</span>)
+            : gives.map((a, i) => <span key={i} dir={a.type === 'pick' ? 'rtl' : 'ltr'} className="block" style={a.type === 'cash' ? { color: 'var(--warning)', fontWeight: 700 } : undefined}>{a.label}</span>)
 
         return (
           <div className="flex flex-col gap-4">
@@ -2401,6 +2409,34 @@ export default function AdminPanel({ initialTab = 'overview', league, teams, act
                 />
                 <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
                   ההתראה תישלח לכל מנהלי הקבוצות ועוזריהם. ברירת מחדל: דקה אחת
+                </p>
+              </div>
+            )}
+
+            {!isSnake && (
+              <div>
+                <label className="block text-sm font-medium mb-2">טריידים בזמן הדראפט</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {([[false, 'כבוי'], [true, 'מופעל']] as [boolean, string][]).map(([value, label]) => {
+                    const active = auctionTradesEnabled === value
+                    return (
+                      <button
+                        key={label}
+                        type="button"
+                        className="btn text-xs"
+                        style={{
+                          background: active ? 'rgba(99,102,241,0.2)' : 'var(--border)',
+                          color: active ? 'var(--primary)' : 'var(--muted)',
+                        }}
+                        onClick={() => setAuctionTradesEnabled(value)}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                  מנהלי קבוצות יוכלו להציע זה לזה שחקנים תמורת שחקנים (אותו מספר מכל צד) ועוד תוספת כסף. מציעים מטאב קבוצות, הצד השני מאשר, ואתה מאשר סופית בטאב טריידים.
                 </p>
               </div>
             )}

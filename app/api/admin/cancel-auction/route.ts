@@ -28,6 +28,15 @@ export async function POST(req: NextRequest) {
   const isAdmin = !!callerAdmin || league?.created_by === user.id
   if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
+  // A completed auction whose player has since been traded cannot be undone:
+  // the refund would go to the team that paid while the player sits elsewhere.
+  if (auction.status === 'completed' && auction.winning_team_id) {
+    const { data: player } = await supabase.from('players').select('drafted_by_team_id').eq('id', auction.player_id).maybeSingle()
+    if (player?.drafted_by_team_id && player.drafted_by_team_id !== auction.winning_team_id) {
+      return NextResponse.json({ error: 'השחקן הועבר בטרייד — לא ניתן לבטל את המכרז' }, { status: 409 })
+    }
+  }
+
   // If already completed and had a winner — refund budget and fix player count
   if (auction.status === 'completed' && auction.winning_team_id && auction.winning_bid) {
     const { data: team } = await supabase

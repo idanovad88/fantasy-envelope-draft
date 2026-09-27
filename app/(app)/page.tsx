@@ -26,6 +26,8 @@ import PushSubscribe from '@/components/PushSubscribe'
 import WatchStar from '@/components/WatchStar'
 import { activateOverdueSnakeDraft } from '@/lib/activateDraft'
 import { settleOpenDraft } from '@/lib/openDraft'
+import TradeInbox from '@/components/TradeInbox'
+import { loadAuctionTradeViews } from '@/lib/auctionTradeViews'
 
 // Subtle horizontal progress row: a thin dark track that blends into the card,
 // with a muted fill showing the portion of the draft/budget already used up.
@@ -73,6 +75,15 @@ export default async function DashboardPage() {
   // Team-assistant manager card — the owner invites/removes, the assistant may step down.
   const isTeamOwner = !!typedMyTeam && typedMyTeam.user_id === user!.id
   const isTeamAssistant = !!typedMyTeam && typedMyTeam.assistant_user_id === user!.id
+  // Auction trades waiting on this owner (or sent by them). Owner only —
+  // assistant managers never trade, so they get no card to act from.
+  const myOpenTrades = typedLeague && typedLeague.draft_type !== 'snake' && typedLeague.auction_trades_enabled && isTeamOwner
+    ? await loadAuctionTradeViews(supabase, typedLeague.id, { statuses: ['pending_target', 'pending_admin'], teamId: typedMyTeam!.id })
+    : []
+  const tradeInbox = myOpenTrades.length > 0 && typedMyTeam
+    ? <TradeInbox myTeamId={typedMyTeam.id} trades={myOpenTrades} />
+    : null
+
   let assistantEmail: string | null = null
   if (isTeamOwner && typedMyTeam!.assistant_user_id) {
     const adminDb = createAdminClient()
@@ -620,6 +631,8 @@ export default async function DashboardPage() {
           </div>
         </div>
 
+        {tradeInbox && <div className="my-4">{tradeInbox}</div>}
+
         {watchlist.length > 0 && (
           <div className="card mb-4">
             <div className="flex items-center justify-between gap-3 mb-3">
@@ -1058,6 +1071,8 @@ export default async function DashboardPage() {
           )}
         </div>
       </div>
+
+      {tradeInbox && <div className="mt-4">{tradeInbox}</div>}
 
       {typedLeague?.draft_start_time && ['setup', 'lottery'].includes(typedLeague.status) && (
         <DraftCountdown targetDate={typedLeague.draft_start_time} />

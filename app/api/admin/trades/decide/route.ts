@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { getAuthUser } from '@/lib/supabase/auth'
 import { validateTrade, type TradeAssetInput } from '@/lib/trades'
+import { isAuctionDraft, teamManagerIds, pushTradeUpdate } from '@/lib/auctionTrades'
+
+// web-push (auction trades) needs Node's crypto.
+export const runtime = 'nodejs'
 
 export async function POST(req: Request) {
   const supabase = await createClient()
@@ -22,7 +26,7 @@ export async function POST(req: Request) {
   if (!trade) return NextResponse.json({ error: 'הטרייד לא נמצא' }, { status: 404 })
 
   // Caller must be an admin of the league (row in admin_users) or its creator.
-  const { data: league } = await admin.from('leagues').select('created_by').eq('id', trade.league_id).single()
+  const { data: league } = await admin.from('leagues').select('created_by, draft_type').eq('id', trade.league_id).single()
   const { data: adminRow } = await admin
     .from('admin_users').select('user_id')
     .eq('user_id', user.id).eq('league_id', trade.league_id).maybeSingle()
@@ -33,6 +37,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'הטרייד אינו ממתין לאישור מנהל' }, { status: 400 })
   }
 
+  const isAuction = isAuctionDraft(league?.draft_type)
+  const notifyTeams = (title: string, body: string) => {
+    if (!isAuction) return
+    pushTradeUpdate(() => teamManagerIds(admin, [trade.proposing_team_id, trade.target_team_id]),
+      trade.id, title, body, '/trades', user.id)
+  }
+
   if (action === 'reject') {
     const { error } = await admin.from('trades').update({
       status: 'rejected',
@@ -41,7 +52,18 @@ export async function POST(req: Request) {
       admin_responded_at: new Date().toISOString(),
     }).eq('id', trade_id)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    notifyTeams('❌ מנהל הליגה דחה את הטרייד', rejection_reason ? `סיבה: ${rejection_reason}` : 'הטרייד לא יבוצע')
     return NextResponse.json({ success: true, status: 'rejected' })
+  }
+
+  // Auction trade: execute_auction_trade() is the whole check — it re-validates
+  // players, counts and both budgets under row locks, and raises in Hebrew.
+  if (isAuction) {
+    await admin.from('trades').update({ admin_user_id: user.id }).eq('id', trade_id)
+    const { error: execErr } = await admin.rpc('execute_auction_trade', { p_trade_id: trade_id })
+    if (execErr) return NextResponse.json({ error: `הטרייד לא בוצע: ${execErr.message}` }, { status: 400 })
+    notifyTeams('✅ הטרייד בוצע', 'מנהל הליגה אישר את הטרייד — השחקנים עברו קבוצה')
+    return NextResponse.json({ success: true, status: 'approved' })
   }
 
   // Approve: re-validate against current state (ownership may have changed).

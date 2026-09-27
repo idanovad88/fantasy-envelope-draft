@@ -34,6 +34,8 @@ export interface League {
   open_extend_short_minutes: number
   open_extend_long_minutes: number
   open_frozen_since: string | null
+  // envelope + open: trades while the draft runs (admin toggle)
+  auction_trades_enabled: boolean
   created_by: string
   created_at: string
   updated_at: string
@@ -65,6 +67,8 @@ export interface Team {
   approved: boolean
   avatar_url: string | null
   assistant_user_id: string | null
+  /** Auction trades: keeps what was paid at auction with the team that paid it, plus cash. */
+  budget_adjustment: number
   created_at: string
   updated_at: string
 }
@@ -211,7 +215,7 @@ export interface AdminUser {
   created_at: string
 }
 
-// ── Trade system (snake draft) ───────────────────────────────────────────────
+// ── Trade system (snake picks/players; auction players + cash) ───────────────────────────────────────────────
 
 export type TradeStatus =
   | 'pending_target'
@@ -252,6 +256,9 @@ export interface Trade {
   created_at: string
   target_responded_at: string | null
   admin_responded_at: string | null
+  // auction trades only
+  cash_from_team_id: string | null
+  cash_amount: number
   // joined
   assets?: TradeAsset[]
   proposing_team?: Team

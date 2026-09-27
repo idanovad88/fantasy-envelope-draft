@@ -70,6 +70,14 @@ export async function POST(req: NextRequest) {
     update.reveal_mode = body.reveal_mode
   }
 
+  // Envelope + open: trades while the draft runs.
+  if ('auction_trades_enabled' in body) {
+    if (typeof body.auction_trades_enabled !== 'boolean') {
+      return NextResponse.json({ error: 'ערך לא תקין להפעלת טריידים' }, { status: 400 })
+    }
+    update.auction_trades_enabled = body.auction_trades_enabled
+  }
+
   // Open outcry draft. Each range matches its DB CHECK — a value the constraint
   // would reject rolls back the whole settings save, the silent failure this
   // route exists to prevent.

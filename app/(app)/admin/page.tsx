@@ -81,7 +81,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       supabase.from('league_creator_whitelist').select('email').order('created_at', { ascending: true }),
       adminDb.from('admin_users').select('user_id').eq('league_id', lid),
       isSnake ? supabase.from('snake_picks').select('*, player:players(name, position), team:teams(name)').eq('league_id', lid).order('overall_pick_number', { ascending: true }) : Promise.resolve({ data: [] }),
-      isSnake ? supabase.from('trades').select('*, assets:trade_assets(*)').eq('league_id', lid).order('created_at', { ascending: false }) : Promise.resolve({ data: [] }),
+      isSnake || league?.auction_trades_enabled ? supabase.from('trades').select('*, assets:trade_assets(*)').eq('league_id', lid).order('created_at', { ascending: false }) : Promise.resolve({ data: [] }),
       isOpen ? supabase.from('open_auctions').select('id, current_price, leader_team_id, deadline_at, player:players(name), nominating_team:teams!nominating_team_id(name), leader_team:teams!leader_team_id(name), passes:open_passes(team_id)').eq('league_id', lid).eq('status', 'open').order('created_at', { ascending: true }) : Promise.resolve({ data: [] }),
       // Sorted by updated_at, not deadline_at: an admin closing early leaves the
       // deadline in the past, behind auctions that actually finished before it.
@@ -93,13 +93,18 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   const teamNameById = new Map(typedTeams.map(t => [t.id, t.name]))
   const playerNameById = new Map(((players || []) as { id: string; name: string }[]).map(p => [p.id, p.name]))
   const numTeams = league?.num_teams ?? 0
-  const labelFor = (a: TradeAsset): { type: 'pick' | 'player'; label: string } => {
+  const labelFor = (a: TradeAsset): { type: 'pick' | 'player' | 'cash'; label: string } => {
     if (a.asset_type === 'pick' && a.overall_pick_number != null) {
       const { round, pickInRound } = describePick(a.overall_pick_number, numTeams)
       return { type: 'pick', label: `סיבוב ${round}, בחירה ${pickInRound} (#${a.overall_pick_number})` }
     }
     return { type: 'player', label: a.player_id ? (playerNameById.get(a.player_id) ?? 'שחקן') : 'שחקן' }
   }
+  // Auction trades: the cash sits on the side that pays it.
+  const withCash = (tr: Trade, teamId: string, gives: ReturnType<typeof labelFor>[]) =>
+    tr.cash_amount > 0 && tr.cash_from_team_id === teamId
+      ? [...gives, { type: 'cash' as const, label: `$${tr.cash_amount}` }]
+      : gives
   const tradeViews: AdminTradeView[] = ((tradeRows || []) as (Trade & { assets: TradeAsset[] })[]).map(tr => {
     const assets = tr.assets ?? []
     return {
@@ -109,8 +114,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       rejection_reason: tr.rejection_reason,
       proposingName: teamNameById.get(tr.proposing_team_id) ?? '—',
       targetName: teamNameById.get(tr.target_team_id) ?? '—',
-      proposingGives: assets.filter(a => a.from_team_id === tr.proposing_team_id).map(labelFor),
-      targetGives: assets.filter(a => a.from_team_id === tr.target_team_id).map(labelFor),
+      proposingGives: withCash(tr, tr.proposing_team_id, assets.filter(a => a.from_team_id === tr.proposing_team_id).map(labelFor)),
+      targetGives: withCash(tr, tr.target_team_id, assets.filter(a => a.from_team_id === tr.target_team_id).map(labelFor)),
     }
   })
 

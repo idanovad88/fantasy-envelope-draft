@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { getAuthUser } from '@/lib/supabase/auth'
 import { cookies } from 'next/headers'
 import RealtimeRefresher from '@/components/RealtimeRefresher'
@@ -6,6 +6,9 @@ import TradeCenter, { type TeamAssets, type TradeView, type AssetLabel } from '@
 import type { League, Team, Trade, TradeAsset } from '@/types'
 import { buildPickOverridesMap, getFuturePickNumbersForTeam, describePick } from '@/lib/utils'
 import { activateOverdueSnakeDraft } from '@/lib/activateDraft'
+import TradeInbox from '@/components/TradeInbox'
+import { loadAuctionTradeViews, sideSummary } from '@/lib/auctionTradeViews'
+import { formatDateTime } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -33,8 +36,12 @@ export default async function TradesPage() {
     : { data: null }
   const league = leagueRow as League | null
 
+  if (league && (league.draft_type === 'envelope' || league.draft_type === 'open')) {
+    return <AuctionTrades league={league} myTeam={myTeam} />
+  }
+
   if (!league || league.draft_type !== 'snake') {
-    return <Shell><p className="text-sm" style={{ color: 'var(--muted)' }}>טריידים זמינים רק בדראפט סנייק.</p></Shell>
+    return <Shell><p className="text-sm" style={{ color: 'var(--muted)' }}>אין ליגה נבחרת.</p></Shell>
   }
   if (!myTeam) {
     return <Shell><p className="text-sm" style={{ color: 'var(--muted)' }}>אין לך קבוצה בליגה זו.</p></Shell>
@@ -90,9 +97,13 @@ export default async function TradesPage() {
   }
 
   // Assets tied up in OPEN trades — cannot be offered again (no overlap).
+  // Read with the service role: RLS hides other teams' open offers from this
+  // user, and only the keys leave this function, never who offered what.
+  const { data: openTradeRows } = await createAdminClient()
+    .from('trades').select('assets:trade_assets(asset_type, overall_pick_number, player_id)')
+    .eq('league_id', league.id).in('status', ['pending_target', 'pending_admin'])
   const lockedKeys = new Set<string>()
-  for (const tr of (tradeRows || []) as (Trade & { assets: TradeAsset[] })[]) {
-    if (tr.status !== 'pending_target' && tr.status !== 'pending_admin') continue
+  for (const tr of (openTradeRows || []) as unknown as { assets: TradeAsset[] }[]) {
     for (const a of tr.assets ?? []) {
       if (a.asset_type === 'pick' && a.overall_pick_number != null) lockedKeys.add(`pick:${a.overall_pick_number}`)
       else if (a.asset_type === 'player' && a.player_id) lockedKeys.add(`player:${a.player_id}`)
@@ -128,6 +139,62 @@ export default async function TradesPage() {
         lockedKeys={[...lockedKeys]}
       />
     </Shell>
+  )
+}
+
+async function AuctionTrades({ league, myTeam }: { league: League; myTeam: Team | null }) {
+  if (!league.auction_trades_enabled) {
+    return <Shell><p className="text-sm" style={{ color: 'var(--muted)' }}>מנהל הליגה לא הפעיל טריידים בליגה זו.</p></Shell>
+  }
+
+  const supabase = await createClient()
+  // RLS returns approved trades plus the caller's own.
+  const trades = await loadAuctionTradeViews(supabase, league.id)
+  const approved = trades.filter(t => t.status === 'approved')
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+  const running = league.status === 'active' || league.status === 'paused'
+
+  return (
+    <Shell>
+      <RealtimeRefresher leagueId={league.id} />
+      <div className="flex flex-col gap-4">
+        {running && (
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>
+            כדי להציע טרייד: טאב <b>קבוצות</b> ← לחץ על שחקן של קבוצה אחרת.
+          </p>
+        )}
+
+        {myTeam && <TradeInbox myTeamId={myTeam.id} trades={trades} showHistory title="הטריידים שלי" />}
+
+        <div className="card">
+          <h2 className="font-bold text-lg mb-3">טריידים שבוצעו בליגה</h2>
+          {approved.length === 0 ? (
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>עדיין לא בוצעו טריידים</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {approved.map(t => (
+                <div key={t.id} className="rounded-lg p-3" style={{ background: 'var(--background)', border: '1px solid var(--border)' }}>
+                  <p className="text-xs mb-2" style={{ color: 'var(--muted)' }}>{formatDateTime(t.updated_at)}</p>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <Side name={t.proposingName} items={sideSummary(t, t.proposingTeamId)} />
+                    <Side name={t.targetName} items={sideSummary(t, t.targetTeamId)} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </Shell>
+  )
+}
+
+function Side({ name, items }: { name: string; items: string[] }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs font-medium mb-1 truncate">{name} נתנו</p>
+      {items.map((s, i) => <p key={i} className="truncate" dir="ltr" style={{ textAlign: 'right' }}>{s}</p>)}
+    </div>
   )
 }
 

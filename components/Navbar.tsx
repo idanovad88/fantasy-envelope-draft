@@ -28,12 +28,13 @@ const NAV = [
 ]
 
 // /auction belongs to both bidding formats — sealed envelopes and the open
-// board — and means nothing in a snake draft. /trades is snake-only.
-function visibleNav(draftType?: DraftType) {
+// board — and means nothing in a snake draft. /trades is always there in snake,
+// and in an auction league only once the admin has switched trades on.
+function visibleNav(draftType?: DraftType, auctionTrades?: boolean) {
   const isSnake = draftType === 'snake'
   return NAV.filter(n =>
     !(isSnake && n.href === '/auction') &&
-    !(!isSnake && n.href === '/trades')
+    !(!isSnake && !auctionTrades && n.href === '/trades')
   )
 }
 
@@ -42,9 +43,10 @@ interface NavbarProps {
   draftType?: DraftType
   leagueName?: string | null
   leagueLogo?: string | null
+  auctionTrades?: boolean
 }
 
-export default function Navbar({ isAdmin, draftType, leagueName, leagueLogo }: NavbarProps) {
+export default function Navbar({ isAdmin, draftType, leagueName, leagueLogo, auctionTrades }: NavbarProps) {
   const pathname = usePathname()
 
   return (
@@ -66,7 +68,7 @@ export default function Navbar({ isAdmin, draftType, leagueName, leagueLogo }: N
           )}
         </div>
 
-        {visibleNav(draftType).map(({ href, label, icon: Icon }) => (
+        {visibleNav(draftType, auctionTrades).map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}
@@ -103,7 +105,7 @@ export default function Navbar({ isAdmin, draftType, leagueName, leagueLogo }: N
 
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 flex border-t" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
-        {visibleNav(draftType).map(({ href, label, icon: Icon }) => (
+        {visibleNav(draftType, auctionTrades).map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}

@@ -17,11 +17,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     supabase.from('admin_users').select('role').eq('user_id', user.id).maybeSingle(),
     supabase.from('leagues').select('id').eq('created_by', user.id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
     selectedLeagueId
-      ? supabase.from('leagues').select('draft_type, name, logo_url').eq('id', selectedLeagueId).maybeSingle()
+      ? supabase.from('leagues').select('draft_type, name, logo_url, auction_trades_enabled').eq('id', selectedLeagueId).maybeSingle()
       : Promise.resolve({ data: null }),
   ])
 
-  const selectedLeague = league as { draft_type?: DraftType; name?: string; logo_url?: string | null } | null
+  const selectedLeague = league as { draft_type?: DraftType; name?: string; logo_url?: string | null; auction_trades_enabled?: boolean } | null
 
   return (
     <div className="flex min-h-dvh">
@@ -30,6 +30,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         draftType={selectedLeague?.draft_type}
         leagueName={selectedLeague?.name}
         leagueLogo={selectedLeague?.logo_url}
+        auctionTrades={!!selectedLeague?.auction_trades_enabled}
       />
       <main className="flex-1 p-4 md:p-6 pb-20 md:pb-6 w-full">
         {children}

@@ -26,9 +26,11 @@ export async function POST(req: Request) {
   await admin.from('auctions').delete().eq('league_id', leagueId) // cascades to bids
   await admin.from('priority_log').delete().eq('league_id', leagueId)
 
-  // Snake: picks + trade system.
+  // Trades (snake picks/players, auction players + cash) — every format.
+  await admin.from('trades').delete().eq('league_id', leagueId) // cascades to trade_assets
+
+  // Snake: picks.
   if (league.draft_type === 'snake') {
-    await admin.from('trades').delete().eq('league_id', leagueId) // cascades to trade_assets
     await admin.from('pick_overrides').delete().eq('league_id', leagueId)
     await admin.from('snake_picks').delete().eq('league_id', leagueId)
   }
@@ -49,6 +51,7 @@ export async function POST(req: Request) {
   const { error: teamsErr } = await admin.from('teams')
     .update({
       budget_remaining: league.budget_per_team,
+      budget_adjustment: 0,
       player_count: 0,
       is_complete: false,
       priority_rank: null,
